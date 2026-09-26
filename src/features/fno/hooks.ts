@@ -1,0 +1,350 @@
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
+import { useIsFocused } from 'expo-router';
+import { useCallback, useMemo, useRef } from 'react';
+
+import { useDebounce } from '@/hooks/useDebounce';
+import { isMarketOpen, livePriceInterval } from '@/lib/utils/market';
+import { isApiError } from '@/types/api';
+
+import { fnoApi } from './api';
+import { orderDetailSettled } from './lib/chain';
+import type {
+  ExitPositionInput,
+  ExploreSection,
+  FnoExchange,
+  MarginLeg,
+  ModifyFnoOrderInput,
+  PlaceFnoOrderInput,
+} from './types';
+
+/**
+ * React Query bindings for the Groww-backed F&O module. SEPARATE STATE PER CONCERN —
+ * reference data (underlyings, expiries), market data (chain, futures, quote) and account
+ * data (positions, orders, funds) never share a cache entry.
+ *
+ * REFRESH POLICY (the web client's, minus its socket stream — see the report):
+ *   - Instrument universe / expiries: listed once a day → cached for an hour, never polled.
+ *   - Chain: every 5 s on Groww data, 25 s on the platform feed (its quote cache is 20 s),
+ *     only while the market is open and the screen is on top.
+ *   - Positions/orders: 5 s while an order is working, 15–30 s otherwise, and invalidated
+ *     immediately by every order action here.
+ * `subscribed: focused` stops a screen that is covered (another tab, a pushed screen) from
+ * polling or re-rendering; it catches up the moment it is shown again.
+ */
+
+const HOUR = 60 * 60_000;
+
+export const fnoKeys = {
+  all: ['fno'] as const,
+  explore: () => [...fnoKeys.all, 'explore'] as const,
+  exploreSection: (section: ExploreSection) => [...fnoKeys.all, 'explore', section] as const,
+  expiryCalendar: () => [...fnoKeys.all, 'expiry-calendar'] as const,
+  underlyings: () => [...fnoKeys.all, 'underlyings'] as const,
+  search: (q: string) => [...fnoKeys.all, 'search', q] as const,
+  status: () => [...fnoKeys.all, 'status'] as const,
+  expiries: (exchange: FnoExchange, underlying: string) =>
+    [...fnoKeys.all, 'expiries', exchange, underlying] as const,
+  chain: (
+    exchange: FnoExchange,
+    underlying: string,
+    expiry: string | null,
+    strikes: number | null,
+  ) => [...fnoKeys.all, 'chain', exchange, underlying, expiry, strikes] as const,
+  futures: (exchange: FnoExchange, underlying: string) =>
+    [...fnoKeys.all, 'futures', exchange, underlying] as const,
+  contract: (exchange: FnoExchange, tradingSymbol: string) =>
+    [...fnoKeys.all, 'contract', exchange, tradingSymbol] as const,
+  positions: () => [...fnoKeys.all, 'positions'] as const,
+  orders: () => [...fnoKeys.all, 'orders'] as const,
+  order: (growwOrderId: string) => [...fnoKeys.all, 'order', growwOrderId] as const,
+  funds: () => [...fnoKeys.all, 'funds'] as const,
+  margin: (signature: string) => [...fnoKeys.all, 'margin', signature] as const,
+};
+
+/** A 4xx (unknown expiry, unknown underlying) is an answer, not a blip — never retried. */
+const retryTransient = (count: number, error: unknown) =>
+  count < 2 && !(isApiError(error) && error.status > 0 && error.status < 500);
+
+/* ── Reference ─────────────────────────────────────────────────────────────────────── */
+
+export function useFnoUnderlyings() {
+  return useQuery({
+    queryKey: fnoKeys.underlyings(),
+    queryFn: ({ signal }) => fnoApi.underlyings(signal),
+    staleTime: HOUR,
+  });
+}
+
+/** Contracts and commodities matching a query (underlyings filter locally from the universe). */
+export function useFnoSearch(query: string) {
+  const q = useDebounce(query.trim().toUpperCase(), 300);
+  return useQuery({
+    queryKey: fnoKeys.search(q),
+    queryFn: ({ signal }) => fnoApi.search(q, signal),
+    enabled: q.length >= 3 && q.length <= 40,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useFnoStatus() {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.status(),
+    queryFn: ({ signal }) => fnoApi.status(signal),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    subscribed: focused,
+  });
+}
+
+/**
+ * The Explore landing page: one request for every shelf. 15 s while the market is open
+ * (the server caches the dataset for the same 15 s); a minute outside hours, when only MCX
+ * commodities (open to 23:30) still move.
+ */
+export function useFnoExplore() {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.explore(),
+    queryFn: ({ signal }) => fnoApi.explore(signal),
+    staleTime: 10_000,
+    refetchInterval: () => (isMarketOpen() ? 15_000 : 60_000),
+    placeholderData: keepPreviousData,
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+/** One "See more" shelf in full — same server dataset as the landing page. */
+export function useExploreSection(section: ExploreSection | null) {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.exploreSection(section ?? 'underlyings'),
+    queryFn: ({ signal }) => fnoApi.exploreSection(section as ExploreSection, signal),
+    enabled: section != null,
+    staleTime: 10_000,
+    refetchInterval: () => (isMarketOpen() ? 15_000 : 60_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+export function useExpiryCalendar() {
+  return useQuery({
+    queryKey: fnoKeys.expiryCalendar(),
+    queryFn: ({ signal }) => fnoApi.expiryCalendar(signal),
+    staleTime: HOUR,
+  });
+}
+
+export function useFnoExpiries(exchange: FnoExchange, underlying: string | null) {
+  return useQuery({
+    queryKey: fnoKeys.expiries(exchange, underlying ?? ''),
+    queryFn: ({ signal }) => fnoApi.expiries(exchange, underlying as string, signal),
+    enabled: !!underlying,
+    staleTime: HOUR,
+    retry: retryTransient,
+  });
+}
+
+/* ── Market data ───────────────────────────────────────────────────────────────────── */
+
+export function useOptionChain(
+  exchange: FnoExchange,
+  underlying: string | null,
+  expiry: string | null,
+  strikes: number | null,
+  enabled = true,
+) {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.chain(exchange, underlying ?? '', expiry, strikes),
+    queryFn: ({ signal }) =>
+      fnoApi.chain(exchange, underlying as string, { expiry, strikes }, signal),
+    enabled: enabled && !!underlying,
+    staleTime: 3_000,
+    // The previous chain stays on screen while a new expiry or window loads — an unmounting
+    // table on every chip tap reads as the screen breaking.
+    placeholderData: keepPreviousData,
+    refetchInterval: (q) => livePriceInterval(q.state.data?.source === 'groww' ? 5_000 : 25_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+export function useFnoFutures(exchange: FnoExchange, underlying: string | null, enabled = true) {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.futures(exchange, underlying ?? ''),
+    queryFn: ({ signal }) => fnoApi.futures(exchange, underlying as string, signal),
+    enabled: enabled && !!underlying,
+    staleTime: 5_000,
+    refetchInterval: (q) => livePriceInterval(q.state.data?.source === 'groww' ? 10_000 : 25_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+/** One contract's quote + greeks + depth. */
+export function useContractDetail(
+  exchange: FnoExchange,
+  tradingSymbol: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: fnoKeys.contract(exchange, tradingSymbol ?? ''),
+    queryFn: ({ signal }) => fnoApi.contract(exchange, tradingSymbol as string, signal),
+    enabled: enabled && !!tradingSymbol,
+    staleTime: 3_000,
+    gcTime: 5 * 60_000,
+    refetchInterval: (q) => livePriceInterval(q.state.data?.source === 'groww' ? 5_000 : 25_000),
+    retry: retryTransient,
+  });
+}
+
+/* ── Account ───────────────────────────────────────────────────────────────────────── */
+
+export function useFnoPositions(enabled = true) {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.positions(),
+    queryFn: ({ signal }) => fnoApi.positions(signal),
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: () => livePriceInterval(15_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+export function useFnoOrders(enabled = true) {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.orders(),
+    queryFn: ({ signal }) => fnoApi.orders(signal),
+    enabled,
+    staleTime: 5_000,
+    // A working order is polled fast whatever the clock says (after-market orders exist).
+    refetchInterval: (q) =>
+      q.state.data?.orders.some((o) => o.canCancel) ? 5_000 : livePriceInterval(30_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+/** One order in full; polled every 5 s until both Groww and this app's record say it is final. */
+export function useFnoOrderDetail(growwOrderId: string | null) {
+  return useQuery({
+    queryKey: fnoKeys.order(growwOrderId ?? ''),
+    queryFn: ({ signal }) => fnoApi.orderDetail(growwOrderId as string, signal),
+    enabled: !!growwOrderId,
+    staleTime: 2_000,
+    gcTime: 60_000,
+    refetchInterval: (q) => (orderDetailSettled(q.state.data) ? false : 5_000),
+    retry: retryTransient,
+  });
+}
+
+export function useFnoFunds(enabled = true) {
+  const focused = useIsFocused();
+  return useQuery({
+    queryKey: fnoKeys.funds(),
+    queryFn: ({ signal }) => fnoApi.funds(signal),
+    enabled,
+    staleTime: 10_000,
+    refetchInterval: () => livePriceInterval(30_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+/** Groww's required margin for the ticket's order, re-asked (debounced) as the order changes. */
+export function useMarginPreview(legs: MarginLeg[] | null, enabled: boolean) {
+  const signature = legs ? JSON.stringify(legs) : null;
+  const debounced = useDebounce(signature, 400);
+  return useQuery({
+    queryKey: fnoKeys.margin(debounced ?? ''),
+    queryFn: ({ signal }) => fnoApi.margin(JSON.parse(debounced as string) as MarginLeg[], signal),
+    enabled: enabled && !!debounced && debounced === signature,
+    staleTime: 10_000,
+    gcTime: 60_000,
+    retry: false,
+  });
+}
+
+/* ── Mutations ─────────────────────────────────────────────────────────────────────── */
+
+function useInvalidateAccount() {
+  const qc = useQueryClient();
+  return useCallback(
+    () =>
+      Promise.all(
+        (['orders', 'order', 'positions', 'funds', 'margin'] as const).map((key) =>
+          qc.invalidateQueries({ queryKey: [...fnoKeys.all, key] }),
+        ),
+      ),
+    [qc],
+  );
+}
+
+/**
+ * ONE idempotency key per order INTENT: minted when the user reaches the review step, reused
+ * for every retry of that confirmation (a timeout followed by a second tap can never become
+ * two orders), discarded once the order has an answer or any field changes. A network error
+ * or 5xx keeps it — nothing is known to have been placed, and a retry must be the SAME order.
+ */
+export function useOrderIntent() {
+  const keyRef = useRef<string | null>(null);
+  const begin = useCallback((): string => {
+    keyRef.current ??= Crypto.randomUUID();
+    return keyRef.current;
+  }, []);
+  const discard = useCallback(() => {
+    keyRef.current = null;
+  }, []);
+  const settle = useCallback((error: unknown | null) => {
+    if (error === null) {
+      keyRef.current = null;
+      return;
+    }
+    if (isApiError(error) && error.status >= 400 && error.status < 500) keyRef.current = null;
+  }, []);
+  return useMemo(() => ({ begin, discard, settle }), [begin, discard, settle]);
+}
+
+/** Places a REAL order on the user's Groww account. */
+export function usePlaceFnoOrder() {
+  const invalidate = useInvalidateAccount();
+  return useMutation({
+    mutationFn: (body: PlaceFnoOrderInput) => fnoApi.placeOrder(body),
+    onSettled: invalidate,
+  });
+}
+
+/** Exits all or part of a position — a REAL order on the opposite side. */
+export function useExitFnoPosition() {
+  const invalidate = useInvalidateAccount();
+  return useMutation({
+    mutationFn: (body: ExitPositionInput) => fnoApi.exitPosition(body),
+    onSettled: invalidate,
+  });
+}
+
+export function useModifyFnoOrder() {
+  const invalidate = useInvalidateAccount();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ModifyFnoOrderInput }) =>
+      fnoApi.modifyOrder(id, body),
+    onSettled: invalidate,
+  });
+}
+
+export function useCancelFnoOrder() {
+  const invalidate = useInvalidateAccount();
+  return useMutation({
+    mutationFn: (growwOrderId: string) => fnoApi.cancelOrder(growwOrderId),
+    onSettled: invalidate,
+  });
+}

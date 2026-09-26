@@ -1,0 +1,147 @@
+import { apiClient } from '@/services/api/client';
+
+import type {
+  BasketPayoff,
+  BuildStrategyInput,
+  BuildStrategyResult,
+  ExpirySettlementResult,
+  FnoBook,
+  FnoMover,
+  FnoOrderView,
+  OptionChain,
+  OptionStrategyDefinition,
+  PaperChainQuery,
+  PayoffLegInput,
+  PlaceBasketResult,
+  PlacePaperFnoOrderInput,
+  UnderlyingSummary,
+} from './types';
+
+/**
+ * /api/v1/derivatives — the reference option chain and the simulated F&O paper book. Same
+ * paths and bodies as the web client's derivatives.service.ts. Nothing here reaches a broker.
+ */
+
+const enc = encodeURIComponent;
+
+export const derivativesApi = {
+  async underlyings(signal?: AbortSignal): Promise<UnderlyingSummary[]> {
+    const { data } = await apiClient.get<{ underlyings: UnderlyingSummary[] }>(
+      '/derivatives/underlyings',
+      { signal },
+    );
+    return data.underlyings;
+  },
+
+  async expiries(underlying: string, signal?: AbortSignal): Promise<string[]> {
+    const { data } = await apiClient.get<{ underlying: string; expiries: string[] }>(
+      `/derivatives/${enc(underlying)}/expiries`,
+      { signal },
+    );
+    return data.expiries;
+  },
+
+  async chain(
+    underlying: string,
+    query: PaperChainQuery,
+    signal?: AbortSignal,
+  ): Promise<OptionChain> {
+    // Keys are omitted rather than sent empty: the query schema is `.strict()`.
+    const params: Record<string, string | number> = {};
+    if (query.expiry) params.expiry = query.expiry;
+    if (query.window != null) params.window = query.window;
+    if (query.exchange) params.exchange = query.exchange;
+    const { data } = await apiClient.get<OptionChain>(`/derivatives/${enc(underlying)}/chain`, {
+      params,
+      signal,
+    });
+    return data;
+  },
+
+  async book(signal?: AbortSignal): Promise<FnoBook> {
+    const { data } = await apiClient.get<FnoBook>('/derivatives/book', { signal });
+    return data;
+  },
+
+  async orders(limit = 100, signal?: AbortSignal): Promise<FnoOrderView[]> {
+    const { data } = await apiClient.get<{ orders: FnoOrderView[] }>('/derivatives/orders', {
+      params: { limit },
+      signal,
+    });
+    return data.orders;
+  },
+
+  /** Returns the ORDER even when rejected — status REJECTED plus a `note` saying why. */
+  async placeOrder(body: PlacePaperFnoOrderInput): Promise<FnoOrderView> {
+    const { data } = await apiClient.post<FnoOrderView>('/derivatives/orders', body);
+    return data;
+  },
+
+  async squareOff(exchange: string, tradingsymbol: string): Promise<FnoOrderView> {
+    const { data } = await apiClient.post<FnoOrderView>(
+      `/derivatives/positions/${enc(exchange)}/${enc(tradingsymbol)}/square-off`,
+    );
+    return data;
+  },
+
+  /** Settles expired positions at INTRINSIC value — not the same as letting them lapse. */
+  async settleExpired(): Promise<ExpirySettlementResult> {
+    const { data } = await apiClient.post<ExpirySettlementResult>('/derivatives/settle-expired');
+    return data;
+  },
+
+  /** Prices a proposed basket (1–8 legs, one underlying). Writes nothing. */
+  async payoff(legs: PayoffLegInput[]): Promise<BasketPayoff> {
+    const { data } = await apiClient.post<BasketPayoff>('/derivatives/payoff', { legs });
+    return data;
+  },
+
+  /** The strategy templates — fetched, so the picker cannot offer a key the server rejects. */
+  async strategies(signal?: AbortSignal): Promise<OptionStrategyDefinition[]> {
+    const { data } = await apiClient.get<{ strategies: OptionStrategyDefinition[] }>(
+      '/derivatives/strategies',
+      { signal },
+    );
+    return data.strategies;
+  },
+
+  /** Resolves a template against the live chain and prices it. Writes nothing. */
+  async buildStrategy(body: BuildStrategyInput): Promise<BuildStrategyResult> {
+    const { data } = await apiClient.post<BuildStrategyResult>(
+      '/derivatives/strategies/build',
+      body,
+    );
+    return data;
+  },
+
+  /** Places every leg, one after another, under one basket id — a later leg can be rejected. */
+  async placeBasket(
+    basketName: string,
+    legs: PlacePaperFnoOrderInput[],
+  ): Promise<PlaceBasketResult> {
+    const { data } = await apiClient.post<PlaceBasketResult>('/derivatives/basket', {
+      basketName,
+      legs,
+    });
+    return data;
+  },
+
+  /** F&O-eligible NSE movers (the web paper Explore's "F&O Stocks" and "Top traded" shelves). */
+  async movers(
+    kind: 'gainers' | 'losers' | 'volume',
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<FnoMover[]> {
+    const path =
+      kind === 'gainers'
+        ? '/stocks/top-gainers'
+        : kind === 'losers'
+          ? '/stocks/top-losers'
+          : '/stocks/top-volume';
+    const { data } = await apiClient.get<{ movers: FnoMover[] }>(path, {
+      params: { limit, fnoOnly: 'true' },
+      signal,
+    });
+    return data.movers;
+  },
+};
