@@ -21,10 +21,7 @@ export default function AppLayout() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-        <Stack.Screen
-          name="search"
-          options={{ animation: 'fade', presentation: 'fullScreenModal' }}
-        />
+        <Stack.Screen name="search" />
         <Stack.Screen name="order" options={{ presentation: 'modal', gestureEnabled: false }} />
         <Stack.Screen name="watchlist-picker" options={{ presentation: 'modal' }} />
         <Stack.Screen name="broker-connect" options={{ presentation: 'modal' }} />

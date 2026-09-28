@@ -15,7 +15,11 @@ import { WatchlistPreview } from '@/features/home/components/WatchlistPreview';
 import { insightKeys } from '@/features/insights/api';
 import { marketKeys, useLiveIndices } from '@/features/market/hooks';
 import { newsKeys } from '@/features/news/hooks';
-import { usePortfolioOverview } from '@/features/portfolio/hooks';
+import {
+  useGrowwPortfolioOverview,
+  useMstockPortfolioOverview,
+  usePortfolioOverview,
+} from '@/features/portfolio/hooks';
 import { strongPickKeys } from '@/features/strong-picks/hooks';
 import { tradingKeys } from '@/features/trading/hooks';
 import { watchlistKeys } from '@/features/watchlists/hooks';
@@ -29,12 +33,16 @@ import { watchlistKeys } from '@/features/watchlists/hooks';
 export default function HomeScreen() {
   const queryClient = useQueryClient();
   const overview = usePortfolioOverview();
+  const mstockOverview = useMstockPortfolioOverview();
+  const growwOverview = useGrowwPortfolioOverview();
   const indices = useLiveIndices();
 
   const onRefresh = useCallback(
     () =>
       Promise.all([
         overview.refetch(),
+        mstockOverview.refetch(),
+        growwOverview.refetch(),
         indices.refetch(),
         queryClient.invalidateQueries({ queryKey: [...marketKeys.all, 'movers'] }),
         queryClient.invalidateQueries({ queryKey: marketKeys.news() }),
@@ -46,7 +54,7 @@ export default function HomeScreen() {
         queryClient.invalidateQueries({ queryKey: newsKeys.runs(3) }),
         queryClient.invalidateQueries({ queryKey: tradingKeys.paperSegments }),
       ]),
-    [overview, indices, queryClient],
+    [overview, mstockOverview, growwOverview, indices, queryClient],
   );
 
   return (
@@ -58,7 +66,11 @@ export default function HomeScreen() {
         error={indices.error}
         onRetry={() => void indices.refetch()}
       />
-      <HoldingsCard overview={overview} />
+      <HoldingsCard
+        overview={overview}
+        mstockOverview={mstockOverview}
+        growwOverview={growwOverview}
+      />
       <TopMovers />
       <TodaysPicks />
       <ProductsAndTools />

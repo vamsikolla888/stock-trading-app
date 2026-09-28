@@ -18,7 +18,7 @@ export function GroupTabs({ group }: { group: string }) {
 
   return (
     <Tabs
-      tabBar={(props) => <GroupTabBar {...props} />}
+      tabBar={(props) => <GroupTabBar group={group} {...props} />}
       screenOptions={{
         tabBarPosition: 'top',
         headerShown: false,

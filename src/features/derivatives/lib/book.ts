@@ -29,7 +29,7 @@ export function defaultUnderlying(
   const want = linked?.trim().toUpperCase();
   const hit = want ? catalogue.find((u) => u.underlying === want) : undefined;
   const preferred = catalogue.find((u) => u.underlying === PREFERRED_UNDERLYING);
-  return (hit ?? preferred ?? catalogue[0]).underlying;
+  return (hit ?? preferred ?? catalogue[0])?.underlying ?? null;
 }
 
 /** Quick-pick lot sizes on the paper ticket. */
@@ -240,14 +240,16 @@ export function payoffGeometry(
   if (analysis.unlimitedProfit || analysis.unlimitedLoss) {
     const first = points[0];
     const last = points[points.length - 1];
-    const rightward = Math.abs(last.profit) >= Math.abs(first.profit);
-    const end = rightward ? last : first;
-    edge = {
-      x: rightward ? box.width - box.padRight : box.padLeft,
-      y: r(py(end.profit)),
-      rightward,
-      loss: end.profit < 0,
-    };
+    if (first !== undefined && last !== undefined) {
+      const rightward = Math.abs(last.profit) >= Math.abs(first.profit);
+      const end = rightward ? last : first;
+      edge = {
+        x: rightward ? box.width - box.padRight : box.padLeft,
+        y: r(py(end.profit)),
+        rightward,
+        loss: end.profit < 0,
+      };
+    }
   }
 
   return {

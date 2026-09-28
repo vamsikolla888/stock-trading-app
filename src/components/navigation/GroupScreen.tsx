@@ -58,7 +58,7 @@ export function GroupScreen({
       {scroll ? (
         <ScrollView
           className="flex-1"
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           refreshControl={
@@ -80,7 +80,7 @@ export function GroupScreen({
         </ScrollView>
       ) : (
         <View className="flex-1">
-          {introText ? <View className="px-5 pt-4">{introText}</View> : null}
+          {introText ? <View className="px-5 pt-5">{introText}</View> : null}
           {children}
         </View>
       )}

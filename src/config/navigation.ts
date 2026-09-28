@@ -15,6 +15,8 @@ export interface NavGroup {
   /** The bottom-tab route (folder) name under app/(app)/(tabs). */
   route: string;
   label: string;
+  /** Compact label for the bottom navigation on narrow phones. */
+  tabLabel?: string;
   icon: GroupIconName;
   items: readonly NavItem[];
 }
@@ -69,6 +71,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     route: 'intel',
     label: 'Intelligence',
+    tabLabel: 'Insights',
     icon: 'intel',
     items: [
       { name: 'index', label: 'Recommendations', href: '/intel' },

@@ -27,3 +27,51 @@ export function dayShapeValues(input: {
     ltp,
   ];
 }
+
+/**
+ * Resolves a trend array for a stock quote row or card.
+ * Uses exact session dayShape if OHLC is present; falls back to prevClose/change/LTP trend
+ * so stocks never miss their sparkline graph.
+ */
+export function moverTrendShape(input: {
+  prevClose?: number | null;
+  close?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  ltp?: number | null;
+  changePct?: number | null;
+}): number[] | null {
+  const shape = dayShapeValues({
+    prevClose: input.prevClose ?? input.close,
+    open: input.open,
+    high: input.high,
+    low: input.low,
+    ltp: input.ltp,
+  });
+  if (shape && shape.length > 1) return shape;
+
+  const known = (value: number | null | undefined): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+  const ltp = input.ltp;
+  if (!known(ltp)) return null;
+
+  const ref = known(input.close)
+    ? input.close
+    : known(input.prevClose)
+      ? input.prevClose
+      : known(input.open)
+        ? input.open
+        : known(input.changePct) && input.changePct !== 0
+          ? ltp / (1 + input.changePct / 100)
+          : null;
+
+  if (known(ref) && ref !== ltp) {
+    const isUp = ltp > ref;
+    const mid = isUp ? ref + (ltp - ref) * 0.4 : ref - (ref - ltp) * 0.4;
+    return [ref, mid, ltp];
+  }
+
+  return [ltp, ltp];
+}

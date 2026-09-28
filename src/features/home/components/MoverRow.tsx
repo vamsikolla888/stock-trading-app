@@ -6,7 +6,7 @@ import type { Mover, MoverKind } from '@/features/market/types';
 import { formatCompactNumber } from '@/lib/utils/formatters';
 
 import { formatMarketCapCrore } from '../lib/capBands';
-import { dayShapeValues } from '../lib/dayShape';
+import { moverTrendShape } from '../lib/dayShape';
 
 /**
  * A ranked stock: name, the session's real shape (prev close → open → high/low → price),
@@ -22,12 +22,13 @@ export const MoverRow = memo(function MoverRow({
   kind: MoverKind;
   onPress: () => void;
 }) {
-  const shape = dayShapeValues({
+  const shape = moverTrendShape({
     prevClose: mover.close,
     open: mover.open,
     high: mover.high,
     low: mover.low,
     ltp: mover.ltp,
+    changePct: mover.changePct,
   });
   const meta =
     kind === 'volume' && mover.volume != null

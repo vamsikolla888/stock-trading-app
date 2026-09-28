@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
+import { Sparkline } from '@/components/market/Sparkline';
 import { StockLogo } from '@/components/market/StockLogo';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Badge } from '@/components/ui/Badge';
@@ -32,6 +33,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
 import { MoverRow } from '../components/MoverRow';
+import { moverTrendShape } from '../lib/dayShape';
 import { formatIstDateTime } from '../lib/istTime';
 
 const numbers = { fontVariant: ['tabular-nums' as const] };
@@ -44,9 +46,9 @@ const numbers = { fontVariant: ['tabular-nums' as const] };
  */
 export function RecentlyViewedStrip() {
   const router = useRouter();
-  const recent = useRecentlyViewed(12);
+  const recent = useRecentlyViewed(5);
   const clear = useClearRecentlyViewed();
-  const items = recent.data ?? [];
+  const items = (recent.data ?? []).slice(0, 5);
   if (items.length === 0) return null;
 
   const confirmClear = () =>
@@ -69,33 +71,28 @@ export function RecentlyViewedStrip() {
       className="mt-6"
       action={{ label: clear.isPending ? 'Clearing…' : 'Clear', onPress: confirmClear }}
     >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        className="-mx-5"
-        contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
-      >
+      <View className="flex-row items-center gap-1.5">
         {items.map((item) => (
           <Pressable
             key={`${item.exchange}:${item.symbol}`}
             accessibilityRole="button"
             accessibilityLabel={`${item.companyName ?? item.symbol}, ${formatSignedPercent(item.changePct)}`}
             onPress={() => router.push(stockHref(item.symbol, item.exchange))}
-            className="w-[92px] items-center rounded-card border border-line bg-surface px-2 py-3 active:bg-surface-sunk dark:border-line-dark dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
+            className="flex-1 items-center rounded-card bg-surface px-1 py-2.5 active:bg-surface-sunk dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
           >
             <StockLogo symbol={item.symbol} uri={stockLogoUrl(item.symbol)} />
             <Text
-              className="mt-2 text-xs font-semibold text-ink dark:text-ink-dark"
+              className="mt-1.5 text-[11px] font-semibold text-ink dark:text-ink-dark"
               numberOfLines={1}
             >
               {item.symbol}
             </Text>
-            <ChangeText value={item.changePct} className="mt-0.5 text-[11px]" style={numbers}>
+            <ChangeText value={item.changePct} className="mt-0.5 text-[10px]" style={numbers}>
               {formatSignedPercent(item.changePct)}
             </ChangeText>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
     </Section>
   );
 }
@@ -167,6 +164,7 @@ export function MoversPreview() {
 
 function TradedCard({ mover, onPress }: { mover: Mover; onPress: () => void }) {
   const title = mover.companyName || mover.symbol;
+
   return (
     <Pressable
       accessibilityRole="button"

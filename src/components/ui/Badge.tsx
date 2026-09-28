@@ -4,8 +4,8 @@ import { tv, type VariantProps } from 'tailwind-variants';
 
 const badgeStyle = tv({
   slots: {
-    container: 'self-start rounded-full px-2.5 py-1',
-    text: 'text-xs font-medium',
+    container: 'items-center justify-center self-center rounded-full px-2.5 py-1',
+    text: 'text-xs font-semibold leading-4',
   },
   variants: {
     variant: {

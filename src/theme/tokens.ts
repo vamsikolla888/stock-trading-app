@@ -209,7 +209,7 @@ export const shadows = {
     shadowColor: '#007a5d',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.18,
-    shadowRadius: 24,
+    shadowRadius: 12,
     elevation: 8,
   },
 } as const;

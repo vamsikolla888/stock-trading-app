@@ -72,6 +72,8 @@ export function useRecommendationsByDate(date: string | null) {
     queryFn: () => recommendationsApi.byDate(date!),
     enabled: date !== null,
     staleTime: 30 * 60_000,
+    // Keep the previous day's data visible while the new one loads to prevent blank flash.
+    placeholderData: (prev) => prev,
   });
 }
 

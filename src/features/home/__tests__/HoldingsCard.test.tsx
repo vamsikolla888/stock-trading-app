@@ -96,6 +96,24 @@ describe('HoldingsCard', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/trade/mstock');
   });
 
+  it('uses dash-and-dot pagination without visible broker pills', () => {
+    render(
+      <HoldingsCard
+        mstockOverview={overview()}
+        growwOverview={overview({ brokerId: 'groww', brokerName: 'Groww' })}
+      />,
+    );
+
+    expect(screen.queryByText('mStock')).toBeNull();
+    expect(screen.queryByText('Groww')).toBeNull();
+    expect(
+      screen.getByRole('tab', { name: 'Go to mStock portfolio', selected: true }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('tab', { name: 'Go to Groww portfolio', selected: false }),
+    ).toBeTruthy();
+  });
+
   it('invites a connection when no broker is set up', () => {
     render(
       <HoldingsCard

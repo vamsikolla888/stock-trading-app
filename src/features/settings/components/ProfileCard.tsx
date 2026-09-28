@@ -34,7 +34,7 @@ export function ProfileCard({ user }: { user: AuthUser | null }) {
             {user.email}
           </Text>
         ) : null}
-        <View className="mt-1.5">
+        <View className="mt-1.5 self-start">
           <Badge
             label={isAdmin ? 'Administrator' : 'Investor account'}
             variant={isAdmin ? 'primary' : 'neutral'}

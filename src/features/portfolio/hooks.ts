@@ -140,6 +140,50 @@ export function useLinkedPortfolio(broker: string) {
   return { query, state: bookStateOf(query) };
 }
 
+/** Individual mStock portfolio overview for dedicated card rendering. */
+export function useMstockPortfolioOverview(): PortfolioOverview {
+  const { query, state } = useMstockPortfolio();
+  return useMemo<PortfolioOverview>(
+    () => ({
+      ...resolveOverview({
+        mstock: { data: query.data, state, error: query.error },
+        linked: {
+          id: null,
+          data: undefined,
+          state: 'not-connected',
+          error: null,
+          resolving: false,
+        },
+        manual: { needed: false, data: undefined, error: null, isPending: false },
+      }),
+      refetch: () => query.refetch(),
+    }),
+    [query, state],
+  );
+}
+
+/** Individual Groww portfolio overview for dedicated card rendering. */
+export function useGrowwPortfolioOverview(): PortfolioOverview {
+  const { query, state } = useLinkedPortfolio('groww');
+  return useMemo<PortfolioOverview>(
+    () => ({
+      ...resolveOverview({
+        mstock: { data: undefined, state: 'not-connected', error: null },
+        linked: {
+          id: 'groww',
+          data: query.data,
+          state,
+          error: query.error,
+          resolving: query.isPending,
+        },
+        manual: { needed: false, data: undefined, error: null, isPending: false },
+      }),
+      refetch: () => query.refetch(),
+    }),
+    [query, state],
+  );
+}
+
 function hasWorkingOrder(page: OrderHistoryPage | undefined): boolean {
   return Boolean(
     page?.days.some((day) => day.orders.some((order) => OPEN_AT_BROKER.has(order.status))),

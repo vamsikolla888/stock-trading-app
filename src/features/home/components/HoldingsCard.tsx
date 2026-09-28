@@ -3,8 +3,16 @@ import BriefcaseBusiness from 'lucide-react-native/icons/briefcase-business';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Eye from 'lucide-react-native/icons/eye';
 import EyeOff from 'lucide-react-native/icons/eye-off';
-import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
@@ -73,7 +81,12 @@ const EMPTY_COPY: Record<
 };
 
 /** No book to show: what to do next depends on whether a broker is connected at all. */
-function EmptyCard({ brokerState }: { brokerState: PortfolioOverview['brokerState'] }) {
+function EmptyCard({
+  brokerState,
+}: {
+  brokerState: PortfolioOverview['brokerState'];
+  brokerName?: string;
+}) {
   const router = useRouter();
   const { colors } = useTheme();
   const kind =
@@ -116,11 +129,15 @@ function EmptyCard({ brokerState }: { brokerState: PortfolioOverview['brokerStat
   );
 }
 
-/**
- * Groww-style holdings summary: current value with a privacy toggle, then the returns
- * breakdown as label/value rows. Tapping the card opens Portfolio.
- */
-export function HoldingsCard({ overview }: { overview: PortfolioOverview }) {
+function SinglePortfolioCard({
+  overview,
+  label,
+  href,
+}: {
+  overview: PortfolioOverview;
+  label: string;
+  href: string;
+}) {
   const router = useRouter();
   const { colors } = useTheme();
   const hideValues = usePreferencesStore((state) => state.hideValues);
@@ -128,115 +145,257 @@ export function HoldingsCard({ overview }: { overview: PortfolioOverview }) {
   const mask = (text: string) => (hideValues ? MASKED_VALUE : text);
   const VisibilityIcon = hideValues ? EyeOff : Eye;
 
-  const { source, totals, day, availableCash, holdings, brokerState } = overview;
-  const openPortfolio = () => router.navigate('/trade/mstock');
+  const { source, totals, day, availableCash, brokerState } = overview;
+  const openPortfolio = () => router.navigate(href as any);
 
-  let body: React.ReactNode;
   if (overview.isLoading) {
-    body = <LoadingCard />;
-  } else if (overview.error) {
-    body = (
+    return <LoadingCard />;
+  }
+
+  if (overview.error) {
+    return (
       <InlineError
         what="your holdings"
         error={overview.error}
         onRetry={() => void overview.refetch()}
       />
     );
-  } else if (source === 'none' || !totals) {
-    body = <EmptyCard brokerState={brokerState} />;
-  } else {
-    // Hand-tracked holdings can lack a live price; show what was invested rather than
-    // pass the cost off as today's value.
-    const priced = totals.value !== null;
-    // The eye toggle sits outside the card's pressable area: a control nested inside an
-    // accessible button is unreachable with VoiceOver (and invalid markup on web).
-    body = (
-      <View className="overflow-hidden rounded-card border border-line bg-surface dark:border-line-dark dark:bg-surface-dark">
-        <View className="flex-row items-center gap-2 px-4 pt-4">
-          <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
-            {priced ? 'Current value' : 'Invested value'}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={hideValues ? 'Show portfolio values' : 'Hide portfolio values'}
-            hitSlop={12}
-            onPress={toggleHideValues}
-          >
-            <VisibilityIcon size={16} color={colors.textMuted} />
-          </Pressable>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityHint="Opens your portfolio"
-          onPress={openPortfolio}
-          className="px-4 pb-4 pt-1 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
-        >
-          <View className="flex-row items-center gap-2">
-            <Text
-              className="flex-1 text-[26px] font-bold text-ink dark:text-ink-dark"
-              style={[styles.numbers, { letterSpacing: -0.8 }]}
-              accessibilityLabel={hideValues ? 'Value hidden' : undefined}
-            >
-              {mask(formatINR(totals.value ?? totals.invested))}
-            </Text>
-            <ChevronRight size={18} color={colors.textFaint} />
-          </View>
-
-          <View className="my-3 h-px bg-line dark:bg-line-dark" />
-
-          {day ? (
-            <Row label="1D returns">
-              <ChangeText value={day.abs} className="text-[13px]" style={styles.numbers}>
-                {mask(formatReturn(day.abs, day.pct))}
-              </ChangeText>
-            </Row>
-          ) : null}
-          <Row label="Total returns">
-            {totals.pnl !== null ? (
-              <ChangeText value={totals.pnl} className="text-[13px]" style={styles.numbers}>
-                {mask(formatReturn(totals.pnl, totals.pnlPct))}
-              </ChangeText>
-            ) : (
-              <Value>Price unavailable</Value>
-            )}
-          </Row>
-          {priced ? (
-            <Row label="Invested">
-              <Value>{mask(formatINR(totals.invested))}</Value>
-            </Row>
-          ) : null}
-          {source === 'broker' && availableCash !== null ? (
-            <Row label="Available funds">
-              <Value>{mask(formatINR(availableCash))}</Value>
-            </Row>
-          ) : null}
-
-          {overview.stale ? (
-            <Text className="mt-2 text-xs text-ink-faint dark:text-ink-dark-faint">
-              Showing last known values — the broker was slow to respond.
-            </Text>
-          ) : source === 'manual' ? (
-            <Text className="mt-2 text-xs text-ink-faint dark:text-ink-dark-faint">
-              Holdings you track by hand. Connect a broker for live values.
-            </Text>
-          ) : null}
-        </Pressable>
-      </View>
-    );
   }
 
-  const count = holdings.length;
+  if (source === 'none' || !totals) {
+    return <EmptyCard brokerState={brokerState} brokerName={label} />;
+  }
+
+  const priced = totals.value !== null;
+  return (
+    <View className="overflow-hidden rounded-card border border-line bg-surface dark:border-line-dark dark:bg-surface-dark">
+      <View className="flex-row items-center gap-2 px-4 pt-4">
+        <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
+          {priced ? 'Current value' : 'Invested value'}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={hideValues ? 'Show portfolio values' : 'Hide portfolio values'}
+          hitSlop={12}
+          onPress={toggleHideValues}
+        >
+          <VisibilityIcon size={16} color={colors.textMuted} />
+        </Pressable>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint="Opens your portfolio"
+        onPress={openPortfolio}
+        className="px-4 pb-4 pt-1 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+      >
+        <View className="flex-row items-center gap-2">
+          <Text
+            className="flex-1 text-[26px] font-bold text-ink dark:text-ink-dark"
+            style={[styles.numbers, { letterSpacing: -0.8 }]}
+            accessibilityLabel={hideValues ? 'Value hidden' : undefined}
+          >
+            {mask(formatINR(totals.value ?? totals.invested))}
+          </Text>
+          <ChevronRight size={18} color={colors.textFaint} />
+        </View>
+
+        <View className="my-3 h-px bg-line dark:bg-line-dark" />
+
+        {day ? (
+          <Row label="1D returns">
+            <ChangeText value={day.abs} className="text-[13px]" style={styles.numbers}>
+              {mask(formatReturn(day.abs, day.pct))}
+            </ChangeText>
+          </Row>
+        ) : null}
+        <Row label="Total returns">
+          {totals.pnl !== null ? (
+            <ChangeText value={totals.pnl} className="text-[13px]" style={styles.numbers}>
+              {mask(formatReturn(totals.pnl, totals.pnlPct))}
+            </ChangeText>
+          ) : (
+            <Value>Price unavailable</Value>
+          )}
+        </Row>
+        {priced ? (
+          <Row label="Invested">
+            <Value>{mask(formatINR(totals.invested))}</Value>
+          </Row>
+        ) : null}
+        {source === 'broker' && availableCash !== null ? (
+          <Row label="Available funds">
+            <Value>{mask(formatINR(availableCash))}</Value>
+          </Row>
+        ) : null}
+
+        {overview.stale ? (
+          <Text className="mt-2 text-xs text-ink-faint dark:text-ink-dark-faint">
+            Showing last known values — the broker was slow to respond.
+          </Text>
+        ) : source === 'manual' ? (
+          <Text className="mt-2 text-xs text-ink-faint dark:text-ink-dark-faint">
+            Holdings you track by hand. Connect a broker for live values.
+          </Text>
+        ) : null}
+      </Pressable>
+    </View>
+  );
+}
+
+export interface HoldingsCardProps {
+  /** Combined / fallback overview when individual broker overviews aren't supplied */
+  overview?: PortfolioOverview;
+  /** Individual mStock portfolio overview */
+  mstockOverview?: PortfolioOverview;
+  /** Individual Groww portfolio overview */
+  growwOverview?: PortfolioOverview;
+}
+
+/**
+ * Groww-style holdings summary supporting swipeable cards for mStock and Groww portfolios.
+ * Supports live price updates when market is open.
+ */
+export function HoldingsCard({ overview, mstockOverview, growwOverview }: HoldingsCardProps) {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const cards: {
+    id: string;
+    label: string;
+    overview: PortfolioOverview;
+    href: string;
+  }[] = [];
+
+  if (mstockOverview && growwOverview) {
+    cards.push(
+      { id: 'mstock', label: 'mStock', overview: mstockOverview, href: '/trade/mstock' },
+      { id: 'groww', label: 'Groww', overview: growwOverview, href: '/trade/groww' },
+    );
+  } else if (overview) {
+    const brokerId = overview.brokerId ?? 'mstock';
+    const label = overview.brokerName ?? (brokerId === 'groww' ? 'Groww' : 'mStock');
+    const href = brokerId === 'groww' ? '/trade/groww' : '/trade/mstock';
+    cards.push({ id: brokerId, label, overview, href });
+  }
+
+  const activeCard = cards[activeIndex] ?? cards[0];
+  const count = activeCard?.overview?.holdings?.length ?? 0;
+  const openPortfolio = () => {
+    if (activeCard) {
+      router.navigate(activeCard.href as any);
+    }
+  };
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (containerWidth <= 0) return;
+    const contentOffsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(contentOffsetX / containerWidth);
+    if (index >= 0 && index < cards.length && index !== activeIndex) {
+      setActiveIndex(index);
+    }
+  };
+
+  const scrollToCard = (index: number) => {
+    if (containerWidth <= 0 || !scrollViewRef.current) return;
+    setActiveIndex(index);
+    scrollViewRef.current.scrollTo({ x: index * containerWidth, animated: true });
+  };
+
+  const handleLayout = (event: LayoutChangeEvent) => {
+    setContainerWidth(event.nativeEvent.layout.width);
+  };
+
   return (
     <Section
       className="mt-6"
       title={count > 0 ? `Holdings (${count})` : 'Holdings'}
       action={count > 0 ? { label: 'View all', onPress: openPortfolio } : undefined}
     >
-      {body}
+      <View onLayout={handleLayout}>
+        {cards.length > 1 && containerWidth > 0 ? (
+          <ScrollView
+            ref={scrollViewRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+          >
+            {cards.map((card) => (
+              <View key={card.id} style={{ width: containerWidth }}>
+                <SinglePortfolioCard overview={card.overview} label={card.label} href={card.href} />
+              </View>
+            ))}
+          </ScrollView>
+        ) : cards.length > 0 ? (
+          (() => {
+            // Destructure so TypeScript narrows to a definite card rather than
+            // re-reading cards[0] three times under noUncheckedIndexedAccess.
+            const [firstCard] = cards;
+            if (!firstCard) return null;
+            return (
+              <SinglePortfolioCard
+                overview={firstCard.overview}
+                label={firstCard.label}
+                href={firstCard.href}
+              />
+            );
+          })()
+        ) : overview ? (
+          <SinglePortfolioCard overview={overview} label="Holdings" href="/trade/mstock" />
+        ) : (
+          <LoadingCard />
+        )}
+      </View>
+
+      {/* Carousel pagination: active portfolio is a dash, the rest are dots. */}
+      {cards.length > 1 ? (
+        <View
+          accessibilityRole="tablist"
+          className="mt-2.5 flex-row items-center justify-center gap-1.5"
+        >
+          {cards.map((card, idx) => (
+            <Pressable
+              key={card.id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: idx === activeIndex }}
+              accessibilityLabel={`Go to ${card.label} portfolio`}
+              hitSlop={8}
+              onPress={() => scrollToCard(idx)}
+            >
+              <View
+                style={[
+                  styles.dot,
+                  idx === activeIndex ? styles.dotActive : styles.dotInactive,
+                  {
+                    backgroundColor: idx === activeIndex ? colors.textMuted : colors.borderStrong,
+                  },
+                ]}
+              />
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </Section>
   );
 }
 
 const styles = {
   numbers: { fontVariant: ['tabular-nums' as const] },
+  dot: {
+    borderRadius: 9999,
+    height: 5,
+  },
+  dotActive: {
+    width: 18,
+    opacity: 1,
+  },
+  dotInactive: {
+    width: 5,
+    opacity: 0.8,
+  },
 };

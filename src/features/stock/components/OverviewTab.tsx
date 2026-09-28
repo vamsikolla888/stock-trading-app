@@ -33,7 +33,7 @@ function LongValue({ children }: { children: string }) {
   );
 }
 
-/** A value on its low–high range, with a marker where it sits. */
+/** A value on its low-high range, with a marker where it sits. */
 function RangeBar({
   low,
   high,
@@ -87,7 +87,7 @@ function RangeBar({
   );
 }
 
-/** The engine's view on this exact listing today, or a plain "no view" — never an invented one. */
+/** The engine's view on this exact listing today, or a plain "no view" -- never an invented one. */
 function OurView({
   symbol,
   pick,
@@ -109,18 +109,18 @@ function OurView({
       <Section title="Our view">
         <View className="rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">
           <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
-            {loading ? 'Checking today’s picks…' : `No view on ${symbol} today`}
+            {loading ? "Checking today's picks\u2026" : `No view on ${symbol} today`}
           </Text>
           {!loading ? (
             <Text className="mt-1.5 text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-              It isn’t in {batchDate ? `the ${formatSessionDay(batchDate)}` : 'today’s'} batch. The
-              engine publishes a few picks a day and says nothing about everything else — no view
-              isn’t a negative one.
+              It isn't in {batchDate ? `the ${formatSessionDay(batchDate)}` : "today's"} batch. The
+              engine publishes a few picks a day and says nothing about everything else \u2014 no
+              view isn't a negative one.
             </Text>
           ) : null}
           <Button
             className="mt-3"
-            label="See today’s picks"
+            label="See today's picks"
             variant="outline"
             size="sm"
             onPress={() => router.push('/intel')}
@@ -132,7 +132,7 @@ function OurView({
 
   const entry =
     pick.lo !== null && pick.hi !== null
-      ? `${formatINR(pick.lo)} – ${formatINR(pick.hi)}`
+      ? `${formatINR(pick.lo)} \u2013 ${formatINR(pick.hi)}`
       : formatINR(pick.lo ?? pick.hi);
 
   return (
@@ -185,7 +185,7 @@ function OurView({
           onPress={onReadCase}
         />
         <Text className="mt-2 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-          Confidence is the model’s own score, never measured against outcomes. Not investment
+          Confidence is the model's own score, never measured against outcomes. Not investment
           advice.
         </Text>
       </View>
@@ -203,7 +203,7 @@ interface OverviewTabProps {
   onReadCase: () => void;
 }
 
-/** Performance, today's view, company facts and price alerts. */
+/** Performance, key stats, shareholding pattern, today's view, company facts and price alerts. */
 export function OverviewTab({
   detail,
   view,
@@ -219,22 +219,25 @@ export function OverviewTab({
   const volume =
     view.volume !== null
       ? `${formatNumber(view.volume, 0)}${view.volumeSession ? ` (${formatSessionDay(view.volumeSession)})` : ''}`
-      : '—';
+      : '\u2014';
   const listedOn = detail.listings?.length
-    ? detail.listings.map((listing) => `${listing.exchange} ${listing.displaySymbol}`).join(' · ')
+    ? detail.listings
+        .map((listing) => `${listing.exchange} ${listing.displaySymbol}`)
+        .join(' \u00b7 ')
     : `${detail.exchange} ${displaySymbol}`;
   const memberships = detail.indices?.all ?? [];
 
   return (
     <View>
+      {/* ── Price performance ── */}
       <Section title="Performance" note={marketOpen ? undefined : 'Last session'} className="mt-6">
         <View className="gap-5 rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">
           <RangeBar
             low={view.low}
             high={view.high}
             value={view.ltp}
-            lowLabel="Today’s low"
-            highLabel="Today’s high"
+            lowLabel="Today's low"
+            highLabel="Today's high"
           />
           <RangeBar
             low={view.yearLow}
@@ -256,10 +259,51 @@ export function OverviewTab({
         </View>
         {detail.yearlyRangeSource === 'catalog' ? (
           <Text className="mt-2 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-            The 52-week range is from the stock catalogue — too little daily history is stored to
-            measure it.
+            The 52-week range is from the stock catalogue \u2014 too little daily history is stored
+            to measure it.
           </Text>
         ) : null}
+      </Section>
+
+      {/* ── Key stats ── */}
+      <Section title="Key stats" className="mt-2">
+        <View className="rounded-card border border-line bg-surface px-3.5 dark:border-line-dark dark:bg-surface-dark">
+          {view.open !== null ? (
+            <KeyValueRow label="Day open" value={formatINR(view.open)} />
+          ) : null}
+          {view.high !== null ? (
+            <KeyValueRow divider label="Day high" value={formatINR(view.high)} />
+          ) : null}
+          {view.low !== null ? (
+            <KeyValueRow divider label="Day low" value={formatINR(view.low)} />
+          ) : null}
+          {view.prevClose !== null ? (
+            <KeyValueRow divider label="Prev close" value={formatINR(view.prevClose)} />
+          ) : null}
+          {view.volume !== null ? (
+            <KeyValueRow divider label="Volume" value={formatNumber(view.volume, 0)} />
+          ) : null}
+          {detail.marketCap !== null ? (
+            <KeyValueRow
+              divider
+              label="Market cap"
+              value={formatMarketCapCrore(detail.marketCap)}
+            />
+          ) : null}
+          {detail.yearlyHigh !== null ? (
+            <KeyValueRow divider label="52W high" value={formatINR(detail.yearlyHigh)} />
+          ) : null}
+          {detail.yearlyLow !== null ? (
+            <KeyValueRow divider label="52W low" value={formatINR(detail.yearlyLow)} />
+          ) : null}
+          {detail.tickSize !== null ? (
+            <KeyValueRow divider label="Tick size" value={formatINR(detail.tickSize)} />
+          ) : null}
+          {detail.lotSize !== null && detail.lotSize > 1 ? (
+            <KeyValueRow divider label="Lot size" value={formatNumber(detail.lotSize, 0)} />
+          ) : null}
+          {detail.segment ? <KeyValueRow divider label="Segment" value={detail.segment} /> : null}
+        </View>
       </Section>
 
       <OurView
@@ -270,9 +314,46 @@ export function OverviewTab({
         onReadCase={onReadCase}
       />
 
+      {/* ── Shareholding pattern ── */}
+      <Section title="Shareholding pattern" note="NSE/BSE quarterly disclosure">
+        <View className="rounded-card border border-dashed border-line-strong bg-surface-sunk p-4 dark:border-line-dark-strong dark:bg-surface-sunk-dark">
+          <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
+            Shareholding data not yet available
+          </Text>
+          <Text className="mt-1 text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
+            Promoter, FII, DII and public shareholding percentages will appear here once this data
+            source is connected. Exchanges disclose it quarterly, typically within 21 days of each
+            quarter-end.
+          </Text>
+          <View className="mt-3 gap-2">
+            {[
+              { label: 'Promoters', hint: 'founders & family' },
+              { label: 'FII / FPI', hint: 'foreign institutions' },
+              { label: 'DII', hint: 'domestic institutions' },
+              { label: 'Public', hint: 'retail & others' },
+            ].map((row) => (
+              <View key={row.label} className="flex-row items-center gap-2">
+                <View className="h-2 w-2 rounded-full bg-line-strong dark:bg-line-dark-strong" />
+                <Text className="text-[13px] text-ink dark:text-ink-dark">
+                  {row.label}
+                  <Text className="text-ink-muted dark:text-ink-dark-muted">
+                    {' '}
+                    \u2014 {row.hint}
+                  </Text>
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </Section>
+
+      {/* ── About ── */}
       <Section title="About">
         <View className="rounded-card border border-line bg-surface px-3.5 dark:border-line-dark dark:bg-surface-dark">
-          <KeyValueRow label="Company" value={<LongValue>{detail.companyName ?? '—'}</LongValue>} />
+          <KeyValueRow
+            label="Company"
+            value={<LongValue>{detail.companyName ?? '\u2014'}</LongValue>}
+          />
           {detail.sector ? (
             <KeyValueRow divider label="Sector" value={<LongValue>{detail.sector}</LongValue>} />
           ) : null}
@@ -286,9 +367,6 @@ export function OverviewTab({
           <KeyValueRow divider label="Listed on" value={<LongValue>{listedOn}</LongValue>} />
           {detail.isin ? (
             <KeyValueRow divider label="ISIN" value={<LongValue>{detail.isin}</LongValue>} />
-          ) : null}
-          {detail.lotSize !== null && detail.lotSize > 1 ? (
-            <KeyValueRow divider label="Lot size" value={formatNumber(detail.lotSize, 0)} />
           ) : null}
           {memberships.length > 0 ? (
             <View className="border-t border-line py-3 dark:border-line-dark">
@@ -304,8 +382,8 @@ export function OverviewTab({
           ) : null}
         </View>
         <Text className="mt-2 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-          Valuation and profitability ratios (P/E, EPS, ROE, book value, dividend yield) aren’t
-          available from this platform’s data sources, so they’re left out rather than estimated.
+          Valuation ratios (P/E, EPS, ROE, book value, dividend yield) aren't available from this
+          platform's data sources and are left out rather than estimated.
         </Text>
       </Section>
 

@@ -127,7 +127,7 @@ export default function RecommendationsScreen() {
       ) : null}
 
       <View className="mt-5">
-        {selected.isPending ? (
+        {selected.isPending || (selected.isFetching && !data) ? (
           <ListSkeleton rows={3} />
         ) : selected.error && !data ? (
           <InlineError

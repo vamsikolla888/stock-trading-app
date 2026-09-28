@@ -15,7 +15,11 @@ import { useTheme } from '@/theme/ThemeProvider';
  * Rendered as the inner tab navigator's tab bar, so every sub-screen stays mounted after
  * its first visit and switching back is instant.
  */
-export function GroupTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export interface GroupTabBarProps extends BottomTabBarProps {
+  group?: string;
+}
+
+export function GroupTabBar({ group, state, descriptors, navigation }: GroupTabBarProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const scrollRef = useRef<ScrollView>(null);
@@ -42,7 +46,7 @@ export function GroupTabBar({ state, descriptors, navigation }: BottomTabBarProp
       style={{ paddingTop: insets.top, backgroundColor: colors.background }}
       className="border-b border-line dark:border-line-dark"
     >
-      <AppHeader />
+      <AppHeader group={group} />
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -51,7 +55,7 @@ export function GroupTabBar({ state, descriptors, navigation }: BottomTabBarProp
         onLayout={(event) => {
           viewportWidth.current = event.nativeEvent.layout.width;
         }}
-        contentContainerStyle={{ paddingHorizontal: 12 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 7, paddingBottom: 0 }}
       >
         {visible.map((route) => {
           const options = descriptors[route.key]?.options;
@@ -80,11 +84,11 @@ export function GroupTabBar({ state, descriptors, navigation }: BottomTabBarProp
               onLayout={(event) => {
                 layouts.current[route.key] = event.nativeEvent.layout;
               }}
-              className="px-2.5 pt-1.5"
+              className="mr-1.5 px-3.5 pt-2.5 pb-0"
             >
               <Text
                 className={cn(
-                  'pb-2.5 text-[14px]',
+                  'pb-1.5 text-[14px]',
                   focused
                     ? 'font-bold text-ink dark:text-ink-dark'
                     : 'font-medium text-ink-muted dark:text-ink-dark-muted',

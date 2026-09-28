@@ -26,7 +26,7 @@ const numbers = { fontVariant: ['tabular-nums' as const] };
 /** ~24 daily closes. Shares the stock screen's 1Y candle cache, so opening the stock is free. */
 function PickTrend({ symbol, exchange }: { symbol: string; exchange: string }) {
   const candles = useCandles(symbol, exchange, '1Y');
-  const closes = useMemo(() => recentCloses(candles.data?.candles, 24), [candles.data]);
+  const closes = useMemo(() => recentCloses(candles.data, 24), [candles.data]);
   if (closes.length < 2) return <View style={{ width: 64, height: 26 }} />;
   return <Sparkline data={closes} width={64} height={26} />;
 }

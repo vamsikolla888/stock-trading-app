@@ -135,8 +135,13 @@ export default function MarketHeatmapScreen() {
   const updated = data ? formatIstTime(data.asOf, true) : null;
   const live = Boolean(data?.provider.live && data.marketOpen);
 
+  /**
+   * Body resolution: show a spinner whenever there is no data yet — this covers both the
+   * initial load (isPending) and a timeframe/index switch where keepPreviousData has no
+   * previous entry for the new query key (isFetching && !data).
+   */
   let body: React.ReactNode = null;
-  if (heatmap.isPending) {
+  if (heatmap.isPending || (heatmap.isFetching && !data)) {
     body = (
       <View
         accessibilityLabel="Loading heatmap"
@@ -157,7 +162,7 @@ export default function MarketHeatmapScreen() {
     body = (
       <InlineEmpty
         title={`Membership unavailable for ${data.index.label}`}
-        message={data.index.caveat ?? 'This index’s constituents haven’t been imported yet.'}
+        message={data.index.caveat ?? "This index's constituents haven't been imported yet."}
         action={{ label: 'Choose another index', onPress: () => setPickerOpen(true) }}
       />
     );
@@ -165,7 +170,7 @@ export default function MarketHeatmapScreen() {
     body = (
       <InlineEmpty
         title="No matching stocks"
-        message={`Nothing in ${data.index.label} matches “${search.trim()}”.`}
+        message={`Nothing in ${data.index.label} matches "${search.trim()}".`}
         action={{ label: 'Clear search', onPress: () => setSearch('') }}
       />
     );
@@ -255,8 +260,8 @@ export default function MarketHeatmapScreen() {
             {sourceLabel(data.provider.active, data.provider.live)}
           </Text>
           <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint">
-            · {data.marketOpen ? 'Market open' : 'Market closed'}
-            {updated ? ` · Updated ${updated} IST` : ''}
+            {'\u00b7'} {data.marketOpen ? 'Market open' : 'Market closed'}
+            {updated ? ` \u00b7 Updated ${updated} IST` : ''}
           </Text>
           {heatmap.isFetching && !heatmap.isPending ? (
             <ActivityIndicator
@@ -283,9 +288,9 @@ export default function MarketHeatmapScreen() {
     <View className="mt-4 gap-3">
       <HeatmapLegend />
       <Text className="text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        {formatNumber(displayed.length, 0)} of {formatNumber(data.stocks.length, 0)} constituents ·
-        size = market cap · colour = {timeframe} price change. Colours show past movement only — not
-        a buy or sell call. Data may be delayed.
+        {formatNumber(displayed.length, 0)} of {formatNumber(data.stocks.length, 0)} constituents{' '}
+        {'\u00b7'} size = market cap {'\u00b7'} colour = {timeframe} price change. Colours show past
+        movement only — not a buy or sell call. Data may be delayed.
       </Text>
     </View>
   ) : null;

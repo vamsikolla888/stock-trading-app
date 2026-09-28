@@ -170,10 +170,13 @@ function SignalsFeed() {
     queryKey: insightKeys.signals,
     queryFn: insightsApi.signals,
     staleTime: 5 * 60_000,
+    // Prevent a brief blank flash when the query transitions through isLoading states.
+    placeholderData: (prev) => prev,
   });
 
-  if (signals.isPending) return <ListSkeleton rows={3} />;
-  if (signals.error && !signals.data) {
+  // isLoading is true on the very first fetch; isPending covers refetches where data is absent.
+  if (signals.isPending && !signals.data) return <ListSkeleton rows={3} />;
+  if (signals.isError && !signals.data) {
     return (
       <InlineError what="signals" error={signals.error} onRetry={() => void signals.refetch()} />
     );

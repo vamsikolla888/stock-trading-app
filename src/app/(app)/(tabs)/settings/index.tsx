@@ -13,7 +13,7 @@ import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import Workflow from 'lucide-react-native/icons/workflow';
 import React from 'react';
-import { Text, View } from 'react-native';
+import { Appearance, Text, View } from 'react-native';
 
 import { GroupScreen } from '@/components/navigation/GroupScreen';
 import { IconTile } from '@/components/ui/IconTile';
@@ -38,6 +38,7 @@ import { toast } from '@/lib/utils/toast';
 import { useAuthStore } from '@/store/authStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { type ThemePreference, useThemeStore } from '@/store/themeStore';
+import { applyColorScheme } from '@/theme/ThemeProvider';
 
 const THEME_OPTIONS: readonly { key: ThemePreference; label: string }[] = [
   { key: 'system', label: 'System' },
@@ -55,6 +56,19 @@ function AppearanceRow() {
   const preference = useThemeStore((state) => state.preference);
   const setPreference = useThemeStore((state) => state.setPreference);
 
+  // Call applyColorScheme on the same tick as the store update so dark: classes and
+  // JS colours never disagree — the ThemeProvider's useEffect catches it one frame
+  // later otherwise, causing a brief flash on every mode switch.
+  const handlePreferenceChange = React.useCallback(
+    (next: ThemePreference) => {
+      // Read the OS dark-mode state via React Native's Appearance API (works on all platforms).
+      const systemIsDark = Appearance.getColorScheme() === 'dark';
+      applyColorScheme(next, systemIsDark);
+      setPreference(next);
+    },
+    [setPreference],
+  );
+
   return (
     <View className="gap-3 px-3.5 py-3">
       <View className="flex-row items-center gap-3">
@@ -66,7 +80,11 @@ function AppearanceRow() {
           </Text>
         </View>
       </View>
-      <SegmentedControl items={THEME_OPTIONS} value={preference} onChange={setPreference} />
+      <SegmentedControl
+        items={THEME_OPTIONS}
+        value={preference}
+        onChange={handlePreferenceChange}
+      />
     </View>
   );
 }
@@ -219,28 +237,39 @@ export default function PreferencesScreen() {
             subtitle="News intake, daily sync and scheduled jobs"
             onPress={() => router.push('/settings/automations')}
           />
-          {isAdmin ? (
-            <>
-              <RowDivider />
-              <MenuRow
-                Icon={ServerCog}
-                iconTone="violet"
-                title="Admin console"
-                subtitle="Platform health, logs, usage and users"
-                onPress={() => router.push('/settings/admin')}
-              />
-              <RowDivider />
-              <MenuRow
-                Icon={Sparkles}
-                iconTone="amber"
-                title="Recommendations engine"
-                subtitle="Data session and manual runs"
-                onPress={() => router.push('/recommendations-admin')}
-              />
-            </>
-          ) : null}
         </ListCard>
       </Section>
+
+      {isAdmin ? (
+        <Section
+          title="Administration"
+          right={
+            <View className="rounded-full bg-danger-100 px-2 py-0.5 dark:bg-danger-900">
+              <Text className="text-[10px] font-bold uppercase tracking-wide text-danger-600 dark:text-danger-400">
+                Admin
+              </Text>
+            </View>
+          }
+        >
+          <ListCard>
+            <MenuRow
+              Icon={ServerCog}
+              iconTone="violet"
+              title="Admin console"
+              subtitle="Platform health, logs, usage and users"
+              onPress={() => router.push('/settings/admin')}
+            />
+            <RowDivider />
+            <MenuRow
+              Icon={Sparkles}
+              iconTone="amber"
+              title="Recommendations engine"
+              subtitle="Data session and manual runs"
+              onPress={() => router.push('/recommendations-admin')}
+            />
+          </ListCard>
+        </Section>
+      ) : null}
 
       <Section title="Support">
         <ListCard>

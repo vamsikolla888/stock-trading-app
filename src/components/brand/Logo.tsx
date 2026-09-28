@@ -70,10 +70,16 @@ interface LogoProps {
   size?: LogoSize;
   /** Stack the wordmark under the mark (splash-style) instead of beside it. */
   stacked?: boolean;
+  showText?: boolean;
   className?: string;
 }
 
-export const Logo = memo(function Logo({ size = 'md', stacked = false, className }: LogoProps) {
+export const Logo = memo(function Logo({
+  size = 'md',
+  stacked = false,
+  showText = true,
+  className,
+}: LogoProps) {
   const { mark, text, gap } = sizes[size];
 
   return (
@@ -81,15 +87,21 @@ export const Logo = memo(function Logo({ size = 'md', stacked = false, className
       accessible
       accessibilityRole="image"
       accessibilityLabel={appConfig.name}
-      className={cn(stacked ? 'items-center' : 'flex-row items-center', gap, className)}
+      className={cn(
+        stacked ? 'items-center' : 'flex-row items-center',
+        showText ? gap : '',
+        className,
+      )}
     >
       <LogoMark size={mark} />
-      <Text
-        className={cn('font-bold tracking-tight text-ink dark:text-ink-dark', text)}
-        style={{ letterSpacing: -0.5 }}
-      >
-        {appConfig.name}
-      </Text>
+      {showText ? (
+        <Text
+          className={cn('font-bold tracking-tight text-ink dark:text-ink-dark', text)}
+          style={{ letterSpacing: -0.5 }}
+        >
+          {appConfig.name}
+        </Text>
+      ) : null}
     </View>
   );
 });

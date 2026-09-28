@@ -5,6 +5,8 @@ import path from 'path';
 
 import { NAV_GROUPS, navGroup } from '@/config/navigation';
 
+import { getHeaderTitle } from '@/lib/navigation/headerTitle';
+
 const TABS_DIR = path.join(__dirname, '..', '..', 'app', '(app)', '(tabs)');
 
 describe('NAV_GROUPS', () => {
@@ -60,5 +62,22 @@ describe('NAV_GROUPS', () => {
   it('looks groups up by route and rejects unknown ones', () => {
     expect(navGroup('fno').label).toBe('F&O');
     expect(() => navGroup('nope')).toThrow('Unknown nav group');
+  });
+});
+
+describe('getHeaderTitle', () => {
+  it('maps groups and segments to the expected header titles', () => {
+    expect(getHeaderTitle('(markets)')).toBe('Stocks');
+    expect(getHeaderTitle('markets')).toBe('Stocks');
+    expect(getHeaderTitle('trade')).toBe('Trade');
+    expect(getHeaderTitle('fno')).toBe('F&O');
+    expect(getHeaderTitle('intel')).toBe('Stocks');
+    expect(getHeaderTitle('settings')).toBe('Stocks');
+
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', '(markets)'])).toBe('Stocks');
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'trade'])).toBe('Trade');
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'fno'])).toBe('F&O');
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'intel'])).toBe('Stocks');
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'settings'])).toBe('Stocks');
   });
 });
