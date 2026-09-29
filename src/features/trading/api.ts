@@ -33,10 +33,18 @@ export const brokersApi = {
     const { data } = await apiClient.post<ChallengeResult>('/brokers/mstock/verify', { code });
     return data;
   },
-  /** Reuses the stored credentials and sends the day's challenge. */
-  async reconnectMstock(): Promise<ChallengeResult> {
-    const { data } = await apiClient.post<ChallengeResult>('/brokers/mstock/reconnect');
+  /**
+   * Reuses the stored credentials: mStock sends the day's challenge (verify next); Groww
+   * mints a fresh token straight away and comes back connected.
+   */
+  async reconnect(broker: string): Promise<ChallengeResult> {
+    const { data } = await apiClient.post<ChallengeResult>(
+      `/brokers/${encodeURIComponent(broker)}/reconnect`,
+    );
     return data;
+  },
+  async reconnectMstock(): Promise<ChallengeResult> {
+    return brokersApi.reconnect('mstock');
   },
   async connectApiKey(broker: string, payload: ApiKeyTotpConnectPayload): Promise<ChallengeResult> {
     const { data } = await apiClient.post<ChallengeResult>(

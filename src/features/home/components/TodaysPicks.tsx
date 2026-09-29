@@ -40,6 +40,13 @@ const ACTION_BADGE: Record<Signal['action'], 'success' | 'danger' | 'neutral'> =
 
 const numbers = { fontVariant: ['tabular-nums' as const] };
 
+/** A screener's measured hit rate; signals stored before it was measured carry none at all. */
+function hitRateLabel(hitRatePct: number | null | undefined): string {
+  return typeof hitRatePct === 'number' && Number.isFinite(hitRatePct)
+    ? `${Math.round(hitRatePct)}% hit rate`
+    : 'no measured rate';
+}
+
 function Level({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
     <View className="flex-1" accessible accessibilityLabel={`${label} ${value}`}>
@@ -193,42 +200,45 @@ function SignalsFeed() {
   }
   return (
     <ListCard>
-      {list.slice(0, SHOWN).map((signal, index) => (
-        <View key={`${signal.screenerKey}:${signal.exchange}:${signal.symbol}`}>
-          {index > 0 ? <RowDivider /> : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${signal.symbol}, ${signal.action}, ${signal.screenerName}, ${
-              signal.hitRatePct === null
-                ? 'no measured rate'
-                : `${Math.round(signal.hitRatePct)}% hit rate`
-            }`}
-            onPress={() => router.push(stockHref(signal.symbol, signal.exchange))}
-            className="min-h-[64px] flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
-          >
-            <StockLogo symbol={signal.symbol} uri={stockLogoUrl(signal.symbol)} size="sm" />
-            <View className="min-w-0 flex-1">
-              <Text className="text-sm font-semibold text-ink dark:text-ink-dark" numberOfLines={1}>
-                {signal.symbol}
-              </Text>
-              <Text
-                className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted"
-                numberOfLines={1}
-              >
-                {signal.screenerName}
-              </Text>
-            </View>
-            <View className="items-end gap-1">
-              <Badge label={signal.action} variant={ACTION_BADGE[signal.action]} />
-              <Text className="text-[11px] text-ink-muted dark:text-ink-dark-muted" style={numbers}>
-                {signal.hitRatePct === null
-                  ? 'no measured rate'
-                  : `${Math.round(signal.hitRatePct)}% hit rate`}
-              </Text>
-            </View>
-          </Pressable>
-        </View>
-      ))}
+      {list.slice(0, SHOWN).map((signal, index) => {
+        const rate = hitRateLabel(signal.hitRatePct);
+        return (
+          <View key={`${signal.screenerKey}:${signal.exchange}:${signal.symbol}`}>
+            {index > 0 ? <RowDivider /> : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${signal.symbol}, ${signal.action}, ${signal.screenerName}, ${rate}`}
+              onPress={() => router.push(stockHref(signal.symbol, signal.exchange))}
+              className="min-h-[64px] flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+            >
+              <StockLogo symbol={signal.symbol} uri={stockLogoUrl(signal.symbol)} size="sm" />
+              <View className="min-w-0 flex-1">
+                <Text
+                  className="text-sm font-semibold text-ink dark:text-ink-dark"
+                  numberOfLines={1}
+                >
+                  {signal.symbol}
+                </Text>
+                <Text
+                  className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted"
+                  numberOfLines={1}
+                >
+                  {signal.screenerName}
+                </Text>
+              </View>
+              <View className="items-end gap-1">
+                <Badge label={signal.action} variant={ACTION_BADGE[signal.action]} />
+                <Text
+                  className="text-[11px] text-ink-muted dark:text-ink-dark-muted"
+                  style={numbers}
+                >
+                  {rate}
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+        );
+      })}
     </ListCard>
   );
 }

@@ -32,7 +32,10 @@ import { getErrorMessage } from '@/types/api';
 
 import { usePlacePaperOrder } from '../hooks';
 import { fillSummary, legOrderValue, PAPER_MAX_LOTS, QUICK_LOTS } from '../lib/book';
-import type { DerivativeKind, FnoOrderView, PaperExchange } from '../types';
+import { paperBookHref } from '../lib/routes';
+import type { DerivativeKind, FnoOrderView, PaperExchange, PaperTicketQuote } from '../types';
+
+export type { PaperTicketQuote } from '../types';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
 
@@ -47,13 +50,6 @@ export interface PaperTicketTarget {
   side: 'BUY' | 'SELL';
   /** Bumped on every open, so re-opening the same contract re-seeds the form. */
   nonce: number;
-}
-
-/** What the chain currently says about the ticket's contract (refreshed by the parent). */
-export interface PaperTicketQuote {
-  lastPrice: number | null;
-  impliedVolatility: number | null;
-  delta: number | null;
 }
 
 /**
@@ -166,6 +162,7 @@ function TicketBody({
             );
           }
         },
+        // In the sheet, next to the form — a toast would sit under the modal.
         onError: (err) => setError(getErrorMessage(err, 'The paper order could not be placed.')),
         onSettled: () => {
           inFlight.current = false;
@@ -222,7 +219,7 @@ function TicketBody({
             onPress={() => {
               if (filled) {
                 onClose();
-                router.push({ pathname: '/fno/paper', params: { view: 'positions' } });
+                router.dismissTo(paperBookHref('positions'));
               } else {
                 setReceipt(null);
               }

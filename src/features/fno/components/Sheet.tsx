@@ -30,6 +30,8 @@ interface SheetProps {
   busy?: boolean;
   /** Share of the screen height the sheet may take. */
   maxHeight?: number;
+  /** iOS only (RN's Modal `onDismiss`): the sheet has finished animating away. */
+  onDismissed?: () => void;
 }
 
 /**
@@ -48,6 +50,7 @@ export function Sheet({
   footer,
   busy = false,
   maxHeight = 0.92,
+  onDismissed,
 }: SheetProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -64,6 +67,7 @@ export function Sheet({
       statusBarTranslucent
       navigationBarTranslucent
       onRequestClose={close}
+      onDismiss={onDismissed}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

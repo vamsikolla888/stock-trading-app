@@ -1,5 +1,5 @@
 export const appConfig = {
-  name: 'The Ledger',
+  name: 'Stocks',
   scheme: 'stocktrading',
   supportEmail: 'support@example.com',
   api: {

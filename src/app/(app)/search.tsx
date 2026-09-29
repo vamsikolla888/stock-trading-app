@@ -25,6 +25,8 @@ import { stockHref } from '@/lib/navigation';
 import { usePreferencesStore, type RecentSearch } from '@/store/preferencesStore';
 import { useTheme } from '@/theme/ThemeProvider';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 /** Ten, not six: the same request (and cache entry) as Explore's Most traded shelf. */
 const POPULAR_LIMIT = 10;
 const POPULAR_SHOWN = 6;

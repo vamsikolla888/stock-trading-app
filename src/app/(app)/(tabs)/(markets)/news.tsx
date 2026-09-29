@@ -15,6 +15,7 @@ import {
   RANGE_OPTIONS,
   SENTIMENT_OPTIONS,
   SORT_OPTIONS,
+  uniqueArticles,
   type SentimentFilter,
 } from '@/features/news/lib/news';
 import type { AnalyzedArticleListItem, NewsRange, NewsSort } from '@/features/news/types';
@@ -43,7 +44,7 @@ export default function NewsScreen() {
   });
   const retry = useRetryAnalysis();
 
-  const items = useMemo(() => feed.data?.pages.flatMap((page) => page.items) ?? [], [feed.data]);
+  const items = useMemo(() => uniqueArticles(feed.data?.pages ?? []), [feed.data]);
   const total = feed.data?.pages[0]?.total ?? null;
   const rangeLabel = RANGE_OPTIONS.find((option) => option.key === range)?.label ?? '';
   const sortLabel = SORT_OPTIONS.find((option) => option.key === sortBy)?.label ?? '';

@@ -162,11 +162,19 @@ const MOVE_TABS = [
  * 1W/1M moves are against the close 5 / 21 sessions back — a stock with stale stored bars has
  * no longer-period move and is not ranked. Volume is the cash market's, where known.
  */
-export function FnoStocksShelf({ stocks }: { stocks: FnoExploreSummary['stocks'] | undefined }) {
+export function FnoStocksShelf({
+  stocks,
+  loading = false,
+}: {
+  stocks: FnoExploreSummary['stocks'] | undefined;
+  /** Placeholder rows only while the first answer is on its way — never after a failure. */
+  loading?: boolean;
+}) {
   const router = useRouter();
   const [period, setPeriod] = useState<ExplorePeriod>('d1');
   const [tab, setTab] = useState<'gainers' | 'losers'>('gainers');
-  const rows = useMemo(() => (stocks?.[period][tab] ?? []).slice(0, 8), [stocks, period, tab]);
+  const rows = useMemo(() => (stocks?.[period]?.[tab] ?? []).slice(0, 8), [stocks, period, tab]);
+  if (!stocks && !loading) return null;
 
   return (
     <Section

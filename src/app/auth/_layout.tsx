@@ -4,6 +4,8 @@ import React from 'react';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useTheme } from '@/theme/ThemeProvider';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 /**
  * Signed-out stack. Paths deliberately mirror the web client (/auth/login,
  * /auth/reset-password…) so the server's password-reset email link maps 1:1 onto this

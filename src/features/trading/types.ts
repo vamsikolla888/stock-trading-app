@@ -50,9 +50,10 @@ export interface ApiKeyTotpConnectPayload {
   totpSecret: string;
 }
 
+/** connect / reconnect / verify. Verify's answer carries no `challenge` — it's done. */
 export interface ChallengeResult {
   broker: string;
-  challenge: MfaMethod | 'none';
+  challenge?: MfaMethod | 'none';
   status: 'pending_verification' | 'connected';
 }
 

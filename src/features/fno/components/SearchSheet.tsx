@@ -1,15 +1,20 @@
 import { useRouter } from 'expo-router';
 import Search from 'lucide-react-native/icons/search';
 import X from 'lucide-react-native/icons/x';
-import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, Text, TextInput, View } from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { useFnoSearch, useFnoUnderlyings } from '../hooks';
 import { contractTitle, expiryLabel } from '../lib/format';
-import type { CommodityUnderlying, FnoContract, FnoUnderlying } from '../types';
+import type {
+  CommodityContractSearchResult,
+  CommodityUnderlying,
+  FnoContract,
+  FnoUnderlying,
+} from '../types';
 
 import { Tag } from './primitives';
 import { Sheet } from './Sheet';
@@ -17,21 +22,27 @@ import { Sheet } from './Sheet';
 type Item =
   | { type: 'u'; u: FnoUnderlying }
   | { type: 'c'; c: FnoContract }
-  | { type: 'm'; m: CommodityUnderlying };
+  | { type: 'm'; m: CommodityUnderlying }
+  | { type: 'mc'; mc: CommodityContractSearchResult };
 
 const keyOf = (it: Item) =>
   it.type === 'u'
     ? `u:${it.u.exchange}:${it.u.underlying}`
     : it.type === 'c'
       ? `c:${it.c.exchange}:${it.c.tradingSymbol}`
-      : `m:${it.m.exchange}:${it.m.underlying}`;
+      : it.type === 'mc'
+        ? `mc:${it.mc.exchange}:${it.mc.tradingSymbol}`
+        : `m:${it.m.exchange}:${it.m.underlying}`;
+
+/** Server-side search needs three characters (the hook's own gate). */
+const REMOTE_MIN = 3;
 
 /**
  * Find an underlying (NIFTY, RELIANCE…), a commodity (GOLD, CRUDEOIL), or jump straight to a
- * contract by trading symbol. Underlyings filter locally from the cached universe (instant);
- * contracts and commodities come from the server once three characters are typed. A
- * commodity opens the commodity futures list filtered to it — commodities have no option
- * chain here, and Groww's API places no commodity orders.
+ * contract by trading symbol or "NIFTY 25000 CE". Underlyings filter locally from the cached
+ * universe (instant); contracts and commodities come from the server once three characters
+ * are typed. A commodity (or commodity contract) opens the commodity futures list filtered to
+ * it — commodities have no option chain here, and Groww's API places no commodity orders.
  */
 export function SearchSheet({
   visible,
@@ -68,11 +79,17 @@ export function SearchSheet({
       )
       .slice(0, 8)
       .map((u) => ({ type: 'u' as const, u }));
-    const ms = (remote.data?.commodities ?? []).slice(0, 6).map((m) => ({ type: 'm' as const, m }));
+    // The query keeps its previous answer while the next one loads; below the server's minimum
+    // that answer belongs to a longer query the user has since deleted, so it is not shown.
+    const answer = needle.length >= REMOTE_MIN ? remote.data : undefined;
+    const ms = (answer?.commodities ?? []).slice(0, 6).map((m) => ({ type: 'm' as const, m }));
     const cs = onPickContract
-      ? (remote.data?.contracts ?? []).slice(0, 8).map((c) => ({ type: 'c' as const, c }))
+      ? (answer?.contracts ?? []).slice(0, 8).map((c) => ({ type: 'c' as const, c }))
       : [];
-    return [...us, ...ms, ...cs];
+    const mcs = (answer?.commodityContracts ?? [])
+      .slice(0, 6)
+      .map((mc) => ({ type: 'mc' as const, mc }));
+    return [...us, ...ms, ...cs, ...mcs];
   }, [needle, universe.data, remote.data, onPickContract]);
 
   const close = () => {
@@ -80,23 +97,42 @@ export function SearchSheet({
     onClose();
   };
 
-  const choose = (it: Item) => {
-    close();
-    if (it.type === 'u') onPickUnderlying(it.u);
-    else if (it.type === 'm') {
-      router.push({
-        pathname: '/fno-list/[section]',
-        params: { section: 'commodity-futures', q: it.m.underlying },
-      });
-    } else onPickContract?.(it.c);
+  // iOS cannot present a modal (the order ticket a contract pick opens) while this one is still
+  // animating away: UIKit refuses the presentation, the ticket never appears, and the screen's
+  // ticket state is stuck "open". So on iOS the pick runs once this sheet has dismissed; Android
+  // stacks dialogs and has no dismiss event, so it runs at once there.
+  const pending = useRef<(() => void) | null>(null);
+  const runPending = () => {
+    const action = pending.current;
+    pending.current = null;
+    action?.();
   };
 
-  const searching = needle.length >= 3 && remote.isFetching;
+  const choose = (it: Item) => {
+    const action = () => {
+      if (it.type === 'u') onPickUnderlying(it.u);
+      else if (it.type === 'm' || it.type === 'mc') {
+        router.push({
+          pathname: '/fno-list/[section]',
+          params: {
+            section: 'commodity-futures',
+            q: it.type === 'm' ? it.m.underlying : it.mc.underlying,
+          },
+        });
+      } else onPickContract?.(it.c);
+    };
+    close();
+    if (Platform.OS === 'ios') pending.current = action;
+    else action();
+  };
+
+  const searching = needle.length >= REMOTE_MIN && remote.isFetching;
 
   return (
     <Sheet
       visible={visible}
       onClose={close}
+      onDismissed={runPending}
       title="Search F&O"
       maxHeight={0.9}
       header={
@@ -143,13 +179,21 @@ export function SearchSheet({
       ) : null}
       {items.map((it) => {
         const title =
-          it.type === 'u' ? it.u.underlying : it.type === 'm' ? it.m.label : contractTitle(it.c);
+          it.type === 'u'
+            ? it.u.underlying
+            : it.type === 'm'
+              ? it.m.label
+              : it.type === 'mc'
+                ? contractTitle(it.mc)
+                : contractTitle(it.c);
         const sub =
           it.type === 'u'
             ? `${it.u.name ?? it.u.underlying} · ${it.u.exchange === 'BFO' ? 'BSE' : 'NSE'}`
             : it.type === 'm'
               ? `${it.m.underlying} · ${it.m.exchange === 'NCO' ? 'NSE' : 'MCX'} · futures list`
-              : `${it.c.tradingSymbol} · ${expiryLabel(it.c.expiry)}`;
+              : it.type === 'mc'
+                ? `${it.mc.tradingSymbol} · ${expiryLabel(it.mc.expiry)} · ${it.mc.exchange === 'NCO' ? 'NSE' : 'MCX'}`
+                : `${it.c.tradingSymbol} · ${expiryLabel(it.c.expiry)}`;
         const tag =
           it.type === 'u'
             ? it.u.isIndex
@@ -157,8 +201,17 @@ export function SearchSheet({
               : 'Stock'
             : it.type === 'm'
               ? 'Commodity'
-              : it.c.kind;
-        const lot = it.type === 'u' ? it.u.lotSize : it.type === 'm' ? it.m.lotSize : it.c.lotSize;
+              : it.type === 'mc'
+                ? it.mc.kind
+                : it.c.kind;
+        const lot =
+          it.type === 'u'
+            ? it.u.lotSize
+            : it.type === 'm'
+              ? it.m.lotSize
+              : it.type === 'mc'
+                ? it.mc.lotSize
+                : it.c.lotSize;
         return (
           <Pressable
             key={keyOf(it)}
@@ -190,7 +243,7 @@ export function SearchSheet({
           No F&amp;O underlying, commodity or contract matches “{q.trim()}”.
         </Text>
       ) : null}
-      {needle.length > 0 && needle.length < 3 && onPickContract ? (
+      {needle.length > 0 && needle.length < REMOTE_MIN && onPickContract ? (
         <Text className="pt-3 text-[11px] text-ink-faint dark:text-ink-dark-faint">
           Type three or more characters to search contracts and commodities too.
         </Text>

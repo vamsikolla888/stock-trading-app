@@ -73,9 +73,17 @@ export function isCancellable(order: OrderHistoryRow, broker: string): boolean {
   return broker === 'mstock' && OPEN_AT_BROKER.has(order.status) && Boolean(order.brokerOrderId);
 }
 
-/** Only orders this app placed can be modified — the PATCH needs the app's own order id. */
+/**
+ * Only orders this app placed can be modified — the PATCH needs the app's own order id —
+ * and only equity ones: the server reads an F&O modify's quantity as LOTS while this book
+ * shows exchange units, so an F&O edit here would multiply the order by its lot size.
+ */
 export function isModifiable(order: OrderHistoryRow, broker: string): boolean {
-  return isCancellable(order, broker) && Boolean(order.liveOrderId);
+  return (
+    isCancellable(order, broker) &&
+    Boolean(order.liveOrderId) &&
+    (order.exchange === 'NSE' || order.exchange === 'BSE')
+  );
 }
 
 // ── Positions ────────────────────────────────────────────────────────────────────────────

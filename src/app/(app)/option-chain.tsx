@@ -34,6 +34,7 @@ import {
   useFnoUnderlyings,
   useOptionChain,
 } from '@/features/fno/hooks';
+import { isUnlistedExpiryError } from '@/features/fno/lib/access';
 import {
   atmRowIndex,
   chainMaxOi,
@@ -43,6 +44,7 @@ import {
   spotMarkerIndex,
   STRIKE_WINDOWS,
 } from '@/features/fno/lib/chain';
+import { parseChainParams } from '@/features/fno/lib/explore';
 import {
   compactQty,
   DASH,
@@ -60,6 +62,8 @@ import { cn } from '@/lib/utils/cn';
 import { formatINR } from '@/lib/utils/formatters';
 import { isMarketOpen } from '@/lib/utils/market';
 import { useTheme } from '@/theme/ThemeProvider';
+
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
 const STALE_MS = 60_000;
@@ -96,17 +100,14 @@ interface Selection {
 export default function OptionChainScreen() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{
-    underlying?: string;
-    exchange?: string;
-    expiry?: string;
-    tab?: string;
+    underlying?: string | string[];
+    exchange?: string | string[];
+    expiry?: string | string[];
+    tab?: string | string[];
   }>();
-  const [sel, setSel] = useState<Selection>(() => ({
-    exchange: params.exchange === 'BFO' ? 'BFO' : 'NFO',
-    underlying: (params.underlying || 'NIFTY').toUpperCase(),
-    expiry: params.expiry || null,
-    tab: params.tab === 'futures' ? 'futures' : 'options',
-  }));
+  // Normalised once: a repeated key arrives as an array, and a malformed expiry would only
+  // earn a 422 — it falls back to the nearest listed expiry instead.
+  const [sel, setSel] = useState<Selection>(() => parseChainParams(params));
   const [strikes, setStrikes] = useState<number | null>(10);
   const [view, setView] = useState<View_>('oi');
   const [ticket, setTicket] = useState<TicketTarget | null>(null);
@@ -129,13 +130,22 @@ export default function OptionChainScreen() {
     [expiries.data],
   );
   const status = useFnoStatus();
+  // An expiry that is not (or no longer) a listed OPTION expiry — a link from yesterday's
+  // position, or a date when only futures expire. The server refuses it (422) rather than show
+  // another expiry's chain; known from the expiry list, it is not even asked for.
+  const expiryUnlistedLocally =
+    sel.expiry != null &&
+    expiries.data != null &&
+    !optionExpiries.some((e) => e.expiry === sel.expiry);
   const chain = useOptionChain(
     sel.exchange,
     sel.underlying,
     sel.expiry,
     strikes,
-    tab === 'options',
+    tab === 'options' && !expiryUnlistedLocally,
   );
+  const expiryUnlisted =
+    expiryUnlistedLocally || (chain.isError && isUnlistedExpiryError(chain.error));
   const futures = useFnoFutures(sel.exchange, sel.underlying, tab === 'futures');
   const data = chain.data;
   // keepPreviousData shows the last chain while the next loads. When that chain belongs to a
@@ -146,14 +156,15 @@ export default function OptionChainScreen() {
     setRefreshing(true);
     try {
       await Promise.all([
-        tab === 'options' ? chain.refetch() : futures.refetch(),
+        // refetch() runs even a disabled query — an expiry known to be unlisted is not re-asked.
+        tab === 'futures' ? futures.refetch() : expiryUnlistedLocally ? null : chain.refetch(),
         expiries.refetch(),
         status.refetch(),
       ]);
     } finally {
       setRefreshing(false);
     }
-  }, [tab, chain, futures, expiries, status]);
+  }, [tab, chain, futures, expiries, status, expiryUnlistedLocally]);
 
   const now = useNow(15_000);
   const spot = data?.spot ?? futures.data?.spot ?? null;
@@ -369,9 +380,24 @@ export default function OptionChainScreen() {
       <View />
     );
 
+  const showNearestExpiry = () => {
+    centredFor.current = null;
+    setSel((s) => ({ ...s, expiry: null }));
+  };
+
   let body: React.ReactNode;
   if (tab === 'options') {
-    if (chain.isLoading && !data) {
+    if (expiryUnlisted && sel.expiry) {
+      body = (
+        <View className="px-5 pt-3">
+          <InlineEmpty
+            title={`No option chain for ${expiryLabel(sel.expiry)}`}
+            message={`${expiryLabel(sel.expiry)} is not a listed option expiry for ${sel.underlying} — it has passed, or only futures expire that day.`}
+            action={{ label: 'Show the nearest expiry', onPress: showNearestExpiry }}
+          />
+        </View>
+      );
+    } else if (chain.isLoading && !data) {
       body = (
         <View className="px-5 pt-3">
           <ListSkeleton rows={8} />

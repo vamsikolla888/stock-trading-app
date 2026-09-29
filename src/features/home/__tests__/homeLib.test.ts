@@ -99,6 +99,14 @@ describe('buildActivity', () => {
     expect(buildActivity({})).toEqual([]);
     expect(buildActivity({ screeners: null, newsRuns: null, strongPickRun: null })).toEqual([]);
   });
+
+  it('reads a completed run stored without counters as zero new articles', () => {
+    const legacy = {
+      ...newsRun('9', 'COMPLETED', '2026-09-26T03:00:00Z', '2026-09-26T03:01:00Z'),
+      counts: undefined,
+    } as unknown as NewsRunListItem;
+    expect(buildActivity({ newsRuns: [legacy] })[0]?.detail).toBe('0 new articles');
+  });
 });
 
 describe('cap bands', () => {

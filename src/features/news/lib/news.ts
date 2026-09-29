@@ -61,6 +61,31 @@ export function scoredImpact(item: {
     : null;
 }
 
+/** An article id as the API issues them (a Mongo ObjectId); it answers 422 for anything else. */
+export function isArticleId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value);
+}
+
+/**
+ * Pages of a feed flattened into rows, each article once. Rows shift between page fetches
+ * (new articles arrive at the top; equal impact scores have no fixed order), so the same
+ * article can come back on two pages — twice in the list would be two rows with one key.
+ */
+export function uniqueArticles<T extends { newsId: string }>(
+  pages: readonly { items: readonly T[] }[],
+): T[] {
+  const seen = new Set<string>();
+  const rows: T[] = [];
+  for (const page of pages) {
+    for (const item of page.items) {
+      if (seen.has(item.newsId)) continue;
+      seen.add(item.newsId);
+      rows.push(item);
+    }
+  }
+  return rows;
+}
+
 /** Only real web links are handed to the OS. */
 export function isWebLink(link: string | null | undefined): link is string {
   return typeof link === 'string' && /^https?:\/\//i.test(link.trim());

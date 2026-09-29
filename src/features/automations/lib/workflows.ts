@@ -22,8 +22,9 @@ export const RUN_STATUS: Record<RunStatusKey, { label: string; tone: StatusTone 
   idle: { label: 'No runs yet', tone: 'neutral' },
 };
 
+/** A status this build doesn't know (a newer server) reads as "No runs yet", never a crash. */
 export function runStatus(status: ExecutionStatus | null | undefined) {
-  return RUN_STATUS[status ?? 'idle'];
+  return RUN_STATUS[status ?? 'idle'] ?? RUN_STATUS.idle;
 }
 
 export const TRIGGER_LABEL: Record<WorkflowTriggerType, string> = {
@@ -31,6 +32,31 @@ export const TRIGGER_LABEL: Record<WorkflowTriggerType, string> = {
   cron: 'Schedule',
   manual: 'Manual',
 };
+
+/** Unknown trigger types (a newer server) are treated like a manual-only workflow. */
+export function triggerKind(type: string): WorkflowTriggerType {
+  return type in TRIGGER_LABEL ? (type as WorkflowTriggerType) : 'manual';
+}
+
+/**
+ * Flattens the run-history pages, keeping the first copy of each execution. A run that
+ * starts while older pages are refetched can shift one onto two pages, and a repeated id
+ * would be a duplicate React key.
+ */
+export function uniqueExecutions(
+  pages: readonly { items: readonly ExecutionSummary[] }[] | undefined,
+): ExecutionSummary[] {
+  const seen = new Set<string>();
+  const out: ExecutionSummary[] = [];
+  for (const page of pages ?? []) {
+    for (const execution of page.items ?? []) {
+      if (seen.has(execution.id)) continue;
+      seen.add(execution.id);
+      out.push(execution);
+    }
+  }
+  return out;
+}
 
 export const TRIGGERED_BY_LABEL: Record<TriggeredBy, string> = {
   manual: 'Run from app',

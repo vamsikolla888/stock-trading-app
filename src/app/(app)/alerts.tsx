@@ -16,6 +16,8 @@ import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 export default function AlertsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -41,7 +43,7 @@ export default function AlertsScreen() {
       <Section title="Price alerts">
         {alerts.isPending ? (
           <ListSkeleton rows={3} />
-        ) : alerts.error ? (
+        ) : alerts.error && !alerts.data ? (
           <InlineError
             what="price alerts"
             error={alerts.error}

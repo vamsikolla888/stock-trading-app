@@ -8,7 +8,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import { useFnoOrderDetail } from '../hooks';
 import { statusLabel, statusTone } from '../lib/chain';
-import { contractTitle, dateTimeIst, DASH, timeIst } from '../lib/format';
+import { contractTitle, dateTimeIst, DASH, lotsLabel, timeIst } from '../lib/format';
 
 import { Caveats, Disclosure, Note, SummaryLine } from './primitives';
 import { Sheet } from './Sheet';
@@ -50,6 +50,7 @@ function DetailBody({ id }: { id: string }) {
   }
   if (!d) return null;
   const o = d.order;
+  const riskChecks = d.lifecycle?.riskDecision?.checks ?? [];
 
   return (
     <View className="gap-4 pb-2">
@@ -72,7 +73,7 @@ function DetailBody({ id }: { id: string }) {
         <SummaryLine
           label="Quantity"
           value={`${formatQuantity(o.filledQuantity)}/${o.quantity != null ? formatQuantity(o.quantity) : DASH}${
-            o.lots != null ? ` (${o.lots} lots)` : ''
+            o.lots != null ? ` (${lotsLabel(o.lots)})` : ''
           }`}
         />
         <SummaryLine
@@ -124,7 +125,7 @@ function DetailBody({ id }: { id: string }) {
             Lifecycle in this app
           </Text>
           <View className="gap-2">
-            {d.lifecycle.events.map((e, i) => (
+            {(d.lifecycle.events ?? []).map((e, i) => (
               <View key={`${e.status}:${e.at}:${i}`} className="flex-row gap-3">
                 <View className="mt-1.5 h-2 w-2 rounded-full bg-brand" />
                 <View className="flex-1">
@@ -143,17 +144,13 @@ function DetailBody({ id }: { id: string }) {
               </View>
             ))}
           </View>
-          {d.lifecycle.riskDecision ? (
+          {riskChecks.length > 0 ? (
             <Disclosure
               className="mt-2"
               title="Risk checks"
-              meta={`${d.lifecycle.riskDecision.checks.filter((c) => c.passed).length}/${d.lifecycle.riskDecision.checks.length} passed`}
+              meta={`${riskChecks.filter((c) => c.passed).length}/${riskChecks.length} passed`}
             >
-              <Caveats
-                items={d.lifecycle.riskDecision.checks.map(
-                  (c) => `${c.passed ? '✓' : '✕'} ${c.detail}`,
-                )}
-              />
+              <Caveats items={riskChecks.map((c) => `${c.passed ? '✓' : '✕'} ${c.detail}`)} />
             </Disclosure>
           ) : null}
         </View>

@@ -9,6 +9,7 @@ import React, { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
@@ -23,11 +24,13 @@ import {
 } from '@/features/trading/components/OrderInputs';
 import {
   tradingKeys,
-  useLiveTradingAvailability,
+  useLiveTradingOptions,
   useLiveWallet,
   useOrderIntent,
   usePaperPreview,
 } from '@/features/trading/hooks';
+import { pinnedBrokerReason } from '@/features/trading/lib/availability';
+import { heldQuantity } from '@/features/trading/lib/liveOrders';
 import {
   MAX_ORDER_QUANTITY,
   needsLimitPrice,
@@ -41,11 +44,16 @@ import {
   describePaperOrder,
   type OrderOutcome,
 } from '@/features/trading/lib/orderOutcome';
-import type { OrderSide, OrderType, PaperOrderInput } from '@/features/trading/types';
+import { parseTicketParams } from '@/features/trading/lib/ticket';
+import type { LiveBroker, OrderType, PaperOrderInput } from '@/features/trading/types';
 import { useDebounce } from '@/hooks/useDebounce';
 import { formatINR, formatQuantity } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ApiError, getErrorMessage, isApiError } from '@/types/api';
+
+// A pushed modal outside the tab layouts: without its own boundary a render error here
+// would take down the whole signed-in stack.
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 type Mode = 'live' | 'paper';
 type Product = 'delivery' | 'intraday';
@@ -88,39 +96,61 @@ export default function OrderScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { colors } = useTheme();
-  const params = useLocalSearchParams<{ symbol: string; exchange?: string; side?: string }>();
-  const symbol = (params.symbol ?? '').toUpperCase();
-  const exchange = (params.exchange ?? 'NSE').toUpperCase() as 'NSE' | 'BSE';
-  const side: OrderSide = params.side === 'SELL' ? 'SELL' : 'BUY';
+  // Every prefill is honoured: the side and size of an exit, the product of the position,
+  // paper vs live, the paper profile, and the broker a holding sits at. Memoised so the
+  // values derived from it are stable inputs to the debounced previews below.
+  const params = useLocalSearchParams();
+  const ticket = useMemo(() => parseTicketParams(params), [params]);
+  const { symbol, exchange, side, profileId } = ticket;
   const isBuy = side === 'BUY';
 
   const detail = useStockDetail(symbol, exchange);
-  const live = useLiveTradingAvailability();
+  const live = useLiveTradingOptions();
   const intent = useOrderIntent();
 
-  const [chosenMode, setChosenMode] = useState<Mode | null>(null);
-  const [product, setProduct] = useState<Product>('delivery');
+  const [chosenMode, setChosenMode] = useState<Mode | null>(ticket.mode);
+  const [chosenBroker, setChosenBroker] = useState<LiveBroker | null>(null);
+  const [product, setProduct] = useState<Product>(ticket.product ?? 'delivery');
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
-  const [quantity, setQuantity] = useState('1');
+  const [quantity, setQuantity] = useState(ticket.qty ? String(ticket.qty) : '1');
   const [limitPrice, setLimitPrice] = useState('');
   const [triggerPrice, setTriggerPrice] = useState('');
   const [step, setStep] = useState<Step>('form');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<OrderOutcome | null>(null);
-  /** The mode shown on the review screen — what Confirm will place. */
-  const [reviewedMode, setReviewedMode] = useState<Mode | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
+  /** What the review screen showed — exactly what Confirm places. */
+  const [reviewed, setReviewed] = useState<{ mode: Mode; broker: LiveBroker | null } | null>(null);
 
-  // Live only when the pre-checks pass; otherwise paper, with the reason shown.
-  const mode: Mode = chosenMode ?? (live.available ? 'live' : 'paper');
-  const isLive = mode === 'live' && live.available;
+  // A ticket opened for one broker (selling a Groww holding) is pinned to it: it must never
+  // quietly go to another broker that may hold the same stock.
+  const pinned = ticket.broker;
+  const broker: LiveBroker | null =
+    pinned ??
+    (chosenBroker && live.brokers.includes(chosenBroker) ? chosenBroker : null) ??
+    live.brokers[0] ??
+    null;
+  const liveReason = live.isLoading ? null : pinnedBrokerReason(pinned, live);
+  const liveAvailable =
+    !live.isLoading && liveReason === null && broker !== null && live.brokers.includes(broker);
+  const brokerLabel = broker ? live.labelOf(broker) : null;
+
+  // Live only when the pre-checks pass; otherwise paper, with the reason shown. A paper
+  // screen opens the ticket in paper mode — it never silently becomes live.
+  const mode: Mode = chosenMode ?? (liveAvailable ? 'live' : 'paper');
+  const isLive = mode === 'live' && liveAvailable;
   const ltp = detail.data?.ltp ?? null;
   const displaySymbol =
     detail.data?.listings?.find((listing) => listing.exchange === exchange)?.displaySymbol ??
     symbol;
 
-  const form = { side, orderType, quantity, limitPrice, triggerPrice };
-  const { order, errors } = validateOrder(form);
-  const [showErrors, setShowErrors] = useState(false);
+  const { order, errors } = useMemo(
+    () => validateOrder({ side, orderType, quantity, limitPrice, triggerPrice }),
+    [side, orderType, quantity, limitPrice, triggerPrice],
+  );
+  const orderQuantity = order?.quantity ?? null;
+  const orderPrice = order?.price ?? null;
+  const orderTrigger = order?.triggerPrice ?? null;
 
   // Any edit to what would be sent is a new intent: its idempotency key must not be reused.
   // Done in the setters (not an effect) so it happens exactly when the user changes a field.
@@ -132,48 +162,54 @@ export default function OrderScreen() {
       setter(value);
     };
 
-  const wallet = useLiveWallet(isLive ? live.broker : null);
+  const wallet = useLiveWallet(isLive ? broker : null);
   const available = isLive
     ? product === 'delivery'
       ? (wallet.data?.deliveryAvailable ?? null)
       : (wallet.data?.intradayAvailable ?? null)
     : null;
+  // A delivery sell draws on demat holdings; intraday sells don't need any.
+  const held =
+    isLive && !isBuy && product === 'delivery' && wallet.data
+      ? heldQuantity(wallet.data.holdings ?? null, detail.data?.listings ?? [])
+      : null;
 
+  // Memoised on primitives: a fresh object each render would restart the debounce forever.
   const paperInput = useMemo<PaperOrderInput | null>(
     () =>
-      !isLive && order
+      !isLive && symbol && orderQuantity !== null
         ? {
             segment: product === 'delivery' ? 'equity' : 'intraday',
+            ...(profileId ? { profileId } : {}),
             exchange,
             symbol,
             side,
             type: orderType,
-            quantity: order.quantity,
-            limitPrice: order.price,
-            triggerPrice: order.triggerPrice,
+            quantity: orderQuantity,
+            limitPrice: orderPrice,
+            triggerPrice: orderTrigger,
           }
         : null,
     [
       isLive,
-      order?.quantity,
-      order?.price,
-      order?.triggerPrice,
+      orderQuantity,
+      orderPrice,
+      orderTrigger,
       product,
+      profileId,
       exchange,
       symbol,
       side,
       orderType,
-    ], // eslint-disable-line react-hooks/exhaustive-deps
+    ],
   );
   const paperPreview = usePaperPreview(useDebounce(paperInput, 300));
 
   const price = order ? referencePrice(order, orderType, ltp) : null;
   const estimate = order && price !== null ? order.quantity * price : null;
-  const orderQuantity = order?.quantity ?? null;
-  // Memoised on primitives: a fresh object each render would restart the debounce forever.
   const liveChargesInput = useMemo(
     () =>
-      isLive && orderQuantity !== null && price !== null
+      isLive && orderQuantity !== null && price !== null && price > 0
         ? {
             product: product === 'delivery' ? ('DELIVERY' as const) : ('INTRADAY' as const),
             side,
@@ -194,36 +230,43 @@ export default function OrderScreen() {
   });
 
   const chargesTotal = isLive
-    ? (charges.data?.breakdown.total ?? null)
+    ? (charges.data?.breakdown?.total ?? null)
     : (paperPreview.data?.charges ?? null);
   const fundsShown = isLive ? available : (paperPreview.data?.availableCash ?? null);
-  const blockedReason = !isLive ? (paperPreview.data?.blockedReason ?? null) : null;
+  const blockedReason = !isLive && paperInput ? (paperPreview.data?.blockedReason ?? null) : null;
+  const paperNotices = !isLive && paperInput ? (paperPreview.data?.notices ?? []) : [];
   const shortOfFunds = isBuy && estimate !== null && fundsShown !== null && estimate > fundsShown;
 
-  const refreshAfterOrder = () =>
+  const refreshAfterOrder = (placedAt: LiveBroker | null) =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
-      queryClient.invalidateQueries({ queryKey: ['portfolio', 'orders'] }),
       queryClient.invalidateQueries({ queryKey: ['paper'] }),
-      queryClient.invalidateQueries({ queryKey: tradingKeys.wallet(live.broker ?? 'none') }),
+      queryClient.invalidateQueries({ queryKey: ['live-trading', 'orders'] }),
+      ...(placedAt
+        ? [queryClient.invalidateQueries({ queryKey: tradingKeys.wallet(placedAt) })]
+        : []),
     ]);
 
   const place = useMutation({
     mutationFn: async (idempotencyKey: string): Promise<OrderOutcome> => {
-      if (!order) throw new Error('Invalid order');
-      // Place exactly what was reviewed. If live trading became unavailable while the
-      // review was open, refuse rather than quietly placing it as the other mode.
-      if (reviewedMode === 'live' && (!live.available || !live.broker)) {
-        throw new ApiError({
-          status: 409,
-          code: 'LIVE_UNAVAILABLE',
-          message: live.reason ?? 'Live trading is no longer available. Go back to edit the order.',
-        });
-      }
-      if (reviewedMode === 'live' && live.broker) {
+      if (!order || !reviewed) throw new Error('Invalid order');
+      if (reviewed.mode === 'live') {
+        // Place exactly what was reviewed. If live trading (or the reviewed broker) became
+        // unavailable while the review was open, refuse rather than quietly placing it
+        // somewhere else or as the other mode.
+        const target = reviewed.broker;
+        if (!target || !live.brokers.includes(target) || pinnedBrokerReason(pinned, live)) {
+          throw new ApiError({
+            status: 409,
+            code: 'LIVE_UNAVAILABLE',
+            message:
+              pinnedBrokerReason(pinned, live) ??
+              'Live trading is no longer available. Go back to edit the order.',
+          });
+        }
         const result = await liveTradingApi.placeOrder({
           mode: 'live',
-          broker: live.broker,
+          broker: target,
           category: product === 'delivery' ? 'equity_delivery' : 'equity_intraday',
           exchange,
           tradingsymbol: symbol,
@@ -238,6 +281,7 @@ export default function OrderScreen() {
       }
       const paperOrder = await paperApi.placeOrder({
         segment: product === 'delivery' ? 'equity' : 'intraday',
+        ...(profileId ? { profileId } : {}),
         exchange,
         symbol,
         side,
@@ -252,13 +296,13 @@ export default function OrderScreen() {
       intent.settle(null);
       setOutcome(result);
       setStep('result');
-      void refreshAfterOrder();
+      void refreshAfterOrder(reviewed?.mode === 'live' ? reviewed.broker : null);
     },
     onError: (error) => {
       intent.settle(error);
       const retrySafe = isApiError(error) && (error.isNetworkError || error.isServerError);
       setSubmitError(
-        retrySafe && reviewedMode === 'live'
+        retrySafe && reviewed?.mode === 'live'
           ? `${getErrorMessage(error)} Tapping confirm again is safe — it can't place a second order.`
           : getErrorMessage(error),
       );
@@ -268,22 +312,50 @@ export default function OrderScreen() {
   const openReview = () => {
     setShowErrors(true);
     if (!order || blockedReason) return;
+    const next = {
+      mode: isLive ? ('live' as const) : ('paper' as const),
+      broker: isLive ? broker : null,
+    };
+    // A different destination than the last review (the default broker moved) is a new
+    // intent, even though no field was edited.
+    if (reviewed && (reviewed.mode !== next.mode || reviewed.broker !== next.broker)) {
+      intent.discard();
+    }
     if (isLive) intent.begin();
-    setReviewedMode(isLive ? 'live' : 'paper');
+    setReviewed(next);
     setSubmitError(null);
     setStep('review');
   };
 
   const confirm = () => {
     if (place.isPending) return;
-    place.mutate(reviewedMode === 'live' ? intent.begin() : 'paper');
+    place.mutate(reviewed?.mode === 'live' ? intent.begin() : 'paper');
   };
+
+  const close = () => (router.canGoBack() ? router.back() : router.replace('/trade'));
 
   const title = `${isBuy ? 'Buy' : 'Sell'} ${displaySymbol}`;
   const modeItems: readonly { key: Mode; label: string }[] = [
-    { key: 'live', label: live.brokerLabel ? `Live · ${live.brokerLabel}` : 'Live' },
+    { key: 'live', label: brokerLabel && liveAvailable ? `Live · ${brokerLabel}` : 'Live' },
     { key: 'paper', label: 'Paper' },
   ];
+  const brokerItems = live.brokers.map((id) => ({ key: id, label: live.labelOf(id) }));
+  const reviewedBrokerLabel = reviewed?.broker ? live.labelOf(reviewed.broker) : 'your broker';
+
+  // Opened without a stock (a stale link): nothing can be priced or placed.
+  if (!symbol) {
+    return (
+      <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.surface }}>
+        <View className="flex-1 justify-center px-5">
+          <InlineEmpty
+            title="No stock selected"
+            message="Open a stock and tap Buy or Sell to place an order."
+            action={{ label: 'Close', onPress: close }}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -304,7 +376,7 @@ export default function OrderScreen() {
           accessibilityLabel="Close"
           hitSlop={10}
           disabled={place.isPending}
-          onPress={() => router.back()}
+          onPress={close}
           className="h-9 w-9 items-center justify-center rounded-full bg-surface-sunk dark:bg-surface-sunk-dark"
         >
           <X size={18} color={colors.text} />
@@ -319,18 +391,26 @@ export default function OrderScreen() {
         >
           {step === 'form' ? (
             <View className="gap-4">
+              {detail.error && !detail.data ? (
+                <InlineError
+                  what={`${symbol}'s price`}
+                  error={detail.error}
+                  onRetry={() => void detail.refetch()}
+                />
+              ) : null}
+
               <View>
                 <SegmentedControl
                   items={modeItems}
                   value={isLive ? 'live' : 'paper'}
                   onChange={(next) => {
-                    if (next === 'live' && !live.available) return;
+                    if (next === 'live' && !liveAvailable) return;
                     edit(setChosenMode)(next);
                   }}
                 />
-                {!live.available && live.reason ? (
+                {!liveAvailable && liveReason ? (
                   <Text className="mt-1.5 text-xs text-ink-muted dark:text-ink-dark-muted">
-                    Live unavailable: {live.reason}{' '}
+                    Live unavailable: {liveReason}{' '}
                     <Text
                       className="font-semibold text-brand-text dark:text-brand-text-dark"
                       onPress={() => router.push('/brokers')}
@@ -340,6 +420,17 @@ export default function OrderScreen() {
                   </Text>
                 ) : null}
               </View>
+
+              {isLive && !pinned && brokerItems.length > 1 && broker ? (
+                <View>
+                  <FieldLabel>Broker</FieldLabel>
+                  <SegmentedControl
+                    items={brokerItems}
+                    value={broker}
+                    onChange={edit(setChosenBroker)}
+                  />
+                </View>
+              ) : null}
 
               <SegmentedControl items={PRODUCTS} value={product} onChange={edit(setProduct)} />
 
@@ -373,7 +464,7 @@ export default function OrderScreen() {
                       label="Price"
                       value={limitPrice}
                       onChange={edit(setLimitPrice)}
-                      placeholder={ltp ? ltp.toFixed(2) : undefined}
+                      placeholder={ltp !== null ? ltp.toFixed(2) : undefined}
                       error={showErrors ? errors.limitPrice : null}
                     />
                   ) : null}
@@ -382,7 +473,7 @@ export default function OrderScreen() {
                       label="Trigger price"
                       value={triggerPrice}
                       onChange={edit(setTriggerPrice)}
-                      placeholder={ltp ? ltp.toFixed(2) : undefined}
+                      placeholder={ltp !== null ? ltp.toFixed(2) : undefined}
                       error={showErrors ? errors.triggerPrice : null}
                     />
                   ) : null}
@@ -405,17 +496,31 @@ export default function OrderScreen() {
                         : '—'
                   }
                 />
+                {held !== null ? (
+                  <SummaryRow
+                    label={`Shares held at ${brokerLabel ?? 'your broker'}`}
+                    value={formatQuantity(held)}
+                  />
+                ) : null}
               </View>
 
               {blockedReason ? <Banner tone="warning" message={blockedReason} /> : null}
-              {!isLive &&
-                paperPreview.data?.notices.map((notice) => (
-                  <Banner key={notice} tone="info" message={notice} />
-                ))}
+              {paperNotices.map((notice, index) => (
+                <Banner key={`${index}-${notice}`} tone="info" message={notice} />
+              ))}
+              {!isLive && paperInput && paperPreview.error && !paperPreview.data ? (
+                <Banner tone="warning" message={getErrorMessage(paperPreview.error)} />
+              ) : null}
               {shortOfFunds && !blockedReason ? (
                 <Banner
                   tone="warning"
                   message="The estimated value is more than your available funds."
+                />
+              ) : null}
+              {held !== null && orderQuantity !== null && orderQuantity > held ? (
+                <Banner
+                  tone="warning"
+                  message={`You hold ${formatQuantity(held)} at ${brokerLabel ?? 'your broker'} — a delivery sell can't be larger than that.`}
                 />
               ) : null}
               {isLive && wallet.error ? (
@@ -427,21 +532,21 @@ export default function OrderScreen() {
                 title={isLive ? 'Real money' : 'Practice mode'}
                 message={
                   isLive
-                    ? `This sends a real order to ${live.brokerLabel ?? 'your broker'}. Pre-trade risk checks run on the server; executed orders can't be undone.`
+                    ? `This sends a real order to ${brokerLabel ?? 'your broker'}. Pre-trade risk checks run on the server; executed orders can't be undone.`
                     : 'Paper orders use virtual cash and real prices. Nothing is sent to a broker.'
                 }
               />
             </View>
           ) : null}
 
-          {step === 'review' && order ? (
+          {step === 'review' && order && reviewed ? (
             <View className="gap-4">
               <View className="rounded-xl border border-line px-3.5 py-2.5 dark:border-line-dark">
                 <SummaryRow
                   label="Mode"
                   value={
-                    reviewedMode === 'live'
-                      ? `Live · ${live.brokerLabel ?? ''}`
+                    reviewed.mode === 'live'
+                      ? `Live · ${reviewedBrokerLabel}`
                       : 'Paper (virtual cash)'
                   }
                 />
@@ -466,11 +571,11 @@ export default function OrderScreen() {
                   value={chargesTotal !== null ? formatINR(chargesTotal) : '—'}
                 />
               </View>
-              {reviewedMode === 'live' ? (
+              {reviewed.mode === 'live' ? (
                 <Banner
                   tone="warning"
                   title="Confirm a real order"
-                  message={`${isBuy ? 'Buying' : 'Selling'} on ${live.brokerLabel ?? 'your broker'} with real money. Market orders fill at the prevailing price, which can differ from the estimate.`}
+                  message={`${isBuy ? 'Buying' : 'Selling'} on ${reviewedBrokerLabel} with real money. Market orders fill at the prevailing price, which can differ from the estimate.`}
                 />
               ) : null}
               {submitError ? <Banner tone="error" message={submitError} /> : null}
@@ -486,9 +591,9 @@ export default function OrderScreen() {
               <Text className="max-w-[320px] text-center text-sm leading-5 text-ink-muted dark:text-ink-dark-muted">
                 {outcome.message}
               </Text>
-              {outcome.details.map((line) => (
+              {outcome.details.map((line, index) => (
                 <Text
-                  key={line}
+                  key={`${index}-${line}`}
                   className="max-w-[320px] text-center text-[13px] text-ink-muted dark:text-ink-dark-muted"
                 >
                   • {line}
@@ -512,7 +617,7 @@ export default function OrderScreen() {
           {step === 'review' ? (
             <>
               <Button
-                label={`Confirm ${isBuy ? 'buy' : 'sell'}${reviewedMode === 'live' ? '' : ' (paper)'}`}
+                label={`Confirm ${isBuy ? 'buy' : 'sell'}${reviewed?.mode === 'live' ? '' : ' (paper)'}`}
                 size="lg"
                 fullWidth
                 variant={isBuy ? 'primary' : 'danger'}
@@ -530,13 +635,13 @@ export default function OrderScreen() {
           ) : null}
           {step === 'result' ? (
             <>
-              <Button label="Done" size="lg" fullWidth onPress={() => router.back()} />
+              <Button label="Done" size="lg" fullWidth onPress={close} />
               <Button
-                label={reviewedMode === 'live' ? 'View orders' : 'Open paper portfolio'}
+                label={reviewed?.mode === 'live' ? 'View live orders' : 'Open paper portfolio'}
                 variant="ghost"
                 fullWidth
                 onPress={() =>
-                  router.replace(reviewedMode === 'live' ? '/trade/mstock' : '/trade/paper')
+                  router.replace(reviewed?.mode === 'live' ? '/trade' : '/trade/paper')
                 }
               />
             </>

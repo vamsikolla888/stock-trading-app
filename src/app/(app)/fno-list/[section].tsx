@@ -18,6 +18,7 @@ import {
   isChainExchange,
   isExploreSection,
   liveMove,
+  paramString,
   periodBase,
   PERIODS,
   SECTION_META,
@@ -55,19 +56,18 @@ const isFuture = (row: Row): row is ExploreFuture => 'tradingSymbol' in row;
  * landing page, so a row here is the row that was ranked there. Filtering is local; F&O stocks
  * can be re-ordered by the chosen period's move.
  */
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 export default function FnoListScreen() {
-  const params = useLocalSearchParams<{ section?: string; q?: string }>();
-  const section = isExploreSection(params.section) ? params.section : null;
+  const params = useLocalSearchParams<{ section?: string | string[]; q?: string | string[] }>();
+  const sectionParam = paramString(params.section);
+  const section = isExploreSection(sectionParam) ? sectionParam : null;
+  // A repeated key arrives as an array; the filter box needs one string.
+  const q = paramString(params.q) ?? '';
   if (!section) return <Redirect href="/fno" />;
   // A new `q` (search → "commodity futures filtered to GOLD") is a new list: keyed, so the
   // filter starts from it instead of being synced into state after the first render.
-  return (
-    <FnoList
-      key={`${section}:${params.q ?? ''}`}
-      section={section}
-      initialFilter={params.q ?? ''}
-    />
-  );
+  return <FnoList key={`${section}:${q}`} section={section} initialFilter={q} />;
 }
 
 function FnoList({ section, initialFilter }: { section: ExploreSection; initialFilter: string }) {

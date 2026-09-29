@@ -25,6 +25,7 @@ import {
   formatSignedINR,
   formatSignedPercent,
 } from '@/lib/utils/formatters';
+import { isApiError } from '@/types/api';
 
 const EMPTY_SKIPPED: AutoTradeActivity['skippedToday'] = [];
 
@@ -44,7 +45,8 @@ export default function LiveScreen() {
   const portfolioQuery = usePaperPortfolio('equity');
   const strategiesQuery = useStrategiesList();
 
-  const engine = engineState(configQuery.data, strategiesQuery.data ?? []);
+  // Null until the library has loaded, so a followed strategy is never called deleted early.
+  const engine = engineState(configQuery.data, strategiesQuery.data ?? null);
   const activity = activityQuery.data ?? null;
   const portfolio = portfolioQuery.data ?? null;
   const tally = todayTally(activity, new Date(now));
@@ -54,9 +56,16 @@ export default function LiveScreen() {
   // Only when the engine follows a strategy — the recommendations batch has its own tab —
   // and gated, because evaluating the entry is a multi-second server pass.
   const watchedId = engine.source === 'strategy' ? engine.strategyId : null;
-  const watchingStrategy = watchedId !== null;
+  // Deployed, then deleted from the library: there is nothing to scan (the server would 404),
+  // and the engine places no new entries — the useful thing to say is where to pick another.
+  // The library's own answer decides it; failing that, the scan's 404 does.
+  const listedGone =
+    watchedId !== null && strategiesQuery.data !== undefined && engine.strategyName === null;
+  const watchingStrategy = watchedId !== null && !listedGone;
   const matchesQuery = useStrategyMatches(watchedId ?? undefined, watchingStrategy);
   const matches = matchesQuery.data;
+  const watchedGone =
+    listedGone || (isApiError(matchesQuery.error) && matchesQuery.error.status === 404);
 
   // Today's move needs every holding's previous close; a partial sum would mislead.
   const positions = useMemo(() => portfolio?.positions ?? [], [portfolio]);
@@ -78,22 +87,34 @@ export default function LiveScreen() {
         configQuery.refetch(),
         activityQuery.refetch(),
         portfolioQuery.refetch(),
-        watchingStrategy ? matchesQuery.refetch() : null,
+        strategiesQuery.refetch(),
+        // A strategy already known to be gone would only answer 404 again, on a tight limit.
+        watchingStrategy && !watchedGone ? matchesQuery.refetch() : null,
       ]),
-    [configQuery, activityQuery, portfolioQuery, matchesQuery, watchingStrategy],
+    [
+      configQuery,
+      activityQuery,
+      portfolioQuery,
+      strategiesQuery,
+      matchesQuery,
+      watchingStrategy,
+      watchedGone,
+    ],
   );
 
   const kpis: Kpi[] = [
     {
       label: "Today's P&L",
-      value: positions.length === 0 ? formatINR(0) : formatSignedINR(day.change),
-      sub:
-        positions.length === 0
+      // Unknown until the account has loaded — an empty book and an unread one differ.
+      value: !portfolio ? '—' : positions.length === 0 ? formatINR(0) : formatSignedINR(day.change),
+      sub: !portfolio
+        ? undefined
+        : positions.length === 0
           ? 'No open positions'
           : day.change === null
             ? 'Not every holding has a previous close'
             : `${formatSignedPercent(day.changePct)} on the book`,
-      trend: day.change,
+      trend: portfolio ? day.change : null,
     },
     {
       label: 'Total P&L',
@@ -190,12 +211,23 @@ export default function LiveScreen() {
       {watchedId !== null ? (
         <Section
           title="What it is watching"
-          action={{
-            label: 'Open strategy',
-            onPress: () => router.push({ pathname: '/strategy/[id]', params: { id: watchedId } }),
-          }}
+          action={
+            watchedGone
+              ? undefined
+              : {
+                  label: 'Open strategy',
+                  onPress: () =>
+                    router.push({ pathname: '/strategy/[id]', params: { id: watchedId } }),
+                }
+          }
         >
-          {matchesQuery.isPending ? (
+          {watchedGone ? (
+            <InlineEmpty
+              title="That strategy is no longer in your library"
+              message="The engine is still pointed at it, so it has nothing to scan and places no new entries. Choose another strategy, or the recommendations batch, in the engine settings."
+              action={{ label: 'Engine settings', onPress: () => router.push('/trade/paper') }}
+            />
+          ) : matchesQuery.isPending ? (
             <ListSkeleton rows={3} />
           ) : matchesQuery.error ? (
             <InlineError

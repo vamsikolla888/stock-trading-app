@@ -42,7 +42,9 @@ export function validateOrder(form: OrderFormState): {
   errors: OrderFormErrors;
 } {
   const errors: OrderFormErrors = {};
-  const quantity = Number.parseInt(form.quantity, 10);
+  // Digits only: parseInt would read "1.5" or "10abc" as a quantity nobody typed.
+  const quantityText = form.quantity.trim();
+  const quantity = /^\d+$/.test(quantityText) ? Number(quantityText) : Number.NaN;
   if (!Number.isInteger(quantity) || quantity < 1) errors.quantity = 'Enter at least 1 share';
   else if (quantity > MAX_ORDER_QUANTITY)
     errors.quantity = `At most ${MAX_ORDER_QUANTITY.toLocaleString('en-IN')} shares`;

@@ -64,8 +64,9 @@ export function Caveats({ items, className }: { items: readonly string[]; classN
   if (items.length === 0) return null;
   return (
     <View className={cn('gap-1.5', className)}>
-      {items.map((item) => (
-        <View key={item} className="flex-row gap-2">
+      {/* Positional keys: two server caveats (or two risk checks) can read the same. */}
+      {items.map((item, index) => (
+        <View key={`${index}:${item}`} className="flex-row gap-2">
           <Text className="text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">•</Text>
           <Text className="flex-1 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
             {item}
@@ -374,9 +375,9 @@ export function IssueList({ issues }: { issues: readonly { message: string }[] }
   if (!issues.length) return null;
   return (
     <View accessibilityRole="alert" className="gap-1">
-      {issues.map((issue) => (
+      {issues.map((issue, index) => (
         <Text
-          key={issue.message}
+          key={`${index}:${issue.message}`}
           className="text-xs leading-[17px] text-danger-600 dark:text-danger-dark"
         >
           • {issue.message}

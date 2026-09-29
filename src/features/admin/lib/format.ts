@@ -81,16 +81,29 @@ export function bucketTone(uptimePct: number | null, checks: number): StatusTone
   return 'bad';
 }
 
+// Built on first use and reused: a chart labels every bar on each 30s refresh, and
+// constructing an Intl.DateTimeFormat is slow on Hermes (a 90-day report has hundreds of bars).
+const bucketFormats: Partial<Record<'hour' | 'day', Intl.DateTimeFormat>> = {};
+
+function bucketFormat(bucket: 'hour' | 'day'): Intl.DateTimeFormat {
+  const unit = bucket === 'hour' ? 'hour' : 'day';
+  const format =
+    bucketFormats[unit] ??
+    new Intl.DateTimeFormat(
+      'en-IN',
+      unit === 'hour'
+        ? { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }
+        : { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' },
+    );
+  bucketFormats[unit] = format;
+  return format;
+}
+
 /** Axis label for an hourly or daily bucket, in IST. */
 export function bucketLabel(iso: string, bucket: 'hour' | 'day'): string {
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return '';
-  return new Intl.DateTimeFormat(
-    'en-IN',
-    bucket === 'hour'
-      ? { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }
-      : { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' },
-  ).format(ms);
+  return bucketFormat(bucket).format(ms);
 }
 
 // ── Log levels (pino numeric levels) ──────────────────────────────────────────────────

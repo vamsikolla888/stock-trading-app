@@ -12,6 +12,13 @@ import type {
 
 const path = (workflowId: string) => `/workflows/${encodeURIComponent(workflowId)}`;
 
+/**
+ * Calls that chain several n8n requests server-side (each allowed 8–10s there): a test
+ * waits for the webhook's own reply, and (de)activating re-reads the workflow afterwards.
+ * The default 15s client timeout would report "timed out" for work that went through.
+ */
+const N8N_CHAINED_TIMEOUT_MS = 35_000;
+
 export const workflowsApi = {
   async list(): Promise<WorkflowsListResult> {
     const { data } = await apiClient.get<WorkflowsListResult>('/workflows');
@@ -26,9 +33,11 @@ export const workflowsApi = {
     return data;
   },
   async setActive(workflowId: string, active: boolean): Promise<WorkflowDetail> {
-    const { data } = await apiClient.patch<WorkflowDetail>(`${path(workflowId)}/active`, {
-      active,
-    });
+    const { data } = await apiClient.patch<WorkflowDetail>(
+      `${path(workflowId)}/active`,
+      { active },
+      { timeout: N8N_CHAINED_TIMEOUT_MS },
+    );
     return data;
   },
   /** Fires the webhook and returns at once — no execution id yet; poll executions for it. */
@@ -38,7 +47,11 @@ export const workflowsApi = {
   },
   /** Waits for the webhook's own response and returns it inline. */
   async test(workflowId: string): Promise<TestWebhookResult> {
-    const { data } = await apiClient.post<TestWebhookResult>(`${path(workflowId)}/test`, {});
+    const { data } = await apiClient.post<TestWebhookResult>(
+      `${path(workflowId)}/test`,
+      {},
+      { timeout: N8N_CHAINED_TIMEOUT_MS },
+    );
     return data;
   },
   async executions(

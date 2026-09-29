@@ -3,6 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { insightKeys } from '@/features/insights/api';
 
 import { strategiesApi } from './api';
+import { pollInterval, retryOnceIfTransient } from './lib/polling';
 import type { CreateStrategyBody, StartGenerationInput, UpdateStrategyBody } from './types';
 
 /** Backtest results only change when a backtest runs, so polling hard gains nothing. */
@@ -162,7 +163,8 @@ export function useBacktestStatus(id: string | undefined, enabled: boolean) {
       return status;
     },
     enabled: enabled && Boolean(id),
-    refetchInterval: (query) => (query.state.data?.running ? 2_500 : false),
+    refetchInterval: (query) =>
+      query.state.data?.running ? pollInterval(query.state.error, 2_500) : false,
   });
 }
 
@@ -188,7 +190,10 @@ export function useGeneration(id: string | null) {
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === 'complete' || status === 'failed' ? false : 2_000;
+      if (status === 'complete' || status === 'failed') return false;
+      // A run that answers 404 (or any 4xx) will never settle — without this the sheet
+      // would poll it every two seconds for as long as the screen stays mounted.
+      return pollInterval(query.state.error, 2_000);
     },
   });
 }
@@ -200,7 +205,8 @@ export function useStrategyMatches(id: string | undefined, enabled: boolean, lim
     queryFn: () => strategiesApi.matches(id!, limit),
     enabled: enabled && Boolean(id),
     staleTime: 5 * 60_000,
-    retry: 1,
+    // Tight per-user limit (10/min): a 429 or 404 retried is a second one.
+    retry: retryOnceIfTransient,
   });
 }
 
@@ -211,6 +217,6 @@ export function useStrategyPairing(id: string | undefined, enabled: boolean) {
     queryFn: () => strategiesApi.pairing(id!),
     enabled: enabled && Boolean(id),
     staleTime: 5 * 60_000,
-    retry: 1,
+    retry: retryOnceIfTransient,
   });
 }

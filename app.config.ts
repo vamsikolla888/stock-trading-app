@@ -28,7 +28,7 @@ assertReleaseApiUrl();
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: isProd ? 'The Ledger' : `The Ledger (${APP_ENV})`,
+  name: isProd ? 'Stocks' : `Stocks (${APP_ENV})`,
   slug: 'stock-trading-app',
   version: '1.0.0',
   orientation: 'default',

@@ -27,7 +27,10 @@ import type { CustomScreener, ScreenerDetail } from '@/features/screeners/types'
 import { useIndexCatalog } from '@/features/strategies/hooks';
 import { formatNumber } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
-import { getErrorMessage } from '@/types/api';
+import { getErrorMessage, isApiError } from '@/types/api';
+
+// A render failure here shows the error page with a retry, not a crashed app.
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 const DISCLAIMER = 'Not investment advice — review before acting.';
 
@@ -38,8 +41,24 @@ const DISCLAIMER = 'Not investment advice — review before acting.';
  */
 export default function ScreenerDetailScreen() {
   const params = useLocalSearchParams<{ id: string; kind?: string }>();
-  const id = typeof params.id === 'string' ? params.id : '';
+  const id = typeof params.id === 'string' ? params.id.trim() : '';
   return params.kind === 'custom' ? <CustomScreenerScreen id={id} /> : <BuiltInScreen id={id} />;
+}
+
+/** A missing id never fetches and a deleted (or renamed) screener answers 404 — both are "not found". */
+function isNotFound(id: string, error: unknown): boolean {
+  return id === '' || (isApiError(error) && error.status === 404);
+}
+
+function ScreenerNotFound() {
+  const router = useRouter();
+  return (
+    <InlineEmpty
+      title="Screener not found"
+      message="It may have been deleted — custom screeners are a shared library, so anyone can remove one — or the link is out of date."
+      action={{ label: 'Go to screeners', onPress: () => router.replace('/intel/screeners') }}
+    />
+  );
 }
 
 // ── Built-in ────────────────────────────────────────────────────────────────────────────
@@ -54,7 +73,9 @@ function BuiltInScreen({ id }: { id: string }) {
       subtitle={data ? matchSubtitle(data.matchCount, data.universeSize, data.runAt) : undefined}
       onRefresh={query.refetch}
     >
-      {query.isPending ? (
+      {isNotFound(id, query.error) ? (
+        <ScreenerNotFound />
+      ) : query.isPending ? (
         <ListSkeleton rows={8} />
       ) : query.error && !data ? (
         <InlineError
@@ -127,6 +148,7 @@ function CustomScreenerScreen({ id }: { id: string }) {
   const navigation = useNavigation();
   const query = useCustomScreener(id);
   const screener = query.data;
+  const notFound = isNotFound(id, query.error);
   const remove = useDeleteCustomScreener();
 
   // Status polling starts once the server has accepted a scan (or the screener says one is in
@@ -135,7 +157,11 @@ function CustomScreenerScreen({ id }: { id: string }) {
   const run = useRunCustomScan(id, { onQueued: () => setQueuedHere(true) });
   const inFlight = screener?.status === 'queued' || screener?.status === 'running';
   const status = useCustomScanStatus(id, queuedHere || inFlight);
-  const running = run.isPending || inFlight || status.data?.running === true;
+  // The queue decides once it has answered, so a scan the worker lost (screener left
+  // "queued") never locks the button; until then the screener's status and the click stand in.
+  const queueAnswered = status.data !== undefined && !status.isFetching;
+  const running =
+    run.isPending || (queueAnswered ? status.data?.running === true : inFlight || queuedHere);
 
   const startScan = () =>
     run.mutate(undefined, {
@@ -275,7 +301,7 @@ function CustomScreenerScreen({ id }: { id: string }) {
       }
       onRefresh={query.refetch}
       right={
-        screener ? (
+        screener && !notFound ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Edit screener"
@@ -290,7 +316,7 @@ function CustomScreenerScreen({ id }: { id: string }) {
         ) : undefined
       }
       footer={
-        screener ? (
+        screener && !notFound ? (
           <View className="border-t border-line bg-canvas px-5 py-3 dark:border-line-dark dark:bg-canvas-dark">
             <Button
               label={running ? 'Scanning…' : screener.runAt ? 'Re-run scan' : 'Run scan'}
@@ -303,7 +329,9 @@ function CustomScreenerScreen({ id }: { id: string }) {
         ) : undefined
       }
     >
-      {query.isPending ? (
+      {notFound ? (
+        <ScreenerNotFound />
+      ) : query.isPending ? (
         <ListSkeleton rows={8} />
       ) : query.error && !screener ? (
         <InlineError

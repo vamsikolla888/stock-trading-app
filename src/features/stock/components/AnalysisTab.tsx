@@ -7,6 +7,7 @@ import { Section } from '@/components/ui/Section';
 import { formatIstDateTime, formatSessionDay } from '@/features/home/lib/istTime';
 import type { Recommendation } from '@/features/insights/types';
 import { useCandles, useSentiment } from '@/features/market/hooks';
+import { candlesErrorMessage } from '@/features/market/lib/chartRanges';
 import { technicalHeadline, technicalSummary } from '@/features/market/lib/technicalSummary';
 import type { StockDetail } from '@/features/market/types';
 import { cn } from '@/lib/utils/cn';
@@ -123,8 +124,9 @@ function WhyThisPick({ pick, batchDate }: { pick: Recommendation; batchDate: str
       className="mt-6"
     >
       <View className="gap-4 rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">
-        {pick.why.map((reason) => (
-          <View key={reason.head}>
+        {pick.why.map((reason, index) => (
+          // Two reasons can share a heading; the position is the stable identity.
+          <View key={index}>
             <Text className="text-sm font-semibold text-ink dark:text-ink-dark">{reason.head}</Text>
             <Text className="mt-1 text-[14px] leading-[21px] text-ink dark:text-ink-dark">
               {reason.text}
@@ -221,7 +223,7 @@ export function AnalysisTab({
         ) : (
           <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
             {daily.error
-              ? `Daily history couldn’t be loaded. ${getErrorMessage(daily.error)}`
+              ? candlesErrorMessage(daily.error)
               : 'Daily history isn’t available for this stock.'}
           </Text>
         )}

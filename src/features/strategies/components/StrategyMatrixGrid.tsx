@@ -3,7 +3,14 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { cn } from '@/lib/utils/cn';
 
-import { matrixCell, type CellTone, type MatrixMetric, type MatrixModel } from '../lib/backtest';
+import {
+  matrixCell,
+  matrixColumnLabels,
+  matrixLegend,
+  type CellTone,
+  type MatrixMetric,
+  type MatrixModel,
+} from '../lib/backtest';
 import type { SymbolStats } from '../types';
 
 const NAME_WIDTH = 124;
@@ -51,6 +58,7 @@ export function StrategyMatrixGrid({
   onSelectCell,
 }: StrategyMatrixGridProps) {
   const metricName = metric === 'profitFactor' ? 'profit factor' : 'win rate';
+  const labels = matrixColumnLabels(model.columns);
 
   return (
     <View className="flex-row overflow-hidden rounded-card border border-line bg-surface dark:border-line-dark dark:bg-surface-dark">
@@ -91,7 +99,7 @@ export function StrategyMatrixGrid({
             style={{ height: HEADER_HEIGHT }}
             className="flex-row border-b border-line dark:border-line-dark"
           >
-            {model.columns.map((key) => (
+            {model.columns.map((key, index) => (
               <View
                 key={key}
                 style={{ width: CELL_WIDTH }}
@@ -102,7 +110,7 @@ export function StrategyMatrixGrid({
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
-                  {key.split(':')[1] ?? key}
+                  {labels[index] ?? key}
                 </Text>
               </View>
             ))}
@@ -113,17 +121,17 @@ export function StrategyMatrixGrid({
               style={{ height: ROW_HEIGHT }}
               className={cn('flex-row', row > 0 && 'border-t border-line dark:border-line-dark')}
             >
-              {model.columns.map((key) => {
+              {model.columns.map((key, index) => {
                 const stats = statsByKey.get(key);
                 const cell = matrixCell(stats, metric);
-                const symbol = key.split(':')[1] ?? key;
+                const symbol = labels[index] ?? key;
                 return (
                   <Pressable
                     key={key}
                     accessibilityRole="button"
                     accessibilityLabel={`${names[row] ?? 'Strategy'} on ${symbol}: ${metricName} ${cell.text}${
                       stats ? `, ${stats.trades} trades` : ''
-                    }${cell.tone === 'thin' ? ', too few trades to read' : ''}`}
+                    }${cell.tone === 'thin' ? ', too few trades to read' : ''}. Show details`}
                     disabled={!stats}
                     onPress={() => stats && onSelectCell({ row, column: key, stats })}
                     style={{ width: CELL_WIDTH }}
@@ -149,6 +157,32 @@ export function StrategyMatrixGrid({
           ))}
         </View>
       </ScrollView>
+    </View>
+  );
+}
+
+/** The colour key, drawn with the grid's own cell styles so the two cannot drift apart. */
+export function MatrixLegend({ metric }: { metric: MatrixMetric }) {
+  const items = matrixLegend(metric);
+  return (
+    <View
+      accessible
+      accessibilityLabel={`Colour key: ${items.map((item) => item.label).join(', ')}`}
+      className="flex-row flex-wrap items-center gap-x-3 gap-y-1.5"
+    >
+      {items.map((item) => (
+        <View key={item.tone} className="flex-row items-center gap-1.5">
+          <View className={cn('items-center rounded-md px-1.5 py-0.5', CELL_FILL[item.tone])}>
+            <Text
+              className={cn('text-[11px]', CELL_TEXT[item.tone])}
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              {item.sample}
+            </Text>
+          </View>
+          <Text className="text-[11px] text-ink-muted dark:text-ink-dark-muted">{item.label}</Text>
+        </View>
+      ))}
     </View>
   );
 }

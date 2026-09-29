@@ -66,8 +66,9 @@ export const SECTION_META: Record<
   },
 };
 
+/** Own keys only: `in` would also accept "toString" and "constructor" from the prototype. */
 export function isExploreSection(value: unknown): value is ExploreSection {
-  return typeof value === 'string' && value in SECTION_META;
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SECTION_META, value);
 }
 
 export type ListOrder = 'rank' | 'gainers' | 'losers';
@@ -124,4 +125,55 @@ export function chainHref(
 /** Only NSE/BSE F&O has a chain screen; MCX is priced here but not traded through Groww. */
 export function isChainExchange(exchange: ExploreExchange | string): exchange is FnoExchange {
   return exchange === 'NFO' || exchange === 'BFO';
+}
+
+/**
+ * Where an expiry-calendar line opens: the option chain AT that date when options expire
+ * then, else the futures tab. The chain refuses a date with no options (422, "not a listed
+ * option expiry") rather than silently showing another expiry.
+ */
+export function calendarEntryHref(
+  exchange: FnoExchange,
+  underlying: string,
+  date: string,
+  hasOptions: boolean,
+) {
+  return chainHref(exchange, underlying, hasOptions ? { expiry: date } : { tab: 'futures' });
+}
+
+/* ── Route params ─────────────────────────────────────────────────────────────────────── */
+
+/** A route param as one trimmed string: a repeated key arrives as an array, a missing one as undefined. */
+export function paramString(value: string | string[] | undefined | null): string | null {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first !== 'string') return null;
+  const trimmed = first.trim();
+  return trimmed ? trimmed : null;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface ChainRouteParams {
+  exchange: FnoExchange;
+  underlying: string;
+  /** Null = the nearest listed expiry. A value the server's `YYYY-MM-DD` rule would refuse is dropped. */
+  expiry: string | null;
+  tab: 'options' | 'futures';
+}
+
+/** /option-chain's params, normalised the way the server will read them. */
+export function parseChainParams(params: {
+  exchange?: string | string[];
+  underlying?: string | string[];
+  expiry?: string | string[];
+  tab?: string | string[];
+}): ChainRouteParams {
+  const exchange = paramString(params.exchange)?.toUpperCase();
+  const expiry = paramString(params.expiry);
+  return {
+    exchange: exchange === 'BFO' ? 'BFO' : 'NFO',
+    underlying: (paramString(params.underlying) ?? 'NIFTY').toUpperCase(),
+    expiry: expiry && ISO_DATE.test(expiry) ? expiry : null,
+    tab: paramString(params.tab) === 'futures' ? 'futures' : 'options',
+  };
 }

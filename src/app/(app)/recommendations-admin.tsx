@@ -5,6 +5,8 @@ import { AdminOnlyNotice } from '@/features/admin/components/AdminState';
 import { RecommendationsEnginePanel } from '@/features/admin/panels/RecommendationsEnginePanel';
 import { useAuthStore } from '@/store/authStore';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 /** Recommendations engine admin (web: /recommendations/admin). Every route it calls is admin-only. */
 export default function RecommendationsAdminScreen() {
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin');

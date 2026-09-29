@@ -44,6 +44,7 @@ import {
   needsLimitPrice,
   needsTriggerPrice,
   parsePriceInput,
+  requestLimitIssues,
 } from '../lib/orderRules';
 import type {
   FnoChainLeg,
@@ -216,8 +217,8 @@ function TicketBody({
   const maxLots = maxLotsPerOrder(contract);
 
   const issues = useMemo(
-    () =>
-      checkContractOrder({
+    () => [
+      ...checkContractOrder({
         contract,
         side,
         orderType,
@@ -226,6 +227,8 @@ function TicketBody({
         triggerPrice: trigger,
         today: todayIst(),
       }),
+      ...requestLimitIssues(lots),
+    ],
     [contract, side, orderType, lots, price, trigger],
   );
   const valid = issues.length === 0;

@@ -24,29 +24,47 @@ import type {
 /** `profileId` omitted resolves to the user's default profile on the server. */
 const withProfile = (profileId?: string) => (profileId ? { profileId } : {});
 
+type RawProfile = Omit<PaperProfile, 'id'> & { id?: string; _id?: string };
+
+/**
+ * The profile routes return Mongo documents as stored (`.lean()` / toObject), so the id
+ * arrives as `_id` and there is no `id` — whatever the OpenAPI spec says. Normalised here,
+ * once, so every screen can key, select and delete by `id`.
+ */
+export function toPaperProfile(raw: RawProfile): PaperProfile {
+  return {
+    id: String(raw.id ?? raw._id ?? ''),
+    name: raw.name ?? '',
+    strategy: raw.strategy ?? null,
+    isDefault: Boolean(raw.isDefault),
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+  };
+}
+
 /** Paper trading — mirrors the web's paper.service.ts, same paths and field names. */
 export const paperApi = {
   async profiles(): Promise<PaperProfile[]> {
-    const { data } = await apiClient.get<{ profiles: PaperProfile[] }>('/paper/profiles');
-    return data.profiles;
+    const { data } = await apiClient.get<{ profiles: RawProfile[] }>('/paper/profiles');
+    return (data?.profiles ?? []).map(toPaperProfile).filter((profile) => profile.id !== '');
   },
   async createProfile(body: {
     name: string;
     strategy?: string | null;
     startingCapital?: number;
   }): Promise<PaperProfile> {
-    const { data } = await apiClient.post<PaperProfile>('/paper/profiles', body);
-    return data;
+    const { data } = await apiClient.post<RawProfile>('/paper/profiles', body);
+    return toPaperProfile(data);
   },
   async renameProfile(
     profileId: string,
     body: { name?: string; strategy?: string | null },
   ): Promise<PaperProfile> {
-    const { data } = await apiClient.patch<PaperProfile>(
+    const { data } = await apiClient.patch<RawProfile>(
       `/paper/profiles/${encodeURIComponent(profileId)}`,
       body,
     );
-    return data;
+    return toPaperProfile(data);
   },
   async deleteProfile(profileId: string): Promise<void> {
     await apiClient.delete(`/paper/profiles/${encodeURIComponent(profileId)}`);

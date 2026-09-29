@@ -2,6 +2,10 @@
 module.exports = {
   preset: 'jest-expo',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+  // .kilo/ holds tool-managed git worktrees — stale copies of this repo whose old tests
+  // would otherwise run against the current source (and collide as duplicate modules).
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.kilo/'],
+  modulePathIgnorePatterns: ['<rootDir>/.kilo/'],
   transformIgnorePatterns: [
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|expo-modules-core|expo-router|expo-.*|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|react-native-toast-message|nativewind|react-native-css-interop|react-native-reanimated|@gorhom/.*|@gluestack.*)/)',
   ],

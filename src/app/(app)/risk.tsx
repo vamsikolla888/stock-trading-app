@@ -11,6 +11,8 @@ import {
   useLiveTradingSettings,
 } from '@/features/trading/hooks';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 // The server's pre-trade checks (live-risk-rules.ts), in the order they run.
 const CHECKS: { title: string; detail: string }[] = [
   { title: 'Kill switch', detail: 'Every live order stops while it is engaged.' },

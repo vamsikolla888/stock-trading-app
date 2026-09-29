@@ -129,8 +129,10 @@ function PositionSheet({
 }) {
   const mask = useMask();
   // Exiting is a normal order the other way — same ticket, same risk checks. Carry-forward
-  // (NRML) positions aren't equity-ticket products, so they're exited at the broker.
-  const exitable = tradable && row.qty !== 0 && row.kind !== 'carry';
+  // (NRML) positions aren't equity-ticket products, and an F&O row (NFO/BFO, even when MIS)
+  // isn't a stock the equity ticket can trade, so both are exited at the broker.
+  const exitable =
+    tradable && row.qty !== 0 && row.kind !== 'carry' && (row.exch === 'NSE' || row.exch === 'BSE');
   const exitHref = ticketHref({
     symbol: row.sym,
     exchange: row.exch,

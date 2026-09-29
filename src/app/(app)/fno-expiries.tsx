@@ -8,10 +8,12 @@ import { Badge } from '@/components/ui/Badge';
 import { Chips } from '@/components/ui/Tabs';
 import { CommodityGlyph, IndexGlyph } from '@/features/fno/components/Glyphs';
 import { useExpiryCalendar } from '@/features/fno/hooks';
-import { chainHref, isChainExchange } from '@/features/fno/lib/explore';
+import { calendarEntryHref, isChainExchange } from '@/features/fno/lib/explore';
 import { dayHeading, dteLabel, venueOf } from '@/features/fno/lib/format';
 import type { ExpiryEntry } from '@/features/fno/types';
 import { useTheme } from '@/theme/ThemeProvider';
+
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -120,11 +122,20 @@ export default function FnoExpiriesScreen() {
             return (
               <Pressable
                 accessibilityRole={opens ? 'button' : undefined}
-                accessibilityLabel={`${item.label}, ${sub}${opens ? ', opens the option chain' : ''}`}
+                accessibilityLabel={`${item.label}, ${sub}${
+                  opens
+                    ? item.hasOptions
+                      ? ', opens the option chain'
+                      : ', opens its futures'
+                    : ''
+                }`}
                 disabled={!opens}
                 onPress={
                   opens && underlying && isChainExchange(exchange)
-                    ? () => router.push(chainHref(exchange, underlying, { expiry: section.date }))
+                    ? () =>
+                        router.push(
+                          calendarEntryHref(exchange, underlying, section.date, item.hasOptions),
+                        )
                     : undefined
                 }
                 className={[

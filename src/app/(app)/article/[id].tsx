@@ -19,6 +19,7 @@ import { stockLogoUrl } from '@/features/market/api';
 import { useArticle, useRetryAnalysis } from '@/features/news/hooks';
 import {
   formatExpectedMove,
+  isArticleId,
   isWebLink,
   plainText,
   SENTIMENT_BADGE,
@@ -28,6 +29,8 @@ import type { AnalyzedArticleDetail } from '@/features/news/types';
 import { stockHref } from '@/lib/navigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { isApiError } from '@/types/api';
+
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 function LoadingBody() {
   return (
@@ -117,10 +120,15 @@ function AnalysisStatus({ detail, newsId }: { detail: AnalyzedArticleDetail; new
 /** One analysed article: headline, the feed's summary, the model's tip and reasoning. */
 export default function ArticleScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
-  const newsId = typeof params.id === 'string' ? params.id : '';
+  // Article ids are Mongo ObjectIds; anything else can only be a broken link, so it is
+  // "not found" straight away rather than a request the server rejects (or, with no id at
+  // all, a disabled query that would show the skeleton forever).
+  const newsId = isArticleId(params.id) ? params.id : '';
   const article = useArticle(newsId);
   const detail = article.data;
-  const notFound = isApiError(article.error) && article.error.status === 404;
+  const notFound =
+    !newsId ||
+    (isApiError(article.error) && (article.error.status === 404 || article.error.status === 422));
   const link = detail?.article.link;
 
   const footer =
@@ -132,7 +140,7 @@ export default function ArticleScreen() {
     ) : undefined;
 
   let body: React.ReactNode;
-  if (article.isPending) {
+  if (article.isPending && newsId) {
     body = <LoadingBody />;
   } else if (!detail) {
     body = notFound ? (

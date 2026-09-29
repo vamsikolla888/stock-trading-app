@@ -1,7 +1,13 @@
-import { candlesToPoints, formatPointTime } from '@/features/market/lib/chartRanges';
+import {
+  candlesErrorMessage,
+  candlesToPoints,
+  formatPointTime,
+  sessionCandles,
+} from '@/features/market/lib/chartRanges';
 import { rsi, sma } from '@/features/market/lib/indicators';
 import { lastCross, technicalSummary } from '@/features/market/lib/technicalSummary';
 import type { Candle } from '@/features/market/types';
+import { ApiError } from '@/types/api';
 
 const candle = (time: number, close: number): Candle => ({
   time,
@@ -31,10 +37,55 @@ describe('candlesToPoints', () => {
   });
 });
 
+describe('sessionCandles', () => {
+  it('gives the candle chart the same latest-session bars as the line chart on 1D', () => {
+    const candles = [
+      candle(1_758_707_700, 100),
+      candle(1_758_772_200, 101),
+      candle(1_758_772_500, 102),
+    ];
+    expect(sessionCandles(candles, '1D').map((bar) => bar.close)).toEqual([101, 102]);
+    expect(sessionCandles(candles, '1M')).toHaveLength(3);
+  });
+
+  it('drops bars with a missing price instead of plotting NaN', () => {
+    const broken = { ...candle(1_758_772_500, 102), high: Number.NaN };
+    expect(sessionCandles([candle(1_758_772_200, 101), broken], '1W')).toHaveLength(1);
+    expect(sessionCandles([], '1D')).toEqual([]);
+  });
+});
+
 describe('formatPointTime', () => {
   it('formats in IST regardless of device zone', () => {
     // 03:50 UTC = 09:20 IST
     expect(formatPointTime(Date.UTC(2026, 8, 25, 3, 50), '1D')).toMatch(/9:20/);
+  });
+
+  it('returns nothing for an invalid time rather than throwing', () => {
+    expect(formatPointTime(Number.NaN, '1D')).toBe('');
+  });
+});
+
+describe('candlesErrorMessage', () => {
+  it('explains a missing broker session instead of echoing the server', () => {
+    const noBroker = new ApiError({
+      status: 404,
+      code: 'NOT_FOUND',
+      message: 'No connected broker',
+    });
+    const expired = new ApiError({ status: 409, code: 'BROKER_SESSION_EXPIRED', message: 'x' });
+    expect(candlesErrorMessage(noBroker)).toMatch(/needs a live broker session/);
+    expect(candlesErrorMessage(expired)).toMatch(/needs a live broker session/);
+  });
+
+  it('passes other API messages through and has a fallback for anything else', () => {
+    const limited = new ApiError({
+      status: 429,
+      code: 'RATE_LIMITED',
+      message: 'Too many attempts.',
+    });
+    expect(candlesErrorMessage(limited)).toBe('Too many attempts.');
+    expect(candlesErrorMessage(new Error('boom'))).toMatch(/couldn’t be loaded/);
   });
 });
 

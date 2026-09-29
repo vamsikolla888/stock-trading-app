@@ -22,9 +22,13 @@ export interface EngineState {
   summary: string;
 }
 
+/**
+ * `strategies` is the caller's library, or null while it is still loading (or failed to
+ * load) — then a followed strategy is named generically rather than declared deleted.
+ */
 export function engineState(
   config: AutoTradeConfigResponse | null | undefined,
-  strategies: readonly { id: string; name: string }[],
+  strategies: readonly { id: string; name: string }[] | null,
 ): EngineState {
   if (!config?.configured) {
     return {
@@ -43,7 +47,7 @@ export function engineState(
     config.config.candidateSource === 'strategy' ? 'strategy' : 'recommendations';
   const strategyId = source === 'strategy' ? (config.config.strategyId ?? null) : null;
   const strategyName = strategyId
-    ? (strategies.find((s) => s.id === strategyId)?.name ?? null)
+    ? (strategies?.find((s) => s.id === strategyId)?.name ?? null)
     : null;
   let summary: string;
   if (source === 'strategy') {
@@ -52,7 +56,9 @@ export function engineState(
         ? 'Set to follow a strategy, but none is selected'
         : strategyName
           ? `Following ${strategyName}`
-          : 'Following a strategy that is no longer in your library';
+          : strategies === null
+            ? 'Following one of your strategies'
+            : 'Following a strategy that is no longer in your library';
   } else {
     summary = 'Following the daily recommendations batch';
   }
@@ -90,7 +96,14 @@ export function todayTally(
   let realised = 0;
   let sawRealised = false;
   for (const e of events) {
-    if (e.side === 'SELL' && e.status === 'FILLED' && e.realisedPnl !== null) {
+    // `!= null` and a finiteness check: an order written before a field existed comes back
+    // without it, and one undefined would turn the whole day's sum into NaN.
+    if (
+      e.side === 'SELL' &&
+      e.status === 'FILLED' &&
+      typeof e.realisedPnl === 'number' &&
+      Number.isFinite(e.realisedPnl)
+    ) {
       realised += e.realisedPnl;
       sawRealised = true;
     }
@@ -98,7 +111,10 @@ export function todayTally(
   return {
     filled: events.filter((e) => e.status === 'FILLED').length,
     rejected: events.filter((e) => e.status === 'REJECTED').length,
-    declined: (activity?.skippedToday ?? []).reduce((n, s) => n + s.count, 0),
+    declined: (activity?.skippedToday ?? []).reduce(
+      (n, s) => n + (Number.isFinite(s.count) ? s.count : 0),
+      0,
+    ),
     buys: events.filter((e) => e.side === 'BUY' && e.status === 'FILLED').length,
     sells: events.filter((e) => e.side === 'SELL' && e.status === 'FILLED').length,
     realisedToday: sawRealised ? realised : null,
@@ -129,7 +145,7 @@ export function eventTone(e: Pick<AutoTradeEvent, 'status' | 'side' | 'realisedP
   if (e.status === 'CANCELLED') return { tone: 'neutral', label: 'Cancelled' };
   if (e.status === 'PENDING') return { tone: 'primary', label: 'Pending' };
   if (e.side === 'BUY') return { tone: 'primary', label: 'Bought' };
-  if (e.realisedPnl === null) return { tone: 'neutral', label: 'Sold' };
+  if (e.realisedPnl == null) return { tone: 'neutral', label: 'Sold' };
   return { tone: e.realisedPnl >= 0 ? 'success' : 'danger', label: 'Sold' };
 }
 

@@ -173,7 +173,12 @@ export function groupByDay<T>(
   items: readonly T[],
   at: (item: T) => string | null,
 ): { date: string; items: T[] }[] {
-  const sorted = [...items].sort((a, b) => Date.parse(at(b) ?? '') - Date.parse(at(a) ?? ''));
+  // An unparseable stamp sorts last rather than poisoning the comparator with NaN.
+  const time = (item: T) => {
+    const ms = Date.parse(at(item) ?? '');
+    return Number.isFinite(ms) ? ms : 0;
+  };
+  const sorted = [...items].sort((a, b) => time(b) - time(a));
   const days: { date: string; items: T[] }[] = [];
   for (const item of sorted) {
     const date = istDateOf(at(item)) ?? 'unknown';

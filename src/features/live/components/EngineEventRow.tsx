@@ -22,16 +22,17 @@ export const EngineEventRow = memo(function EngineEventRow({ event }: { event: A
   const router = useRouter();
   const tone = eventTone(event);
   const reason = exitWord(event.exitReason);
+  // `!= null` throughout: rows older than a field come back without it, and `undefined !==
+  // null` would draw "triggered at —" under every buy.
+  const realised = event.realisedPnl ?? null;
   const slipped =
-    event.exitTriggerLevel !== null &&
-    event.price !== null &&
-    event.exitTriggerLevel !== event.price;
+    event.exitTriggerLevel != null && event.price != null && event.exitTriggerLevel !== event.price;
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${tone.label} ${formatQuantity(event.quantity)} ${event.symbol} at ${formatINR(event.price)}, ${istDateTime(event.at)} IST${
-        event.realisedPnl !== null ? `, realised ${formatSignedINR(event.realisedPnl)}` : ''
+        realised !== null ? `, realised ${formatSignedINR(realised)}` : ''
       }`}
       onPress={() => router.push(stockHref(event.symbol, event.exchange))}
       className="px-3.5 py-3 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
@@ -57,9 +58,9 @@ export const EngineEventRow = memo(function EngineEventRow({ event }: { event: A
         </View>
         <View className="items-end gap-1">
           <Badge label={tone.label} variant={tone.tone} />
-          {event.realisedPnl !== null ? (
-            <ChangeText value={event.realisedPnl} className="text-xs" style={numbers}>
-              {formatSignedINR(event.realisedPnl)}
+          {realised !== null ? (
+            <ChangeText value={realised} className="text-xs" style={numbers}>
+              {formatSignedINR(realised)}
             </ChangeText>
           ) : null}
         </View>

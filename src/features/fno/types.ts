@@ -36,6 +36,10 @@ export interface FnoContract {
   exchangeToken: string;
   buyAllowed: boolean;
   sellAllowed: boolean;
+  /** Added server-side 2026-09-27; absent from older cached rows. */
+  logoKind?: 'stock' | 'index';
+  logoSymbol?: string;
+  logoPath?: string | null;
 }
 
 export interface FnoUnderlying {
@@ -43,6 +47,8 @@ export interface FnoUnderlying {
   exchange: FnoExchange;
   isIndex: boolean;
   spotSymbol: string | null;
+  /** Groww's exact cash/index identifier (server 2026-09-27); may be absent. */
+  spotGrowwSymbol?: string | null;
   name: string | null;
   nearestExpiry: string;
   expiryCount: number;
@@ -50,6 +56,9 @@ export interface FnoUnderlying {
   hasFutures: boolean;
   lotSize: number | null;
   contractCount: number;
+  logoKind?: 'stock' | 'index';
+  logoSymbol?: string;
+  logoPath?: string | null;
 }
 
 export interface FnoExpiry {
@@ -565,8 +574,25 @@ export interface CommodityUnderlying {
   contractCount: number;
 }
 
+/** A live MCX / NSE-commodity contract from search (server 2026-09-27). Priced only — Groww's
+ *  API places no commodity orders, so it opens the commodity futures list, never a ticket. */
+export interface CommodityContractSearchResult {
+  exchange: 'MCX' | 'NCO';
+  tradingSymbol: string;
+  growwSymbol: string | null;
+  underlying: string;
+  kind: ContractKind;
+  expiry: string;
+  strike: number | null;
+  lotSize: number | null;
+  logoKind: 'commodity';
+  logoSymbol: string;
+  logoPath: null;
+}
+
 export interface FnoSearchResult {
   underlyings: FnoUnderlying[];
   contracts: FnoContract[];
   commodities?: CommodityUnderlying[];
+  commodityContracts?: CommodityContractSearchResult[];
 }

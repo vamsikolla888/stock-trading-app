@@ -4,15 +4,23 @@ import React, { useState } from 'react';
 import { KeyboardAvoidingView, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { InlineEmpty, InlineError } from '@/components/common/InlineError';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/Tabs';
-import { useBrokerCatalog, useBrokerMutations } from '@/features/trading/hooks';
+import {
+  useBrokerCatalog,
+  useBrokerConnections,
+  useBrokerMutations,
+} from '@/features/trading/hooks';
 import type { MfaMethod } from '@/features/trading/types';
 import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
+
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 const MFA_OPTIONS: readonly { key: MfaMethod; label: string }[] = [
   { key: 'otp', label: 'SMS code' },
@@ -33,16 +41,20 @@ const SECURE_FIELD = {
 export default function BrokerConnectScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const params = useLocalSearchParams<{ broker: string; step?: string }>();
+  const params = useLocalSearchParams<{ broker?: string | string[]; step?: string | string[] }>();
+  const brokerId = (Array.isArray(params.broker) ? params.broker[0] : params.broker) ?? '';
+  const stepParam = Array.isArray(params.step) ? params.step[0] : params.step;
   const catalog = useBrokerCatalog();
-  const broker = catalog.data?.find((entry) => entry.id === params.broker);
+  const connections = useBrokerConnections();
+  const broker = catalog.data?.find((entry) => entry.id === brokerId);
   const isMstock =
-    (broker?.auth ?? (params.broker === 'mstock' ? 'mstock-login' : 'api-key-totp')) ===
-    'mstock-login';
+    (broker?.auth ?? (brokerId === 'mstock' ? 'mstock-login' : 'api-key-totp')) === 'mstock-login';
+  const connection = connections.data?.find((entry) => entry.broker === brokerId);
   const { connectMstock, verifyMstock, connectApiKey } = useBrokerMutations();
 
+  // Only mStock has a code step; an API-key broker always starts at its credentials.
   const [step, setStep] = useState<'credentials' | 'verify'>(
-    params.step === 'verify' ? 'verify' : 'credentials',
+    stepParam === 'verify' && (brokerId === 'mstock' || isMstock) ? 'verify' : 'credentials',
   );
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState({
@@ -53,16 +65,20 @@ export default function BrokerConnectScreen() {
     totpSecret: '',
     code: '',
   });
-  const [mfaMethod, setMfaMethod] = useState<MfaMethod>('otp');
+  const [chosenMfa, setChosenMfa] = useState<MfaMethod | null>(null);
+  // Reopened at the code step (a reconnect), the code arrives the way the connection was
+  // set up — the saved method, not the form's default.
+  const mfaMethod: MfaMethod = chosenMfa ?? connection?.mfaMethod ?? 'otp';
   const set = (key: keyof typeof fields) => (value: string) => {
     setError(null);
     setFields((current) => ({ ...current, [key]: value }));
   };
 
-  const label = broker?.label ?? params.broker;
+  const label = broker?.label ?? brokerId;
+  const close = () => (router.canGoBack() ? router.back() : router.replace('/brokers'));
   const done = () => {
     toast.success(`${label} connected`);
-    router.back();
+    close();
   };
   const fail = (err: unknown) => setError(getErrorMessage(err));
 
@@ -76,7 +92,13 @@ export default function BrokerConnectScreen() {
         mfaMethod,
       },
       {
-        onSuccess: (result) => (result.status === 'connected' ? done() : setStep('verify')),
+        onSuccess: (result) => {
+          if (result.status === 'connected') return done();
+          if (result.challenge === 'otp' || result.challenge === 'totp') {
+            setChosenMfa(result.challenge);
+          }
+          setStep('verify');
+        },
         onError: fail,
       },
     );
@@ -87,7 +109,7 @@ export default function BrokerConnectScreen() {
   const submitApiKey = () =>
     connectApiKey.mutate(
       {
-        broker: params.broker,
+        broker: brokerId,
         payload: {
           apiKey: fields.apiKey.trim(),
           totpSecret: fields.totpSecret.replace(/\s+/g, '').toUpperCase(),
@@ -127,7 +149,7 @@ export default function BrokerConnectScreen() {
           accessibilityRole="button"
           accessibilityLabel="Close"
           hitSlop={10}
-          onPress={() => router.back()}
+          onPress={close}
           className="h-9 w-9 items-center justify-center rounded-full bg-surface-sunk dark:bg-surface-sunk-dark"
         >
           <X size={18} color={colors.text} />
@@ -142,7 +164,21 @@ export default function BrokerConnectScreen() {
         >
           {error ? <Banner tone="error" message={error} /> : null}
 
-          {step === 'verify' ? (
+          {!broker && catalog.isPending ? (
+            <LoadingSpinner />
+          ) : !broker && catalog.error ? (
+            <InlineError
+              what="brokers"
+              error={catalog.error}
+              onRetry={() => void catalog.refetch()}
+            />
+          ) : !broker ? (
+            <InlineEmpty
+              title="Broker not available"
+              message="This broker can't be connected from the app. Pick one from Broker connections."
+              action={{ label: 'Broker connections', onPress: () => router.replace('/brokers') }}
+            />
+          ) : step === 'verify' ? (
             <>
               <Text className="text-sm leading-5 text-ink-muted dark:text-ink-dark-muted">
                 Enter today’s code from{' '}
@@ -200,7 +236,7 @@ export default function BrokerConnectScreen() {
                 <Text className="mb-1.5 text-[13px] font-medium text-ink-muted dark:text-ink-dark-muted">
                   Daily code via
                 </Text>
-                <SegmentedControl items={MFA_OPTIONS} value={mfaMethod} onChange={setMfaMethod} />
+                <SegmentedControl items={MFA_OPTIONS} value={mfaMethod} onChange={setChosenMfa} />
               </View>
               <Button
                 label="Continue"

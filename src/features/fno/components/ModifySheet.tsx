@@ -12,7 +12,12 @@ import { getErrorMessage } from '@/types/api';
 import { useModifyFnoOrder } from '../hooks';
 import { modifyBody } from '../lib/chain';
 import { contractTitle, DASH, lotsLabel } from '../lib/format';
-import { checkContractOrder, parsePriceInput, type ContractRuleIssue } from '../lib/orderRules';
+import {
+  checkContractOrder,
+  parsePriceInput,
+  requestLimitIssues,
+  type ContractRuleIssue,
+} from '../lib/orderRules';
 import type { FnoOrderRow } from '../types';
 
 import { FieldLabel, IssueList, LotsStepper, Note, PriceField, SummaryLine } from './primitives';
@@ -95,6 +100,7 @@ function ModifyBody({
           today: '0000-00-00',
         }).filter((i) => i.field !== 'side' && i.field !== 'expiry')
       : [];
+    if (sizable) out.push(...requestLimitIssues(lots));
     const filledLots = c ? order.filledQuantity / c.lotSize : 0;
     if (sizable && c && lots < filledLots) {
       out.push({

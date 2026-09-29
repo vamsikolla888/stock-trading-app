@@ -4,6 +4,7 @@ import { tradingKeys } from '@/features/trading/hooks';
 import type { MstockConnectPayload } from '@/features/trading/types';
 
 import { adminApi, opsApi, recommendationAdminApi } from './api';
+import { mergeUserUpdate } from './lib/users';
 import type {
   AdminJobKind,
   BrokerUsageRange,
@@ -87,6 +88,8 @@ export function useRecentLogs(minLevel: number, live: boolean) {
     queryKey: adminKeys.logs(minLevel),
     queryFn: () => adminApi.recentLogs(minLevel, 300),
     staleTime: 5_000,
+    // Hundreds of lines with their details — not worth persisting for the next cold start.
+    gcTime: 5 * 60_000,
     refetchInterval: live ? 10_000 : false,
   });
 }
@@ -128,7 +131,7 @@ export function useUpdatePlatformUser() {
       adminApi.updateUser(userId, update),
     onSuccess: (updated) => {
       queryClient.setQueryData<PlatformUser[]>(adminKeys.users, (old) =>
-        old?.map((user) => (user.id === updated.id ? { ...user, ...updated } : user)),
+        old?.map((user) => (user.id === updated.id ? mergeUserUpdate(user, updated) : user)),
       );
       void queryClient.invalidateQueries({ queryKey: adminKeys.users });
     },

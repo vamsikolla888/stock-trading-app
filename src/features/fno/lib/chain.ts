@@ -8,6 +8,7 @@ import type {
   FnoOrderType,
   FnoPositionRow,
   FnoSide,
+  LiveOrder,
   LiveOrderStatus,
 } from '../types';
 
@@ -393,6 +394,46 @@ export const STATUS_TEXT: Partial<Record<LiveOrderStatus, string>> = {
 
 export function statusLabel(status: LiveOrderStatus): string {
   return status.replace(/_/g, ' ');
+}
+
+/**
+ * The explanation lines under an order receipt, each said once. The risk engine's `reason` IS
+ * its first failed check's detail (server live-risk-rules.ts), so listing both verbatim would
+ * print the same sentence twice (and give React two children with one key).
+ */
+export function receiptNotes(
+  order: Pick<
+    LiveOrder,
+    | 'status'
+    | 'riskDecision'
+    | 'rejectionReason'
+    | 'filledQuantity'
+    | 'averageFillPrice'
+    | 'brokerOrderId'
+  >,
+  formatFill: (filledQuantity: number, averagePrice: number) => string,
+): string[] {
+  const notes: string[] = [];
+  if (order.status === 'UNKNOWN') {
+    notes.push(
+      'Groww did not confirm in time. Do not place this order again — it resolves on its own once reconciled.',
+    );
+  }
+  const risk = order.riskDecision;
+  if (risk && !risk.approved) {
+    if (risk.reason) notes.push(risk.reason);
+    for (const check of risk.checks ?? [])
+      if (!check.passed && check.detail) notes.push(check.detail);
+  }
+  if (order.rejectionReason && order.status !== 'RISK_REJECTED') notes.push(order.rejectionReason);
+  if (
+    (order.status === 'FILLED' || order.status === 'PARTIALLY_FILLED') &&
+    order.averageFillPrice != null
+  ) {
+    notes.push(formatFill(order.filledQuantity, order.averageFillPrice));
+  }
+  if (order.brokerOrderId) notes.push(`Groww order ${order.brokerOrderId}`);
+  return [...new Set(notes.map((n) => n.trim()).filter(Boolean))];
 }
 
 /** Contract rows carry everything a ticket needs; a leg without one cannot be traded. */

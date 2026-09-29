@@ -18,6 +18,18 @@ export function accessProblemFromError(error: unknown): 'not-connected' | 'sessi
   return null;
 }
 
+/**
+ * The chain refused its `expiry` (422 VALIDATION on that field): the date is not a listed option
+ * expiry — it has passed, or only futures expire then. Retrying the same request cannot help.
+ */
+export function isUnlistedExpiryError(error: unknown): boolean {
+  return (
+    isApiError(error) &&
+    error.code === 'VALIDATION' &&
+    Object.prototype.hasOwnProperty.call(error.fieldErrors, 'expiry')
+  );
+}
+
 export function accessProblem(g: GrowwAccess | null | undefined): AccessProblem | null {
   if (!g || g.usable) return null;
   return g.reason;

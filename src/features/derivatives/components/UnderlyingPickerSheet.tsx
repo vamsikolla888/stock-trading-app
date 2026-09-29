@@ -128,6 +128,11 @@ export function UnderlyingPickerSheet({
           onRetry={() => void catalogue.refetch()}
         />
       ) : null}
+      {catalogue.isPending && !catalogue.isError ? (
+        <Text className="py-6 text-center text-[13px] text-ink-muted dark:text-ink-dark-muted">
+          Loading contracts…
+        </Text>
+      ) : null}
       {matches.map((u) => {
         const on = u.underlying === value;
         return (

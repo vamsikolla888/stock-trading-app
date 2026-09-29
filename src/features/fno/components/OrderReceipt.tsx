@@ -8,7 +8,7 @@ import { Text, View } from 'react-native';
 import { formatINR, formatQuantity } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 
-import { isTerminalStatus, STATUS_TEXT, statusLabel } from '../lib/chain';
+import { isTerminalStatus, receiptNotes, STATUS_TEXT, statusLabel } from '../lib/chain';
 import { lotsLabel } from '../lib/format';
 import type { LiveOrder, LiveOrderStatus } from '../types';
 
@@ -42,27 +42,10 @@ export function OrderReceipt({ order, live }: { order: LiveOrder; live?: boolean
     },
     danger: { Icon: CircleX, color: colors.danger, bg: 'bg-danger-wash dark:bg-danger-wash-dark' },
   }[tone];
-  const notes: string[] = [];
-  if (order.status === 'UNKNOWN') {
-    notes.push(
-      'Groww did not confirm in time. Do not place this order again — it resolves on its own once reconciled.',
-    );
-  }
-  if (order.riskDecision && !order.riskDecision.approved) {
-    if (order.riskDecision.reason) notes.push(order.riskDecision.reason);
-    for (const check of order.riskDecision.checks.filter((c) => !c.passed))
-      notes.push(check.detail);
-  }
-  if (order.rejectionReason && order.status !== 'RISK_REJECTED') notes.push(order.rejectionReason);
-  if (
-    (order.status === 'FILLED' || order.status === 'PARTIALLY_FILLED') &&
-    order.averageFillPrice != null
-  ) {
-    notes.push(
-      `${formatQuantity(order.filledQuantity)} qty filled at ${formatINR(order.averageFillPrice)}`,
-    );
-  }
-  if (order.brokerOrderId) notes.push(`Groww order ${order.brokerOrderId}`);
+  const notes = receiptNotes(
+    order,
+    (filled, average) => `${formatQuantity(filled)} qty filled at ${formatINR(average)}`,
+  );
 
   return (
     <View accessibilityLiveRegion="polite" className="items-center gap-3 pt-4">

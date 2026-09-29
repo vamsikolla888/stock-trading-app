@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { cn } from '@/lib/utils/cn';
+import { shadows } from '@/theme/tokens';
 
 export interface TabItem<K extends string> {
   key: K;
@@ -52,7 +53,15 @@ export function Tabs<K extends string>({ items, value, onChange, className }: Se
   );
 }
 
-/** Pill segmented control (Delivery / Intraday, chart ranges). */
+/**
+ * Pill segmented control (Delivery / Intraday, chart ranges, the Appearance picker).
+ *
+ * The selected pill's shadow is a style, never a `shadow-*` class: NativeWind compiles
+ * shadow classes to CSS variables, and a component that gains variables after its first
+ * render gets "upgraded" (remounted) — in development that path serialises every prop,
+ * reaches React Navigation's context and throws "Couldn't find a navigation context",
+ * which is exactly what tapping Light/Dark did in Settings.
+ */
 export function SegmentedControl<K extends string>({
   items,
   value,
@@ -75,9 +84,10 @@ export function SegmentedControl<K extends string>({
             accessibilityRole="tab"
             accessibilityState={{ selected }}
             onPress={() => onChange(item.key)}
+            style={selected ? shadows.sm : undefined}
             className={cn(
               'h-9 flex-1 items-center justify-center rounded-lg',
-              selected && 'bg-surface shadow-sm dark:bg-surface-dark',
+              selected && 'bg-surface dark:bg-surface-dark',
             )}
           >
             <Text

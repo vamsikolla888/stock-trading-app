@@ -115,8 +115,8 @@ export function PayoffChart({
                   strokeLinejoin="round"
                 />
               ) : null}
-              {geo.breakEvens.map((b) => (
-                <React.Fragment key={b.value}>
+              {geo.breakEvens.map((b, i) => (
+                <React.Fragment key={`${b.value}:${i}`}>
                   <Line
                     x1={b.x}
                     x2={b.x}

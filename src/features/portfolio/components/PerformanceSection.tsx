@@ -78,7 +78,10 @@ function HistoryCard({ scope }: { scope: PortfolioHistoryScope }) {
       ) : (
         <View style={{ opacity: history.isPlaceholderData ? 0.6 : 1 }}>
           <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
-            {shown ? formatDay(istDateOf(new Date(shown.time).toISOString())) : ''}
+            {/* toISOString throws on an invalid date — never format a time that isn't one. */}
+            {shown && Number.isFinite(shown.time)
+              ? formatDay(istDateOf(new Date(shown.time).toISOString()))
+              : ''}
           </Text>
           <Text className="mt-0.5 text-xl font-bold text-ink dark:text-ink-dark" style={NUMBERS}>
             {shown ? mask(formatINR(shown.value)) : '—'}

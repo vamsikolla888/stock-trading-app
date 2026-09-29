@@ -163,25 +163,29 @@ export default function WatchlistsScreen() {
 
   const confirmDelete = () => {
     if (!active || readOnly) return;
+    const list = active;
     setSheet(null);
-    Alert.alert(
-      `Delete “${active.name}”?`,
-      'The list and its tracking history are gone for good.',
-      [
-        { text: 'Keep it', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () =>
-            remove.mutate(active.id, {
-              onSuccess: () => {
-                setSelectedId(null);
-                toast.success('List deleted', active.name);
-              },
-              onError: (error) => toast.error('Couldn’t delete the list', getErrorMessage(error)),
-            }),
-        },
-      ],
+    // iOS won't present the alert while the actions sheet is still animating away.
+    afterSheetClose(() =>
+      Alert.alert(
+        `Delete “${list.name}”?`,
+        'The list and its tracking history are gone for good.',
+        [
+          { text: 'Keep it', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () =>
+              remove.mutate(list.id, {
+                onSuccess: () => {
+                  setSelectedId(null);
+                  toast.success('List deleted', list.name);
+                },
+                onError: (error) => toast.error('Couldn’t delete the list', getErrorMessage(error)),
+              }),
+          },
+        ],
+      ),
     );
   };
 
@@ -464,7 +468,9 @@ export default function WatchlistsScreen() {
           onShare={share}
           onRename={() => {
             rename.reset();
-            setSheet('rename');
+            // One RN Modal at a time: the name sheet presents once this one has gone.
+            setSheet(null);
+            afterSheetClose(() => setSheet('rename'));
           }}
           onDelete={confirmDelete}
         />

@@ -23,6 +23,15 @@ export const WORKING_AT_BROKER: ReadonlySet<LiveOrderStatus> = new Set([
 ]);
 
 /**
+ * An equity order — the only kind this app's equity ticket and modify sheet understand. An
+ * F&O order's quantity is in LOTS on the server while its fills are in exchange units, so
+ * editing one here would be read at the wrong scale; those are modified from the F&O tab.
+ */
+export function isEquityOrder(order: Pick<LiveOrder, 'category'>): boolean {
+  return order.category === 'equity_delivery' || order.category === 'equity_intraday';
+}
+
+/**
  * The open order for this stock at this broker, if any. The server allows one working order
  * per stock per broker, so the ticket points at it instead of letting a second one fail.
  */

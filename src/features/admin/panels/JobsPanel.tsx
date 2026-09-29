@@ -207,7 +207,9 @@ function JobHistory() {
   return (
     <ListCard>
       {logs.data.map((log, index) => (
-        <View key={`${log.queue}-${log.id}`}>
+        // The server reads each queue's states one after another, so a job that moves on
+        // mid-read can be listed twice — the index keeps the key unique.
+        <View key={`${log.queue}-${log.id}-${index}`}>
           {index > 0 ? <RowDivider /> : null}
           <View className="gap-1.5 px-3.5 py-3">
             <View className="flex-row items-center gap-2">

@@ -1,6 +1,6 @@
 import ChartCandlestick from 'lucide-react-native/icons/chart-candlestick';
 import TrendingUpIcon from 'lucide-react-native/icons/trending-up';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { CandlestickChart } from '@/components/market/CandlestickChart';
@@ -10,13 +10,15 @@ import { RangeSelector } from '@/components/ui/Tabs';
 import { useCandles } from '@/features/market/hooks';
 import {
   CHART_RANGES,
+  candlesErrorMessage,
   candlesToPoints,
   formatPointTime,
+  sessionCandles,
   type ChartRange,
 } from '@/features/market/lib/chartRanges';
+import type { Candle } from '@/features/market/types';
 import { formatINR, formatSignedINR, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
-import { getErrorMessage } from '@/types/api';
 
 const RANGE_LABEL: Record<ChartRange, string> = {
   '1D': 'today',
@@ -54,8 +56,19 @@ export function PriceChartSection({
   const [scrub, setScrub] = useState<ChartPoint | null>(null);
   const candles = useCandles(symbol, exchange, range);
 
-  const candleList = candles.data ?? [];
+  // Both chart types draw the same bars: on 1D only the latest session, never the tail of
+  // the previous day that the 80-bar request also returns.
+  const candleList = useMemo(
+    () => sessionCandles(candles.data ?? [], range),
+    [candles.data, range],
+  );
   const points = useMemo(() => candlesToPoints(candleList, range), [candleList, range]);
+  // Candle times are unix seconds; chart points (and the scrub label) are epoch ms.
+  const onCandleScrub = useCallback(
+    (candle: Candle | null) =>
+      setScrub(candle ? { time: candle.time * 1000, value: candle.close } : null),
+    [],
+  );
   const baseline = range === '1D' ? prevClose : null;
   const reference = range === '1D' ? prevClose : (points[0]?.value ?? null);
 
@@ -127,7 +140,7 @@ export function PriceChartSection({
               <CandlestickChart
                 candles={candleList}
                 baseline={baseline}
-                onScrub={(c) => setScrub(c ? { time: c.time, value: c.close } : null)}
+                onScrub={onCandleScrub}
                 height={190}
               />
             ) : (
@@ -138,7 +151,7 @@ export function PriceChartSection({
           ) : (
             <Text className="text-center text-[13px] text-ink-muted dark:text-ink-dark-muted">
               {candles.error
-                ? getErrorMessage(candles.error)
+                ? candlesErrorMessage(candles.error)
                 : 'No price history for this range yet.'}
             </Text>
           )}

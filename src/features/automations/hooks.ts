@@ -1,6 +1,9 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import { appConfig } from '@/config/app';
+import { isApiError } from '@/types/api';
+
 import { workflowsApi } from './api';
 import type {
   ExecutionSummary,
@@ -18,12 +21,24 @@ export const workflowKeys = {
     ['workflows', 'detail', id, 'execution', executionId] as const,
 };
 
+/**
+ * A server with no n8n configured answers 503 DEPENDENCY_UNAVAILABLE — a standing state, not
+ * an outage, so retrying it only delays the "not connected" screen. Other failures retry as
+ * the app's default does (connectivity and 5xx only).
+ */
+function retryUnlessUnconfigured(failureCount: number, error: unknown): boolean {
+  if (isApiError(error) && error.code === 'DEPENDENCY_UNAVAILABLE') return false;
+  if (isApiError(error) && error.status !== 0 && error.status < 500) return false;
+  return failureCount < appConfig.query.retry;
+}
+
 /** Poll faster while a run the user started is being watched; otherwise refresh on focus. */
 export function useWorkflows(options: { pollMs?: number | false } = {}) {
   return useQuery({
     queryKey: workflowKeys.list,
     queryFn: workflowsApi.list,
     staleTime: 30_000,
+    retry: retryUnlessUnconfigured,
     refetchInterval: options.pollMs ?? false,
   });
 }
@@ -34,6 +49,7 @@ export function useWorkflow(id: string | undefined) {
     queryFn: () => workflowsApi.detail(id!),
     enabled: Boolean(id),
     staleTime: 30_000,
+    retry: retryUnlessUnconfigured,
   });
 }
 
@@ -85,6 +101,9 @@ export function useWorkflowExecution(id: string | undefined, executionId: string
     queryFn: () => workflowsApi.execution(id!, executionId!),
     enabled: Boolean(id && executionId),
     staleTime: 60_000,
+    // A run's input/output can be megabytes of n8n JSON. Dropping it soon after the row
+    // closes keeps it out of the persisted cache that every cold start has to parse.
+    gcTime: 5 * 60_000,
   });
 }
 

@@ -29,7 +29,8 @@ const TOKEN_PATTERN = /^[A-Za-z0-9_-]{20,512}$/;
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { token } = useLocalSearchParams<{ token?: string }>();
+  const params = useLocalSearchParams<{ token?: string | string[] }>();
+  const token = typeof params.token === 'string' ? params.token : undefined;
   const resetPassword = useResetPassword();
   const confirmRef = useRef<TextInput>(null);
   const [banner, setBanner] = useState<(ServerErrorBanner & { linkExpired?: boolean }) | null>(

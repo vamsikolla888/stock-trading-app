@@ -25,7 +25,7 @@ describe('NAV_GROUPS', () => {
       NAV_GROUPS.map((group) => [group.label, group.items.map((item) => item.label)]),
     );
     expect(labels).toEqual({
-      Markets: ['Today', 'Strong picks', 'Explore', 'Market heatmap', 'News'],
+      Markets: ['Today', 'Daily Brief', 'Strong picks', 'Explore', 'Market heatmap', 'News'],
       Trade: ['Trade', 'mStock portfolio', 'Groww portfolio', 'Watchlists', 'Paper trading'],
       'F&O': ['Explore', 'Positions', 'Orders', 'Paper trading'],
       Intelligence: [

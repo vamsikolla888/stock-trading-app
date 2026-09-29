@@ -165,6 +165,13 @@ export interface PlacePaperFnoOrderInput {
   lots: number;
 }
 
+/** What the chain currently says about a ticket's contract (refreshed by the parent). */
+export interface PaperTicketQuote {
+  lastPrice: number | null;
+  impliedVolatility: number | null;
+  delta: number | null;
+}
+
 export interface PaperChainQuery {
   expiry?: string | null;
   /** Strikes either side of ATM, 1–50. */
@@ -297,3 +304,6 @@ export interface FnoMover {
   changePct: number | null;
   volume?: number | null;
 }
+
+/** The three peer screens of the paper book, as on the web (/fno/paper, /positions, /orders). */
+export type PaperView = 'explore' | 'positions' | 'orders';

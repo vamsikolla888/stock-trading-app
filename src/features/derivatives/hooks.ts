@@ -6,6 +6,7 @@ import { livePriceInterval } from '@/lib/utils/market';
 import { isApiError } from '@/types/api';
 
 import { derivativesApi } from './api';
+import { PAPER_ORDERS_LIMIT } from './lib/book';
 import type {
   BuildStrategyInput,
   PaperChainQuery,
@@ -92,7 +93,7 @@ export function usePaperBook() {
   });
 }
 
-export function usePaperOrders(limit = 100, enabled = true) {
+export function usePaperOrders(limit = PAPER_ORDERS_LIMIT, enabled = true) {
   return useQuery({
     queryKey: derivativesKeys.orders(limit),
     queryFn: ({ signal }) => derivativesApi.orders(limit, signal),
@@ -118,21 +119,19 @@ export function useFnoMovers(kind: 'gainers' | 'losers' | 'volume', limit: numbe
 }
 
 /**
- * Every mutation invalidates the whole `derivatives` tree — an order moves margin, positions,
- * net greeks and the order log in one write — and `paper`, whose cash views share the account.
+ * An order moves margin, positions, net greeks and the order log in one write, so every
+ * mutation refreshes the book and the log. Deliberately NOT:
+ *   - the chain — a paper fill does not move the market, and a chain refetch is ~100 quote
+ *     lookups against the chain's own rate bucket;
+ *   - `paper` — the F&O pool is its own capital, and no /paper-trading endpoint reads it.
+ * Fired, not awaited: the ticket shows its receipt at once and the book catches up behind it.
  */
 function useInvalidatePaper() {
   const qc = useQueryClient();
-  return useCallback(
-    () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: derivativesKeys.book() }),
-        qc.invalidateQueries({ queryKey: [...derivativesKeys.all, 'orders'] }),
-        qc.invalidateQueries({ queryKey: [...derivativesKeys.all, 'chain'] }),
-        qc.invalidateQueries({ queryKey: ['paper'] }),
-      ]),
-    [qc],
-  );
+  return useCallback(() => {
+    void qc.invalidateQueries({ queryKey: derivativesKeys.book() });
+    void qc.invalidateQueries({ queryKey: [...derivativesKeys.all, 'orders'] });
+  }, [qc]);
 }
 
 export function usePlacePaperOrder() {

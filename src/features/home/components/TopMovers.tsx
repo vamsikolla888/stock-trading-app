@@ -134,7 +134,13 @@ export function TopMovers() {
       {body}
       <Pressable
         accessibilityRole="button"
-        onPress={() => router.push({ pathname: '/movers', params: { kind, cap } })}
+        onPress={() =>
+          router.push(
+            kind === 'volume'
+              ? { pathname: '/most-traded', params: { cap } }
+              : { pathname: '/movers', params: { kind, cap } },
+          )
+        }
         className="mt-3 flex-row items-center justify-center gap-1 py-2 active:opacity-60"
       >
         <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">

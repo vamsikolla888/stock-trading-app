@@ -28,13 +28,20 @@ import { formatProfitFactor } from '@/features/strategies/lib/ranking';
 import type { StrategyDetail } from '@/features/strategies/types';
 import { formatNumber, formatPercent, formatSignedPercent } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
-import { getErrorMessage } from '@/types/api';
+import { getErrorMessage, isApiError } from '@/types/api';
+
+// A render failure here shows the error page with a retry, not a crashed app.
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 export default function StrategyDetailScreen() {
   const router = useRouter();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
-  const id = typeof rawId === 'string' ? rawId : '';
+  const id = typeof rawId === 'string' ? rawId.trim() : '';
   const query = useStrategy(id || undefined);
+  // No id (a malformed link) never fetches, and a deleted strategy — say, one the Live board
+  // still points at — answers 404: both deserve "not found", not an endless skeleton or a raw
+  // server message.
+  const notFound = id === '' || (isApiError(query.error) && query.error.status === 404);
   const indices = useIndexCatalog();
   const remove = useDeleteStrategy();
 
@@ -46,7 +53,15 @@ export default function StrategyDetailScreen() {
   const strategy = query.data;
   const inFlight = strategy?.status === 'queued' || strategy?.status === 'running';
   const status = useBacktestStatus(id, queuedHere || inFlight);
-  const running = run.isPending || inFlight || status.data?.running === true;
+  // The queue is the authority once it has answered (as on the web): a strategy left "queued"
+  // by a job the worker lost must not lock the Run button forever. Until it answers — or
+  // while a poll is in flight — the strategy's own status and this screen's click stand in.
+  const queueAnswered = status.data !== undefined && !status.isFetching;
+  const running =
+    run.isPending || (queueAnswered ? status.data?.running === true : inFlight || queuedHere);
+  // Not while the detail is refetching: a finished job invalidates it, and until the new read
+  // lands the old "running" status would read as stuck for a moment.
+  const stuck = inFlight && queueAnswered && !running && !query.isFetching;
 
   const startBacktest = () =>
     run.mutate(undefined, {
@@ -196,10 +211,10 @@ export default function StrategyDetailScreen() {
   return (
     <StackScreen
       title={strategy?.name ?? 'Strategy'}
-      subtitle={strategy ? statusLine(strategy) : undefined}
+      subtitle={strategy ? statusLine(strategy, stuck) : undefined}
       onRefresh={refresh}
       right={
-        strategy ? (
+        strategy && !notFound ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Edit rules"
@@ -214,7 +229,7 @@ export default function StrategyDetailScreen() {
         ) : undefined
       }
       footer={
-        strategy ? (
+        strategy && !notFound ? (
           <View className="border-t border-line bg-canvas px-5 py-3 dark:border-line-dark dark:bg-canvas-dark">
             <Button
               label={
@@ -229,7 +244,13 @@ export default function StrategyDetailScreen() {
         ) : undefined
       }
     >
-      {query.isPending ? (
+      {notFound ? (
+        <InlineEmpty
+          title="Strategy not found"
+          message="It may have been deleted, or the link is out of date. Strategies are private, so another account's link won't open here either."
+          action={{ label: 'Go to strategies', onPress: () => router.replace('/intel/strategies') }}
+        />
+      ) : query.isPending ? (
         <ListSkeleton rows={5} />
       ) : query.error || !strategy ? (
         <InlineError
@@ -241,6 +262,7 @@ export default function StrategyDetailScreen() {
         <StrategyBody
           strategy={strategy}
           running={running}
+          stuck={stuck}
           indexLabels={indices.data ?? []}
           onRun={startBacktest}
           onEdit={startEditing}
@@ -252,7 +274,8 @@ export default function StrategyDetailScreen() {
   );
 }
 
-function statusLine(strategy: StrategyDetail): string {
+function statusLine(strategy: StrategyDetail, stuck: boolean): string {
+  if (stuck) return "Last backtest didn't finish";
   if (strategy.status === 'queued' || strategy.status === 'running') return 'Backtest running';
   if (strategy.status === 'never-run') return 'Never backtested';
   if (strategy.status === 'failed') return 'Last backtest failed';
@@ -262,6 +285,7 @@ function statusLine(strategy: StrategyDetail): string {
 function StrategyBody({
   strategy,
   running,
+  stuck,
   indexLabels,
   onRun,
   onEdit,
@@ -270,6 +294,8 @@ function StrategyBody({
 }: {
   strategy: StrategyDetail;
   running: boolean;
+  /** Marked queued/running, but the queue no longer holds the job. */
+  stuck: boolean;
   indexLabels: Parameters<typeof parameterRows>[2];
   onRun: () => void;
   onEdit: () => void;
@@ -359,6 +385,14 @@ function StrategyBody({
           className="mt-4"
           message="Replaying these rules across every stock with enough daily history — this takes a little while. You can leave this screen."
         />
+      ) : stuck ? (
+        <Banner
+          tone="warning"
+          className="mt-4"
+          title="The last backtest didn't finish"
+          message="It is marked as running, but the job is no longer in the queue — the worker may have restarted. Run it again."
+          action={{ label: 'Run backtest', onPress: onRun }}
+        />
       ) : strategy.status === 'failed' && strategy.lastError ? (
         <Banner
           tone="error"
@@ -385,12 +419,13 @@ function StrategyBody({
       {runData ? (
         <>
           <Section title="Equity curve">
-            <EquityCurveCard points={runData.equityCurve} />
+            <EquityCurveCard points={runData.equityCurve ?? []} />
           </Section>
 
           <Section
             title="Recent trades"
-            note={`${trades.length} of ${formatNumber(runData.trades.length, 0)}`}
+            // The run stores only the newest 200 trades; totalTrades is the true count.
+            note={`${trades.length} of ${formatNumber(m?.totalTrades ?? runData.trades.length, 0)}`}
           >
             {trades.length === 0 ? (
               <InlineEmpty title="No trades" message="This run produced no trades." />
@@ -468,7 +503,7 @@ function StrategyBody({
         </Card>
       </Section>
 
-      {analysis && analysis.splits.length === 2 ? (
+      {analysis?.splits?.length === 2 ? (
         <Section title="Held up out of sample?">
           <Card className="py-1.5">
             {analysis.splits.map((split, index) => (

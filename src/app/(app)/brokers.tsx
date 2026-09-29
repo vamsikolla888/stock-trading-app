@@ -15,6 +15,8 @@ import type { BrokerCatalogEntry, BrokerConnectionSummary } from '@/features/tra
 import { toast } from '@/lib/utils/toast';
 import { getErrorMessage } from '@/types/api';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 type Chip = { label: string; variant: 'success' | 'warning' | 'danger' | 'neutral' };
 
 // Same mapping as the web's BrokerConnect cards.
@@ -40,7 +42,7 @@ function BrokerCard({
   connection?: BrokerConnectionSummary;
 }) {
   const router = useRouter();
-  const { disconnect, reconnectMstock } = useBrokerMutations();
+  const { disconnect, reconnect: reconnectBroker } = useBrokerMutations();
   const chip = chipFor(connection);
   const isMstock = broker.auth === 'mstock-login';
   const capabilities = [
@@ -55,13 +57,20 @@ function BrokerCard({
       params: { broker: broker.id, ...(step ? { step } : {}) },
     });
 
-  const reconnect = () => {
-    if (!isMstock) return openConnect();
-    reconnectMstock.mutate(undefined, {
-      onSuccess: () => openConnect('verify'),
-      onError: (error) => toast.error('Couldn’t start reconnect', getErrorMessage(error)),
+  // Both reuse the stored credentials: mStock sends the day's code (verify next); an
+  // API-key broker (Groww) re-mints its token and is connected straight away. If that
+  // fails — a revoked key, a changed secret — the form takes new credentials.
+  const reconnect = () =>
+    reconnectBroker.mutate(broker.id, {
+      onSuccess: (result) => {
+        if (result.status === 'connected') toast.success(`${broker.label} reconnected`);
+        else openConnect('verify');
+      },
+      onError: (error) => {
+        toast.error('Couldn’t reconnect', getErrorMessage(error));
+        if (!isMstock) openConnect();
+      },
     });
-  };
 
   const confirmDisconnect = () =>
     Alert.alert(
@@ -109,14 +118,14 @@ function BrokerCard({
       <View className="mt-3 flex-row flex-wrap gap-2">
         {!connection ? (
           <Button label="Connect" size="sm" onPress={() => openConnect()} />
-        ) : connection.status === 'pending_verification' ? (
+        ) : connection.status === 'pending_verification' && isMstock ? (
           <Button label="Enter code" size="sm" onPress={() => openConnect('verify')} />
         ) : connection.status !== 'connected' || isMstock ? (
           <Button
             label={connection.status === 'connected' ? 'Refresh session' : 'Reconnect'}
             size="sm"
             variant={connection.status === 'connected' ? 'outline' : 'primary'}
-            loading={reconnectMstock.isPending}
+            loading={reconnectBroker.isPending}
             onPress={reconnect}
           />
         ) : null}

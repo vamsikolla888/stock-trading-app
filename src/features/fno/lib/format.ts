@@ -173,7 +173,12 @@ export function venueOf(exchange: string): string {
   return 'NSE';
 }
 
-/** "2 lots" / "1 lot". */
+/**
+ * "2 lots" / "1 lot". Groww can report a quantity that is not a whole number of the current
+ * lot (the lot size was revised) — that reads "1.5 lots", never "1.4999999999999998 lots".
+ */
 export function lotsLabel(lots: number): string {
-  return `${lots} lot${Math.abs(lots) === 1 ? '' : 's'}`;
+  if (!isNum(lots)) return DASH;
+  const shown = Number.isInteger(lots) ? String(lots) : String(Math.round(lots * 100) / 100);
+  return `${shown} lot${Math.abs(lots) === 1 ? '' : 's'}`;
 }

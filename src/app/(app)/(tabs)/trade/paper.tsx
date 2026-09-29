@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 
-import { InlineEmpty, InlineError } from '@/components/common/InlineError';
+import { InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
 import { GroupScreen } from '@/components/navigation/GroupScreen';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
@@ -25,6 +25,8 @@ import {
 } from '@/features/paper/hooks';
 import { paperKeys } from '@/features/paper/keys';
 import type { CashSegment, PaperOrderStatus } from '@/features/paper/types';
+import { afterSheetClose } from '@/features/trading/components/Sheet';
+import { StockSearchSheet, type StockPick } from '@/features/trading/components/StockSearchSheet';
 import { ticketHref } from '@/features/trading/lib/ticket';
 import { useNow } from '@/hooks/useNow';
 import {
@@ -73,6 +75,8 @@ export default function PaperTradingScreen() {
   const now = useNow();
   const [segment, setSegment] = useState<CashSegment>('equity');
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  /** The pool a new paper order is being searched for; null while the search is closed. */
+  const [searchFor, setSearchFor] = useState<CashSegment | null>(null);
 
   const { profiles, active, profileId, select } = useActivePaperProfile();
   const overview = usePaperSegments(profileId);
@@ -107,6 +111,29 @@ export default function PaperTradingScreen() {
     [router, profileId],
   );
 
+  // New paper orders start from an in-place search, never the app-wide search: a stock's
+  // own page opens the ticket in LIVE mode when a broker is connected, and a paper screen
+  // must not hand the user a real-money ticket.
+  const quickPicks: StockPick[] = positions
+    .filter((position) => position.exchange === 'NSE' || position.exchange === 'BSE')
+    .map((position) => ({
+      exchange: position.exchange as 'NSE' | 'BSE',
+      symbol: position.symbol,
+      companyName: position.companyName,
+    }));
+  const pickStock = (pick: StockPick) => {
+    const pool = searchFor ?? segment;
+    setSearchFor(null);
+    afterSheetClose(() =>
+      openTrade({
+        symbol: pick.symbol,
+        exchange: pick.exchange,
+        side: 'BUY',
+        product: pool === 'intraday' ? 'intraday' : 'delivery',
+      }),
+    );
+  };
+
   return (
     <>
       <GroupScreen
@@ -123,7 +150,7 @@ export default function PaperTradingScreen() {
               label="Place a paper order"
               size="lg"
               fullWidth
-              onPress={() => router.push('/search')}
+              onPress={() => setSearchFor(segment)}
             />
           </View>
         }
@@ -228,7 +255,7 @@ export default function PaperTradingScreen() {
                 profileId={profileId}
                 now={now}
                 onTrade={(params) => openTrade(params)}
-                onNewOrder={(_seg) => router.push('/search')}
+                onNewOrder={setSearchFor}
               />
             ) : (
               <PaperPositionsSection
@@ -237,13 +264,22 @@ export default function PaperTradingScreen() {
                 profileId={profileId}
                 now={now}
                 onTrade={(params) => openTrade(params)}
-                onNewOrder={(_seg) => router.push('/search')}
+                onNewOrder={setSearchFor}
               />
             )}
           </View>
         ) : null}
 
         {/* ── Order log ── */}
+        {orders.error && !orders.data ? (
+          <Section title="Order log">
+            <InlineError
+              what="your paper orders"
+              error={orders.error}
+              onRetry={() => void orders.refetch()}
+            />
+          </Section>
+        ) : null}
         {orders.data && orders.data.length > 0 ? (
           <Section title="Order log" note={`last ${Math.min(orders.data.length, 20)}`}>
             <ListCard>
@@ -265,7 +301,7 @@ export default function PaperTradingScreen() {
                           : formatINR(order.limitPrice)}
                         {order.note ? ` · ${order.note}` : ''}
                       </Text>
-                      {order.realisedPnl !== null ? (
+                      {order.realisedPnl != null ? (
                         <ChangeText value={order.realisedPnl} className="mt-0.5 text-xs">
                           {formatSignedINR(order.realisedPnl)} realised
                         </ChangeText>
@@ -279,7 +315,7 @@ export default function PaperTradingScreen() {
           </Section>
         ) : null}
 
-        {overview.data?.caveats.map((caveat) => (
+        {(overview.data?.caveats ?? []).map((caveat) => (
           <Text
             key={caveat}
             className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint"
@@ -292,6 +328,17 @@ export default function PaperTradingScreen() {
           Paper orders use real market prices but no real money or broker is involved.
         </Text>
       </GroupScreen>
+
+      <StockSearchSheet
+        visible={searchFor !== null}
+        title="New paper order"
+        subtitle={`${searchFor === 'intraday' ? 'Intraday' : 'Delivery'} · virtual cash`}
+        onClose={() => setSearchFor(null)}
+        onPick={pickStock}
+        quickPicks={quickPicks}
+        quickPicksTitle="In this book"
+        actionLabel="Trade"
+      />
 
       {profileSheetOpen && profiles.data ? (
         <ProfileSheet

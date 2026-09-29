@@ -7,7 +7,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import type { IconComponent } from '@/components/ui/icon';
 import { IconTile, type IconTone } from '@/components/ui/IconTile';
-import { runStatus, TRIGGER_LABEL } from '@/features/automations/lib/workflows';
+import { runStatus, TRIGGER_LABEL, triggerKind } from '@/features/automations/lib/workflows';
 import type { WorkflowSummary, WorkflowTriggerType } from '@/features/automations/types';
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { relativeTime } from '@/features/settings/lib/time';
@@ -31,9 +31,10 @@ export function WorkflowRow({
 }) {
   const { colors } = useTheme();
   const status = runStatus(workflow.lastRunStatus);
-  const trigger = TRIGGER_ICON[workflow.triggerType];
+  const kind = triggerKind(workflow.triggerType);
+  const trigger = TRIGGER_ICON[kind];
   const meta = [
-    TRIGGER_LABEL[workflow.triggerType],
+    TRIGGER_LABEL[kind],
     workflow.active ? null : 'Inactive',
     workflow.lastRunAt ? relativeTime(workflow.lastRunAt, now) : null,
   ]

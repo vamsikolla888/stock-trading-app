@@ -82,12 +82,14 @@ export default function AutomationsScreen() {
     );
   } else if (notConfigured) {
     body = (
+      // The server answers DEPENDENCY_UNAVAILABLE both when n8n isn't configured and when
+      // its circuit breaker is open (n8n not responding), so the copy covers both.
       <InlineEmpty
-        title="Automations aren’t connected"
+        title="Automations aren’t available"
         message={
           isAdmin
-            ? 'The server has no n8n instance configured. Set N8N_BASE_URL and N8N_API_KEY on the server, then pull to refresh.'
-            : 'The server isn’t connected to an automation engine yet. An administrator can set it up.'
+            ? 'The server can’t reach n8n — either N8N_BASE_URL and N8N_API_KEY aren’t set, or n8n isn’t responding. Pull to refresh to try again.'
+            : 'The automation engine isn’t reachable right now. Pull to refresh to try again, or ask an administrator.'
         }
       />
     );

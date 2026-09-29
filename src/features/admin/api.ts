@@ -38,6 +38,8 @@ import type {
 
 const OPS_TIMEOUT_MS = 8_000;
 const CATALOG_TIMEOUT_MS = 120_000;
+/** The connection test drives the paired Chrome twice (open a page, read it), up to 30s each. */
+const BROWSER_TEST_TIMEOUT_MS = 75_000;
 
 /**
  * GET /health and /ready live OUTSIDE /api/v1 and need no token, so they bypass the API
@@ -176,6 +178,8 @@ export const adminApi = {
   async testBrowserResearch(): Promise<BrowserResearchTestResult> {
     const { data } = await apiClient.post<BrowserResearchTestResult>(
       '/admin/browser-research/test',
+      undefined,
+      { timeout: BROWSER_TEST_TIMEOUT_MS },
     );
     return data;
   },

@@ -55,6 +55,8 @@ function ConvictionBars({ value }: { value: number }) {
 /** All three segments, qualified or not — "not for intraday" is information too. */
 function SegmentChips({ pick }: { pick: StrongPick }) {
   const [open, setOpen] = useState(false);
+  // A pick published before segments were judged has no verdicts to show.
+  if (pick.segmentVerdicts.length === 0) return null;
   return (
     <>
       <Pressable

@@ -11,13 +11,19 @@ interface BiometricResult {
 export function useBiometricAuth() {
   const [isChecking, setIsChecking] = useState(false);
 
+  // Both resolve rather than reject: callers run them from switch and button handlers,
+  // where a rejected native call would surface as an unhandled promise error.
   const isAvailable = useCallback(async (): Promise<boolean> => {
     if (!env.enableBiometrics) return false;
-    const [hasHardware, isEnrolled] = await Promise.all([
-      LocalAuthentication.hasHardwareAsync(),
-      LocalAuthentication.isEnrolledAsync(),
-    ]);
-    return hasHardware && isEnrolled;
+    try {
+      const [hasHardware, isEnrolled] = await Promise.all([
+        LocalAuthentication.hasHardwareAsync(),
+        LocalAuthentication.isEnrolledAsync(),
+      ]);
+      return hasHardware && isEnrolled;
+    } catch {
+      return false;
+    }
   }, []);
 
   const authenticate = useCallback(async (promptMessage = 'Sign in'): Promise<BiometricResult> => {
@@ -29,6 +35,8 @@ export function useBiometricAuth() {
         disableDeviceFallback: false,
       });
       return result.success ? { success: true } : { success: false, error: result.error };
+    } catch {
+      return { success: false, error: 'unknown' };
     } finally {
       setIsChecking(false);
     }

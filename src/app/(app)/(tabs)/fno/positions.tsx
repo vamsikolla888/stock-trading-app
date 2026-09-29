@@ -76,10 +76,14 @@ export default function FnoPositionsScreen() {
     [router],
   );
 
-  // The exit ticket reads the latest refresh of the same line.
+  // The exit ticket reads the latest refresh of the same line (exchange, symbol and product —
+  // the server matches an exit on all three).
   const exitingLive = exiting
     ? (data?.positions.find(
-        (p) => p.tradingSymbol === exiting.tradingSymbol && p.product === exiting.product,
+        (p) =>
+          p.exchange === exiting.exchange &&
+          p.tradingSymbol === exiting.tradingSymbol &&
+          p.product === exiting.product,
       ) ?? exiting)
     : null;
 

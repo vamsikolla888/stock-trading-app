@@ -16,6 +16,7 @@ import {
   APPROVAL,
   describeUserChange,
   filterUsers,
+  mergeUserUpdate,
   ROLE_LABEL,
   sortUsers,
   userCounts,
@@ -187,11 +188,13 @@ export function UsersPanel() {
         update.mutate(
           { userId: user.id, update: next },
           {
-            onSuccess: (saved) =>
+            onSuccess: (saved) => {
+              const merged = mergeUserUpdate(user, saved);
               toast.success(
                 'User updated',
-                `${saved.email} · ${APPROVAL[saved.approvalStatus]?.label ?? saved.approvalStatus}`,
-              ),
+                `${merged.email} · ${APPROVAL[merged.approvalStatus]?.label ?? merged.approvalStatus}`,
+              );
+            },
             onError: (error) => toast.error('Couldn’t update this user', getErrorMessage(error)),
           },
         ),

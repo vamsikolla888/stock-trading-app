@@ -391,9 +391,10 @@ function GenerationResult({
             {kind === 'screener' ? 'screeners' : 'strategies'}
           </Text>
           <View className="gap-2.5">
-            {kept.map((candidate) => (
+            {kept.map((candidate, index) => (
+              // Names come from the model and can repeat — the index keeps keys unique.
               <View
-                key={candidate.name}
+                key={`${index}-${candidate.name}`}
                 className="rounded-card border border-line p-3 dark:border-line-dark"
               >
                 <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
@@ -406,9 +407,9 @@ function GenerationResult({
                     />
                   </View>
                 ) : null}
-                {candidate.conditionText.map((text, index) => (
+                {(candidate.conditionText ?? []).map((text, line) => (
                   <Text
-                    key={`${index}-${text}`}
+                    key={`${line}-${text}`}
                     className="mt-1.5 text-xs leading-[17px] text-ink dark:text-ink-dark"
                   >
                     {text}
@@ -441,9 +442,9 @@ function GenerationResult({
             Rejected ({rejected.length})
           </Text>
           <View className="gap-2">
-            {rejected.map((candidate) => (
+            {rejected.map((candidate, index) => (
               <View
-                key={candidate.name}
+                key={`${index}-${candidate.name}`}
                 className="rounded-card bg-surface-sunk p-3 dark:bg-surface-sunk-dark"
               >
                 <Text className="text-[13px] font-semibold text-ink-muted dark:text-ink-dark-muted">

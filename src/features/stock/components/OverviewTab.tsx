@@ -114,8 +114,8 @@ function OurView({
           {!loading ? (
             <Text className="mt-1.5 text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
               It isn't in {batchDate ? `the ${formatSessionDay(batchDate)}` : "today's"} batch. The
-              engine publishes a few picks a day and says nothing about everything else \u2014 no
-              view isn't a negative one.
+              engine publishes a few picks a day and says nothing about everything else — no view
+              isn't a negative one.
             </Text>
           ) : null}
           <Button
@@ -167,8 +167,9 @@ function OurView({
         </View>
         {pick.why.length > 0 ? (
           <View className="mt-3 gap-2">
-            {pick.why.map((reason) => (
-              <View key={reason.head} className="flex-row gap-2">
+            {pick.why.map((reason, index) => (
+              // Two reasons can share a heading; the position is the stable identity.
+              <View key={index} className="flex-row gap-2">
                 <Check size={15} color={colors.link} style={{ marginTop: 2 }} />
                 <Text className="flex-1 text-[13px] leading-[19px] text-ink dark:text-ink-dark">
                   {reason.head}
@@ -259,8 +260,8 @@ export function OverviewTab({
         </View>
         {detail.yearlyRangeSource === 'catalog' ? (
           <Text className="mt-2 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-            The 52-week range is from the stock catalogue \u2014 too little daily history is stored
-            to measure it.
+            The 52-week range is from the stock catalogue — too little daily history is stored to
+            measure it.
           </Text>
         ) : null}
       </Section>
@@ -337,8 +338,7 @@ export function OverviewTab({
                 <Text className="text-[13px] text-ink dark:text-ink-dark">
                   {row.label}
                   <Text className="text-ink-muted dark:text-ink-dark-muted">
-                    {' '}
-                    \u2014 {row.hint}
+                    {` \u2014 ${row.hint}`}
                   </Text>
                 </Text>
               </View>

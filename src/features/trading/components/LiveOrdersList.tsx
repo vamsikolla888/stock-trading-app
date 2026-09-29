@@ -19,7 +19,7 @@ import { toast } from '@/lib/utils/toast';
 import { getErrorMessage } from '@/types/api';
 
 import { useLiveOrderMutations, useLiveOrders } from '../hooks';
-import { WORKING_AT_BROKER } from '../lib/liveOrders';
+import { isEquityOrder, WORKING_AT_BROKER } from '../lib/liveOrders';
 import { ORDER_TYPE_LABEL } from '../lib/orderForm';
 import { LIVE_BROKER_LABEL, type LiveOrder } from '../types';
 
@@ -40,11 +40,15 @@ export function LiveOrdersList() {
   const orders = useLiveOrders(50);
   const now = useNow();
   const [openId, setOpenId] = useState<string | null>(null);
+  const [modifyId, setModifyId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const rows = useMemo(() => orders.data ?? [], [orders.data]);
-  const shown = showAll ? rows : rows.slice(0, INITIAL_ROWS);
-  const days = useMemo(() => groupByDay(shown, (order) => order.createdAt), [shown]);
+  const days = useMemo(
+    () => groupByDay(showAll ? rows : rows.slice(0, INITIAL_ROWS), (order) => order.createdAt),
+    [rows, showAll],
+  );
   const open = rows.find((order) => order.id === openId) ?? null;
+  const modifying = rows.find((order) => order.id === modifyId) ?? null;
 
   if (orders.isPending) return <ListSkeleton rows={3} />;
   if (orders.error && !orders.data) {
@@ -91,7 +95,34 @@ export function LiveOrdersList() {
           {showAll ? 'Show fewer' : `Show all ${rows.length}`}
         </Text>
       ) : null}
-      {open ? <LiveOrderSheet order={open} onClose={() => setOpenId(null)} /> : null}
+      {open ? (
+        <LiveOrderSheet
+          order={open}
+          onClose={() => setOpenId(null)}
+          onModify={() => {
+            // One RN Modal must finish dismissing before the next presents on iOS —
+            // swapping them in one render leaves the edit sheet invisible.
+            setOpenId(null);
+            afterSheetClose(() => setModifyId(open.id));
+          }}
+        />
+      ) : null}
+      {modifying && WORKING_AT_BROKER.has(modifying.status) && isEquityOrder(modifying) ? (
+        <ModifyOrderSheet
+          order={{
+            id: modifying.id,
+            symbol: modifying.tradingsymbol,
+            side: modifying.side,
+            orderType: modifying.orderType,
+            quantity: modifying.quantity,
+            price: modifying.price,
+            triggerPrice: modifying.triggerPrice,
+            filledQuantity: modifying.filledQuantity,
+            brokerLabel: brokerOf(modifying),
+          }}
+          onClose={() => setModifyId(null)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -146,12 +177,20 @@ function LiveOrderRow({ order, onPress }: { order: LiveOrder; onPress: () => voi
   );
 }
 
-function LiveOrderSheet({ order, onClose }: { order: LiveOrder; onClose: () => void }) {
+function LiveOrderSheet({
+  order,
+  onClose,
+  onModify,
+}: {
+  order: LiveOrder;
+  onClose: () => void;
+  onModify: () => void;
+}) {
   const router = useRouter();
   const now = useNow();
   const { cancel } = useLiveOrderMutations();
-  const [modifying, setModifying] = useState(false);
   const working = WORKING_AT_BROKER.has(order.status);
+  const equity = isEquityOrder(order);
   const broker = brokerOf(order);
 
   const confirmCancel = () =>
@@ -175,25 +214,6 @@ function LiveOrderSheet({ order, onClose }: { order: LiveOrder; onClose: () => v
       ],
     );
 
-  if (modifying) {
-    return (
-      <ModifyOrderSheet
-        order={{
-          id: order.id,
-          symbol: order.tradingsymbol,
-          side: order.side,
-          orderType: order.orderType,
-          quantity: order.quantity,
-          price: order.price,
-          triggerPrice: order.triggerPrice,
-          filledQuantity: order.filledQuantity,
-          brokerLabel: broker,
-        }}
-        onClose={onClose}
-      />
-    );
-  }
-
   const failedChecks = (order.riskDecision?.checks ?? []).filter((check) => !check.passed);
 
   return (
@@ -206,12 +226,9 @@ function LiveOrderSheet({ order, onClose }: { order: LiveOrder; onClose: () => v
       footer={
         working ? (
           <View className="flex-row gap-2.5">
-            <Button
-              label="Modify"
-              variant="outline"
-              className="flex-1"
-              onPress={() => setModifying(true)}
-            />
+            {equity ? (
+              <Button label="Modify" variant="outline" className="flex-1" onPress={onModify} />
+            ) : null}
             <Button
               label="Cancel order"
               variant="danger"
@@ -220,7 +237,7 @@ function LiveOrderSheet({ order, onClose }: { order: LiveOrder; onClose: () => v
               onPress={confirmCancel}
             />
           </View>
-        ) : (
+        ) : equity ? (
           <Button
             label="View stock"
             variant="outline"
@@ -230,7 +247,7 @@ function LiveOrderSheet({ order, onClose }: { order: LiveOrder; onClose: () => v
               afterSheetClose(() => router.push(stockHref(order.tradingsymbol, order.exchange)));
             }}
           />
-        )
+        ) : undefined
       }
     >
       <View className="mb-1 flex-row">
@@ -303,7 +320,13 @@ function LiveOrderSheet({ order, onClose }: { order: LiveOrder; onClose: () => v
           ))}
         </View>
       ) : null}
-      {working ? <Note>A modify or cancel goes to {broker} straight away.</Note> : null}
+      {working ? (
+        <Note>
+          {equity
+            ? `A modify or cancel goes to ${broker} straight away.`
+            : `A cancel goes to ${broker} straight away. Modify F&O orders from the F&O tab.`}
+        </Note>
+      ) : null}
     </Sheet>
   );
 }

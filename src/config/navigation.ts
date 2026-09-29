@@ -39,6 +39,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: 'markets',
     items: [
       { name: 'index', label: 'Today', href: '/' },
+      { name: 'daily-brief', label: 'Daily Brief', href: '/daily-brief' },
       { name: 'strong-picks', label: 'Strong picks', href: '/strong-picks' },
       { name: 'explore', label: 'Explore', href: '/explore' },
       { name: 'heatmap', label: 'Market heatmap', href: '/heatmap' },

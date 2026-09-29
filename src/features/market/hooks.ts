@@ -38,7 +38,10 @@ const FIRST_SNAPSHOT_TIMEOUT_MS = 4_000;
 function isNoBrokerError(error: unknown): boolean {
   return (
     isApiError(error) &&
-    (error.status === 404 || error.code === 'NOT_FOUND' || error.code === 'BROKER_SESSION_EXPIRED')
+    (error.status === 404 ||
+      error.code === 'NOT_FOUND' ||
+      error.code === 'BROKER_SESSION_EXPIRED' ||
+      error.status === 409)
   );
 }
 
@@ -64,7 +67,12 @@ export function useLiveIndices(): {
     queryFn: marketApi.indices,
     staleTime: 15_000,
     retry: false,
-    refetchInterval: () => (snapshot ? false : livePriceInterval(appConfig.market.livePollMs)),
+    // Polled only as the socket's stand-in, and never once it has said "no broker": asking
+    // again every 15 s would get the same 404/409 every time.
+    refetchInterval: (query) =>
+      snapshot || isNoBrokerError(query.state.error)
+        ? false
+        : livePriceInterval(appConfig.market.livePollMs),
   });
 
   useFocusEffect(

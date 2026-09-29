@@ -34,6 +34,7 @@ import { getErrorMessage } from '@/types/api';
 
 import { useBuildStrategy, usePlacePaperBasket, useStrategyTemplates } from '../hooks';
 import { basketName, basketOutcome, outlookTone, PAPER_MAX_LOTS } from '../lib/book';
+import { paperBookHref } from '../lib/routes';
 import type { BuildStrategyResult, FnoOrderView } from '../types';
 
 import { PayoffChart } from './PayoffChart';
@@ -147,7 +148,9 @@ function Builder({
         onSuccess: (result) => {
           setPlaced(result.orders);
           const outcome = basketOutcome(result.orders);
-          toast.success('Paper basket placed', `${outcome.filled} of ${outcome.total} legs filled`);
+          const summary = `${outcome.filled} of ${outcome.total} legs filled`;
+          if (outcome.filled === outcome.total) toast.success('Paper basket placed', summary);
+          else toast.info('Paper basket partly filled', summary);
         },
         onSettled: () => {
           inFlight.current = false;
@@ -205,7 +208,7 @@ function Builder({
           fullWidth
           onPress={() => {
             onClose();
-            router.push({ pathname: '/fno/paper', params: { view: 'positions' } });
+            router.dismissTo(paperBookHref('positions'));
           }}
         />
       </View>
@@ -228,6 +231,11 @@ function Builder({
           error={templates.error}
           onRetry={() => void templates.refetch()}
         />
+      );
+    }
+    if (templates.data && templates.data.length === 0) {
+      return (
+        <InlineEmpty title="No strategy templates" message="The server lists none right now." />
       );
     }
     return (

@@ -3,10 +3,12 @@ import {
   articleState,
   formatExpectedMove,
   impactTier,
+  isArticleId,
   isWebLink,
   newsWindowStart,
   plainText,
   scoredImpact,
+  uniqueArticles,
 } from '@/features/news/lib/news';
 import type { AnalyzedArticleListResponse } from '@/features/news/types';
 
@@ -117,5 +119,29 @@ describe('nextNewsPage', () => {
     expect(nextNewsPage(page(3, 45, 5))).toBeUndefined();
     expect(nextNewsPage(page(1, 20, 20))).toBeUndefined();
     expect(nextNewsPage(page(2, 100, 0))).toBeUndefined();
+  });
+});
+
+describe('isArticleId', () => {
+  it('accepts only the ObjectIds the API issues', () => {
+    expect(isArticleId('66f1c2a4b9e0f1a2b3c4d5e6')).toBe(true);
+    expect(isArticleId('66F1C2A4B9E0F1A2B3C4D5E6')).toBe(true);
+    expect(isArticleId('not-an-id')).toBe(false);
+    expect(isArticleId('66f1c2a4b9e0f1a2b3c4d5e')).toBe(false);
+    expect(isArticleId(undefined)).toBe(false);
+    expect(isArticleId(['66f1c2a4b9e0f1a2b3c4d5e6'])).toBe(false);
+  });
+});
+
+describe('uniqueArticles', () => {
+  const row = (newsId: string) => ({ newsId });
+
+  it('keeps each article once when it comes back on a later page, in first-seen order', () => {
+    const pages = [{ items: [row('a'), row('b')] }, { items: [row('b'), row('c')] }];
+    expect(uniqueArticles(pages).map((item) => item.newsId)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('is empty for no pages', () => {
+    expect(uniqueArticles([])).toEqual([]);
   });
 });

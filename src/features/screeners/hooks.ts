@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { marketKeys } from '@/features/market/hooks';
+import { pollInterval } from '@/features/strategies/lib/polling';
 
 import { screenersApi } from './api';
 import type { CustomScreenerInput } from './types';
@@ -118,7 +119,8 @@ export function useCustomScanStatus(id: string, enabled: boolean) {
       return status;
     },
     enabled: enabled && id.length > 0,
-    refetchInterval: (query) => (query.state.data?.running ? 2_500 : false),
+    refetchInterval: (query) =>
+      query.state.data?.running ? pollInterval(query.state.error, 2_500) : false,
   });
 }
 
@@ -149,6 +151,7 @@ export function useAllScansStatus(enabled: boolean) {
       return status;
     },
     enabled,
-    refetchInterval: (query) => (query.state.data?.running ? 3_000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.running ? pollInterval(query.state.error, 3_000) : false,
   });
 }

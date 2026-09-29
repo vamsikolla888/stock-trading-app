@@ -11,7 +11,8 @@ import { useTheme } from '@/theme/ThemeProvider';
 export default function PendingApprovalScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { email } = useLocalSearchParams<{ email?: string }>();
+  const params = useLocalSearchParams<{ email?: string | string[] }>();
+  const email = typeof params.email === 'string' ? params.email : undefined;
   const backToSignIn = () => router.dismissTo('/auth/login');
 
   return (

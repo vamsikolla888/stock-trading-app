@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Play from 'lucide-react-native/icons/play';
 import Send from 'lucide-react-native/icons/send';
 import Share2 from 'lucide-react-native/icons/share-2';
@@ -14,6 +14,7 @@ import { Card } from '@/components/ui/Card';
 import { IconTile } from '@/components/ui/IconTile';
 import { ListCard, RowDivider, Section } from '@/components/ui/Section';
 import { Tabs } from '@/components/ui/Tabs';
+import { isDependencyUnavailable } from '@/features/admin/lib/access';
 import { ExecutionRow } from '@/features/automations/components/ExecutionRow';
 import { WorkflowConfigForm } from '@/features/automations/components/WorkflowConfigForm';
 import { TRIGGER_ICON } from '@/features/automations/components/WorkflowRow';
@@ -34,6 +35,8 @@ import {
   runBlockedReason,
   runStatus,
   TRIGGER_LABEL,
+  triggerKind,
+  uniqueExecutions,
   watchDeadline,
   type PendingRun,
 } from '@/features/automations/lib/workflows';
@@ -48,6 +51,8 @@ import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 type Panel = 'monitor' | 'configure';
 const PANELS: readonly { key: Panel; label: string }[] = [
   { key: 'monitor', label: 'Activity' },
@@ -57,7 +62,8 @@ const WATCH_POLL_MS = 4_000;
 
 function TriggerCard({ workflow }: { workflow: WorkflowDetail }) {
   const { colors } = useTheme();
-  const trigger = TRIGGER_ICON[workflow.triggerType];
+  const kind = triggerKind(workflow.triggerType);
+  const trigger = TRIGGER_ICON[kind];
 
   return (
     <Card className="gap-3">
@@ -65,7 +71,7 @@ function TriggerCard({ workflow }: { workflow: WorkflowDetail }) {
         <IconTile Icon={trigger.Icon} tone={trigger.tone} size="sm" />
         <View className="flex-1">
           <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
-            {TRIGGER_LABEL[workflow.triggerType]} trigger
+            {TRIGGER_LABEL[kind]} trigger
           </Text>
           <Text className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted">
             {workflow.triggerType === 'cron'
@@ -128,7 +134,11 @@ function TestResultCard({
 }
 
 export default function AutomationDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  // A deep link or stale route can arrive without an id (or with it repeated); without one
+  // the queries never start, so the screen says so instead of loading forever.
+  const id = typeof params.id === 'string' && params.id.trim() ? params.id : undefined;
+  const router = useRouter();
   const { colors } = useTheme();
   const now = useNow();
   const queryClient = useQueryClient();
@@ -155,10 +165,7 @@ export default function AutomationDetailScreen() {
   const test = useTestWorkflow();
   const retry = useRetryExecution();
 
-  const items = useMemo(
-    () => executions.data?.pages.flatMap((page) => page.items) ?? [],
-    [executions.data],
-  );
+  const items = useMemo(() => uniqueExecutions(executions.data?.pages), [executions.data]);
   const resolved = pendingRun ? resolvePendingRun(pendingRun, items) : null;
   const runFinished = resolved ? isTerminal(resolved.status) : false;
   const watching = watchedRun !== null && !runFinished;
@@ -175,7 +182,9 @@ export default function AutomationDetailScreen() {
   }, [finishedStatus, id, queryClient]);
 
   const detail = workflow.data;
-  const blocked = detail ? runBlockedReason(detail) : null;
+  const blocked = detail
+    ? runBlockedReason({ active: detail.active, triggerType: triggerKind(detail.triggerType) })
+    : null;
 
   const onRefresh = () => Promise.all([workflow.refetch(), executions.refetch()]);
 
@@ -267,13 +276,27 @@ export default function AutomationDetailScreen() {
       title={detail?.name ?? 'Automation'}
       subtitle={
         detail
-          ? `${TRIGGER_LABEL[detail.triggerType]} · ${detail.active ? 'Active' : 'Inactive'}`
+          ? `${TRIGGER_LABEL[triggerKind(detail.triggerType)]} · ${detail.active ? 'Active' : 'Inactive'}`
           : undefined
       }
-      onRefresh={onRefresh}
+      onRefresh={id ? onRefresh : undefined}
     >
-      {workflow.isPending ? (
+      {!id ? (
+        <InlineEmpty
+          title="Workflow not found"
+          message="This link doesn’t point to a workflow. Open it from the Automations list."
+          action={{
+            label: 'Open Automations',
+            onPress: () => router.replace('/settings/automations'),
+          }}
+        />
+      ) : workflow.isPending ? (
         <ListSkeleton rows={3} />
+      ) : !detail && isDependencyUnavailable(workflow.error) ? (
+        <InlineEmpty
+          title="Automations aren’t connected"
+          message="The server isn’t connected to its n8n instance right now. Pull to refresh once it is."
+        />
       ) : !detail ? (
         <InlineError
           what="this workflow"

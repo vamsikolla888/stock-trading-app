@@ -27,7 +27,9 @@ const { resetResendCooldownSeconds, resetLinkTtlMinutes } = appConfig.auth;
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const params = useLocalSearchParams<{ email?: string }>();
+  const params = useLocalSearchParams<{ email?: string | string[] }>();
+  // Prefilled from sign-in; a repeated query param arrives as an array — ignore it then.
+  const initialEmail = typeof params.email === 'string' ? params.email : '';
   const forgotPassword = useForgotPassword();
   const { remaining, start: startCooldown } = useCountdown();
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -40,7 +42,7 @@ export default function ForgotPasswordScreen() {
     formState: { errors },
   } = useForm<ForgotPasswordFormInput, unknown, ForgotPasswordFormValues>({
     resolver: zodResolver(forgotPasswordSchema),
-    defaultValues: { email: params.email ?? '' },
+    defaultValues: { email: initialEmail },
   });
 
   const send = (email: string, isResend = false) => {
@@ -131,7 +133,7 @@ export default function ForgotPasswordScreen() {
               textContentType="emailAddress"
               returnKeyType="send"
               onSubmitEditing={onSubmit}
-              autoFocus={!params.email}
+              autoFocus={!initialEmail}
             />
           )}
         />

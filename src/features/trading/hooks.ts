@@ -9,9 +9,9 @@ import { livePriceInterval } from '@/lib/utils/market';
 import { isApiError } from '@/types/api';
 
 import { brokersApi, liveTradingApi } from './api';
+import { resolveLiveTrading } from './lib/availability';
 import { IN_FLIGHT, ordersMoved } from './lib/liveOrders';
 import {
-  LIVE_BROKER_LABEL,
   type ApiKeyTotpConnectPayload,
   type LiveBroker,
   type ModifyLiveOrderInput,
@@ -80,7 +80,37 @@ export interface LiveAvailability {
   isLoading: boolean;
 }
 
-const LIVE_BROKER_ORDER: LiveBroker[] = ['mstock', 'groww'];
+/**
+ * Every live pre-check at once (see resolveLiveTrading). The catalog is static and only
+ * decides live-capability, so it doesn't hold up the answer — the others do.
+ */
+function useLiveTradingResolution() {
+  const settings = useLiveTradingSettings();
+  const killSwitch = useKillSwitch();
+  const connections = useBrokerConnections();
+  const catalog = useBrokerCatalog();
+  const isLoading = settings.isPending || killSwitch.isPending || connections.isPending;
+
+  const resolution = useMemo(
+    () =>
+      resolveLiveTrading({
+        settings: { data: settings.data, error: settings.error },
+        killSwitch: { data: killSwitch.data, error: killSwitch.error },
+        connections: { data: connections.data, error: connections.error },
+        catalog: { data: catalog.data },
+      }),
+    [
+      settings.data,
+      settings.error,
+      killSwitch.data,
+      killSwitch.error,
+      connections.data,
+      connections.error,
+      catalog.data,
+    ],
+  );
+  return { resolution, isLoading };
+}
 
 /**
  * Whether a real order can be placed, checked BEFORE showing the live option: the global
@@ -88,44 +118,18 @@ const LIVE_BROKER_ORDER: LiveBroker[] = ['mstock', 'groww'];
  * these pre-checks and learns about them only from a rejected order.
  */
 export function useLiveTradingAvailability(): LiveAvailability {
-  const settings = useLiveTradingSettings();
-  const killSwitch = useKillSwitch();
-  const connections = useBrokerConnections();
-  const catalog = useBrokerCatalog();
+  const { resolution, isLoading } = useLiveTradingResolution();
 
   return useMemo(() => {
-    const isLoading =
-      settings.isPending || killSwitch.isPending || connections.isPending || catalog.isPending;
-    const liveCapable = new Set(
-      (catalog.data ?? []).filter((b) => b.capabilities.liveTrading).map((b) => b.id),
-    );
-    const connected = LIVE_BROKER_ORDER.find((id) =>
-      connections.data?.some(
-        (c) => c.broker === id && c.status === 'connected' && liveCapable.has(id),
-      ),
-    );
-    const known = LIVE_BROKER_ORDER.find((id) => connections.data?.some((c) => c.broker === id));
-    const label = (id: string | undefined) =>
-      catalog.data?.find((b) => b.id === id)?.label ?? id ?? null;
-
-    let reason: string | null = null;
-    if (settings.data && !settings.data.enabled) reason = 'Live trading is switched off right now.';
-    else if (killSwitch.data?.engaged)
-      reason = `Live trading is paused${killSwitch.data.reason ? `: ${killSwitch.data.reason}` : '.'}`;
-    else if (!connected && known)
-      reason = `Your ${label(known)} session has expired. Reconnect to trade live.`;
-    else if (!connected) reason = 'Connect a broker to place real orders.';
-    else if (settings.error || killSwitch.error)
-      reason = "Couldn't confirm that live trading is available.";
-
+    const broker = resolution.brokers[0] ?? null;
     return {
-      available: !isLoading && reason === null && Boolean(connected),
-      broker: connected ?? null,
-      brokerLabel: label(connected),
-      reason: isLoading ? null : reason,
+      available: !isLoading && broker !== null,
+      broker,
+      brokerLabel: broker ? resolution.labelOf(broker) : null,
+      reason: isLoading ? null : resolution.reason,
       isLoading,
     };
-  }, [settings, killSwitch, connections, catalog]);
+  }, [resolution, isLoading]);
 }
 
 export function useLiveWallet(broker: LiveBroker | null) {
@@ -190,31 +194,18 @@ export interface LiveTradingOptions {
  * wallet read isn't held up — the server refuses an order to a broker that can't trade.
  */
 export function useLiveTradingOptions(): LiveTradingOptions {
-  const availability = useLiveTradingAvailability();
-  const connections = useBrokerConnections();
-  const catalog = useBrokerCatalog();
+  const { resolution, isLoading } = useLiveTradingResolution();
 
-  return useMemo(() => {
-    const capable = catalog.data
-      ? new Set(
-          catalog.data.filter((entry) => entry.capabilities.liveTrading).map((entry) => entry.id),
-        )
-      : new Set<string>(LIVE_BROKER_ORDER);
-    const connected = new Set(
-      (connections.data ?? [])
-        .filter((connection) => connection.status === 'connected')
-        .map((connection) => connection.broker),
-    );
-    const brokers = LIVE_BROKER_ORDER.filter((id) => capable.has(id) && connected.has(id));
-    return {
-      available: availability.available && brokers.length > 0,
-      brokers: availability.available ? brokers : [],
-      reason: availability.reason,
-      isLoading: availability.isLoading,
-      labelOf: (broker: LiveBroker) =>
-        catalog.data?.find((entry) => entry.id === broker)?.label ?? LIVE_BROKER_LABEL[broker],
-    };
-  }, [availability, connections.data, catalog.data]);
+  return useMemo(
+    () => ({
+      available: !isLoading && resolution.brokers.length > 0,
+      brokers: isLoading ? [] : resolution.brokers,
+      reason: isLoading ? null : resolution.reason,
+      isLoading,
+      labelOf: (broker: LiveBroker) => resolution.labelOf(broker),
+    }),
+    [resolution, isLoading],
+  );
 }
 
 /**
@@ -289,7 +280,15 @@ export function useBrokerMutations() {
       mutationFn: (code: string) => brokersApi.verifyMstock(code),
       onSettled: refreshAll,
     }),
-    reconnectMstock: useMutation({ mutationFn: brokersApi.reconnectMstock, onSettled: refreshAll }),
+    reconnectMstock: useMutation({
+      mutationFn: () => brokersApi.reconnect('mstock'),
+      onSettled: refreshAll,
+    }),
+    /** mStock sends the day's code; Groww re-mints its token from the stored key and secret. */
+    reconnect: useMutation({
+      mutationFn: (broker: string) => brokersApi.reconnect(broker),
+      onSettled: refreshAll,
+    }),
     connectApiKey: useMutation({
       mutationFn: ({ broker, payload }: { broker: string; payload: ApiKeyTotpConnectPayload }) =>
         brokersApi.connectApiKey(broker, payload),

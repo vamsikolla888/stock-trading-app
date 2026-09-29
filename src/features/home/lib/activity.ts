@@ -62,9 +62,10 @@ export function buildActivity(
           : run.status === 'FAILED'
             ? 'News refresh failed'
             : 'News refresh running',
+      // The run document is sent as stored, so its counters are read defensively.
       detail:
         run.status === 'COMPLETED'
-          ? `${plural(run.counts.inserted, 'new article')}`
+          ? plural(run.counts?.inserted ?? 0, 'new article')
           : run.status === 'FAILED'
             ? (run.errorMessage ?? 'The ingestion run did not finish')
             : 'Fetching the latest articles',

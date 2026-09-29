@@ -13,7 +13,7 @@ import { stockLogoUrl } from '@/features/market/api';
 import { formatReturn, useMask } from '@/features/portfolio/components/BookSummaryCard';
 import { formatAsOf, formatDay, istDateOf, plural } from '@/features/portfolio/lib/dates';
 import { PriceInput } from '@/features/trading/components/OrderInputs';
-import { Note, Sheet } from '@/features/trading/components/Sheet';
+import { afterSheetClose, Note, Sheet } from '@/features/trading/components/Sheet';
 import type { TicketParams } from '@/features/trading/lib/ticket';
 import {
   formatINR,
@@ -84,7 +84,6 @@ export function PaperHoldingsSection({
   const [openKey, setOpenKey] = useState<string | null>(null);
   const rows = useMarks(portfolio.positions, props.quotes);
   const totalPnl = sumOrNull(rows.map(({ mark }) => mark.pnl));
-  const open = rows.find(({ position }) => positionKey(position) === openKey) ?? null;
 
   if (rows.length === 0) {
     return (
@@ -132,19 +131,14 @@ export function PaperHoldingsSection({
         break-even price.
       </Note>
 
-      {open ? (
-        <PaperPositionSheet
-          position={open.position}
-          mark={open.mark}
-          profileId={props.profileId}
-          now={now}
-          onClose={() => setOpenKey(null)}
-          onTrade={(params) => {
-            setOpenKey(null);
-            props.onTrade(params);
-          }}
-        />
-      ) : null}
+      <PositionSheets
+        rows={rows}
+        openKey={openKey}
+        onOpenKey={setOpenKey}
+        profileId={props.profileId}
+        now={now}
+        onTrade={props.onTrade}
+      />
     </View>
   );
 }
@@ -166,7 +160,6 @@ export function PaperPositionsSection({
   const rows = useMarks(portfolio.positions, props.quotes);
   const totalPnl = sumOrNull(rows.map(({ mark }) => mark.pnl));
   const called = portfolio.positions.filter((position) => position.marginCall);
-  const open = rows.find(({ position }) => positionKey(position) === openKey) ?? null;
   const shortfall = portfolio.marginShortfall ?? 0;
 
   const squareOff = () =>
@@ -261,19 +254,14 @@ export function PaperPositionsSection({
         is borrowed at {portfolio.leverage ?? 5}× and repaid on exit — P&L % is against that margin.
       </Note>
 
-      {open ? (
-        <PaperPositionSheet
-          position={open.position}
-          mark={open.mark}
-          profileId={props.profileId}
-          now={now}
-          onClose={() => setOpenKey(null)}
-          onTrade={(params) => {
-            setOpenKey(null);
-            props.onTrade(params);
-          }}
-        />
-      ) : null}
+      <PositionSheets
+        rows={rows}
+        openKey={openKey}
+        onOpenKey={setOpenKey}
+        profileId={props.profileId}
+        now={now}
+        onTrade={props.onTrade}
+      />
     </View>
   );
 }
@@ -313,33 +301,80 @@ function PositionRow({
 
 // ── One position ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * A position's detail sheet and its levels editor. Each is its own RN Modal, so moving
+ * from one to the other — or on to the order ticket — waits for the first to finish
+ * dismissing: iOS refuses to present while a modal is still animating away.
+ */
+function PositionSheets({
+  rows,
+  openKey,
+  onOpenKey,
+  profileId,
+  now,
+  onTrade,
+}: {
+  rows: readonly { position: PaperPosition; mark: RowMark }[];
+  openKey: string | null;
+  onOpenKey: (key: string | null) => void;
+  profileId: string | undefined;
+  now: number;
+  onTrade: OpenTicket;
+}) {
+  const [levelsKey, setLevelsKey] = useState<string | null>(null);
+  const open = rows.find(({ position }) => positionKey(position) === openKey) ?? null;
+  const editing = rows.find(({ position }) => positionKey(position) === levelsKey) ?? null;
+
+  return (
+    <>
+      {open ? (
+        <PaperPositionSheet
+          position={open.position}
+          mark={open.mark}
+          now={now}
+          onClose={() => onOpenKey(null)}
+          onEditLevels={() => {
+            const key = positionKey(open.position);
+            onOpenKey(null);
+            afterSheetClose(() => setLevelsKey(key));
+          }}
+          onTrade={(params) => {
+            onOpenKey(null);
+            afterSheetClose(() => onTrade(params));
+          }}
+        />
+      ) : null}
+      {editing ? (
+        <LevelsSheet
+          position={editing.position}
+          profileId={profileId}
+          onClose={() => setLevelsKey(null)}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function PaperPositionSheet({
   position,
   mark,
-  profileId,
   now,
   onClose,
+  onEditLevels,
   onTrade,
 }: {
   position: PaperPosition;
   mark: RowMark;
-  profileId: string | undefined;
   now: number;
   onClose: () => void;
+  onEditLevels: () => void;
   onTrade: OpenTicket;
 }) {
   const mask = useMask();
-  const [editing, setEditing] = useState(false);
   const intraday = position.segment === 'intraday';
   const product = intraday ? 'intraday' : 'delivery';
   const hasLevels =
     (position.targetPrice ?? null) !== null || (position.stopPrice ?? null) !== null;
-
-  if (editing) {
-    return (
-      <LevelsSheet position={position} profileId={profileId} onClose={() => setEditing(false)} />
-    );
-  }
 
   return (
     <Sheet
@@ -457,7 +492,7 @@ function PaperPositionSheet({
           label={hasLevels ? 'Edit levels' : 'Set levels'}
           variant="link"
           className="mt-1 self-start"
-          onPress={() => setEditing(true)}
+          onPress={onEditLevels}
         />
       </View>
     </Sheet>

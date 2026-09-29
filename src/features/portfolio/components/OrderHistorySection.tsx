@@ -10,7 +10,7 @@ import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import { Chips } from '@/components/ui/Tabs';
 import { ModifyOrderSheet } from '@/features/trading/components/ModifyOrderSheet';
-import { Note, Pager, Sheet, SideTag } from '@/features/trading/components/Sheet';
+import { afterSheetClose, Note, Pager, Sheet, SideTag } from '@/features/trading/components/Sheet';
 import { formatINR, formatQuantity } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
 import { getErrorMessage } from '@/types/api';
@@ -51,6 +51,7 @@ export function OrderHistorySection({
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [modifyKey, setModifyKey] = useState<string | null>(null);
   const history = useOrderHistoryPage(broker, page);
   const data = history.data;
 
@@ -67,6 +68,7 @@ export function OrderHistorySection({
     [data, filter],
   );
   const open = pageOrders.find((order) => order.key === openKey) ?? null;
+  const modifying = pageOrders.find((order) => order.key === modifyKey) ?? null;
 
   if (history.isPending) return <ListSkeleton rows={4} />;
   if (history.error && !data) {
@@ -157,6 +159,28 @@ export function OrderHistorySection({
           broker={broker}
           brokerLabel={brokerLabel}
           onClose={() => setOpenKey(null)}
+          onModify={() => {
+            // The detail sheet must finish dismissing before the edit sheet presents —
+            // iOS won't show a second RN Modal while the first is animating away.
+            setOpenKey(null);
+            afterSheetClose(() => setModifyKey(open.key));
+          }}
+        />
+      ) : null}
+      {modifying && modifying.liveOrderId && isModifiable(modifying, broker) ? (
+        <ModifyOrderSheet
+          order={{
+            id: modifying.liveOrderId,
+            symbol: modifying.tradingsymbol ?? '',
+            side: modifying.side ?? 'BUY',
+            orderType: modifying.orderType ?? 'MARKET',
+            quantity: modifying.quantity ?? 0,
+            price: modifying.price,
+            triggerPrice: modifying.triggerPrice,
+            filledQuantity: modifying.filledQuantity,
+            brokerLabel,
+          }}
+          onClose={() => setModifyKey(null)}
         />
       ) : null}
     </View>
@@ -210,14 +234,15 @@ function OrderSheet({
   broker,
   brokerLabel,
   onClose,
+  onModify,
 }: {
   order: OrderHistoryRow;
   broker: string;
   brokerLabel: string;
   onClose: () => void;
+  onModify: () => void;
 }) {
   const cancel = useCancelBrokerOrder();
-  const [modifying, setModifying] = useState(false);
   const cancellable = isCancellable(order, broker);
   const modifiable = isModifiable(order, broker);
 
@@ -247,25 +272,6 @@ function OrderSheet({
     );
   };
 
-  if (modifying && order.liveOrderId) {
-    return (
-      <ModifyOrderSheet
-        order={{
-          id: order.liveOrderId,
-          symbol: order.tradingsymbol ?? '',
-          side: order.side ?? 'BUY',
-          orderType: order.orderType ?? 'MARKET',
-          quantity: order.quantity ?? 0,
-          price: order.price,
-          triggerPrice: order.triggerPrice,
-          filledQuantity: order.filledQuantity,
-          brokerLabel,
-        }}
-        onClose={onClose}
-      />
-    );
-  }
-
   return (
     <Sheet
       visible
@@ -277,12 +283,7 @@ function OrderSheet({
         cancellable ? (
           <View className="flex-row gap-2.5">
             {modifiable ? (
-              <Button
-                label="Modify"
-                variant="outline"
-                className="flex-1"
-                onPress={() => setModifying(true)}
-              />
+              <Button label="Modify" variant="outline" className="flex-1" onPress={onModify} />
             ) : null}
             <Button
               label="Cancel order"
@@ -344,7 +345,9 @@ function OrderSheet({
       ) : null}
       {cancellable && !modifiable ? (
         <Note>
-          Placed outside this app, so it can be cancelled here but modified only in {brokerLabel}.
+          {order.liveOrderId
+            ? 'An F&O order — it can be cancelled here and modified from the F&O tab.'
+            : `Placed outside this app, so it can be cancelled here but modified only in ${brokerLabel}.`}
         </Note>
       ) : null}
     </Sheet>

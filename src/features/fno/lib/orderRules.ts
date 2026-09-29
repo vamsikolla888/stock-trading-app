@@ -33,6 +33,24 @@ export interface ContractRuleIssue {
   message: string;
 }
 
+/**
+ * The request schema's own ceiling (server fno.dto.ts `lots`: 1–10,000), separate from the
+ * contract rules: with no freeze limit published, nothing else would stop a typed 20000
+ * reaching the confirm step only to come back a 422.
+ */
+export const MAX_LOTS_PER_REQUEST = 10_000;
+
+export function requestLimitIssues(lots: number): ContractRuleIssue[] {
+  return Number.isInteger(lots) && lots > MAX_LOTS_PER_REQUEST
+    ? [
+        {
+          field: 'quantity',
+          message: `At most ${MAX_LOTS_PER_REQUEST.toLocaleString('en-IN')} lots can be sent in one order`,
+        },
+      ]
+    : [];
+}
+
 export const needsLimitPrice = (t: ContractOrderInput['orderType']) => t === 'LIMIT' || t === 'SL';
 export const needsTriggerPrice = (t: ContractOrderInput['orderType']) => t === 'SL' || t === 'SL-M';
 

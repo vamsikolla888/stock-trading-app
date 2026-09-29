@@ -28,6 +28,18 @@ export function userCounts(users: readonly PlatformUser[]): Record<UserFilter, n
   };
 }
 
+/**
+ * Folds a PATCH /admin/users/:id reply into the cached row. The reply is a raw document:
+ * an account created before roles existed comes back with no `role` at all, which must not
+ * blank the "User" the list already shows — missing fields keep the cached value.
+ */
+export function mergeUserUpdate(user: PlatformUser, saved: Partial<PlatformUser>): PlatformUser {
+  const defined = Object.fromEntries(
+    Object.entries(saved).filter(([, value]) => value !== undefined && value !== null),
+  ) as Partial<PlatformUser>;
+  return { ...user, ...defined };
+}
+
 export const APPROVAL: Record<PlatformUserApproval, { label: string; tone: StatusTone }> = {
   pending: { label: 'Pending', tone: 'warn' },
   approved: { label: 'Approved', tone: 'ok' },

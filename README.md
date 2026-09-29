@@ -1,4 +1,4 @@
-# The Ledger — mobile app
+# Stocks — mobile app
 
 Expo (React Native) client for the stocks-advisory-platform API, built with the New Architecture
 (Fabric + TurboModules), TypeScript strict mode, and a feature-based architecture designed to

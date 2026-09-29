@@ -1,9 +1,13 @@
 import type {
+  ExpirySettlementResult,
   FnoBookTotals,
+  FnoCharges,
   FnoOrderView,
   FnoPositionView,
+  OptionChain,
   OptionChainLeg,
   PaperExchange,
+  PaperTicketQuote,
   PayoffAnalysis,
   PayoffLegInput,
   SpotSource,
@@ -51,8 +55,81 @@ export function bookReturns(totals: Pick<FnoBookTotals, 'unrealisedPnl' | 'reali
   return Math.round((totals.unrealisedPnl + totals.realisedPnl) * 100) / 100;
 }
 
-export function expiredCount(positions: readonly Pick<FnoPositionView, 'daysToExpiry'>[]): number {
-  return positions.filter((p) => p.daysToExpiry < 0).length;
+/* ── Expiry ───────────────────────────────────────────────────────────────────────────── */
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Expired = the expiry date is before today in IST — the server's own settlement rule
+ * (`expiry < todayIST()`). NOT `daysToExpiry < 0`: the server clamps that at zero, so an
+ * expired leg reads "0 days" for ever and would never be offered for settlement.
+ */
+export function isExpired(expiry: string, today: string): boolean {
+  return ISO_DATE.test(expiry) && ISO_DATE.test(today) && expiry < today;
+}
+
+export function expiredCount(
+  positions: readonly Pick<FnoPositionView, 'expiry'>[],
+  today: string,
+): number {
+  return positions.filter((p) => isExpired(p.expiry, today)).length;
+}
+
+/** "5d" / "today" / "expired" for a held leg, with expiry decided by the date (see above). */
+export function positionDteLabel(
+  p: Pick<FnoPositionView, 'expiry' | 'daysToExpiry'>,
+  today: string,
+): string {
+  if (isExpired(p.expiry, today)) return 'expired';
+  const days = p.daysToExpiry;
+  if (!Number.isFinite(days) || days < 0) return '—';
+  return days === 0 ? 'today' : `${days}d`;
+}
+
+export interface SettlementOutcome {
+  tone: 'success' | 'info' | 'warning';
+  title: string;
+  message: string;
+}
+
+/**
+ * A settlement run in words. The server skips (and logs) any expired position whose underlying
+ * has no closing price yet — an index with no cash row, typically — so "settled 0" after an
+ * expired leg was on screen means "not yet", never "nothing had expired".
+ */
+export function settlementOutcome(
+  result: Pick<ExpirySettlementResult, 'settled' | 'totalPnl' | 'details'>,
+  expiredBefore: number,
+  money: (n: number) => string,
+  signedMoney: (n: number) => string,
+): SettlementOutcome {
+  const plural = (n: number) => `${n} position${n === 1 ? '' : 's'}`;
+  if (result.settled === 0) {
+    return expiredBefore > 0
+      ? {
+          tone: 'warning',
+          title: 'None could be settled yet',
+          message: `${plural(expiredBefore)} passed expiry, but settling needs the underlying’s closing price and it is not available yet. Try again later.`,
+        }
+      : {
+          tone: 'info',
+          title: 'Nothing to settle',
+          message: 'No position had passed expiry, so nothing was settled.',
+        };
+  }
+  const left = Math.max(0, expiredBefore - result.settled);
+  const detail = result.details
+    .map((d) => `${d.tradingsymbol} at ${money(d.settlementPrice)}`)
+    .join(' · ');
+  return {
+    tone: left > 0 ? 'warning' : 'success',
+    title: `Settled ${plural(result.settled)} for ${signedMoney(result.totalPnl)}`,
+    message:
+      `${detail}${detail ? '. ' : ''}Options settle at intrinsic value, futures against the underlying close.` +
+      (left > 0
+        ? ` ${plural(left)} still ${left === 1 ? 'waits' : 'wait'} for a closing price.`
+        : ''),
+  };
 }
 
 /** A premium flow in words: negative means premium was RECEIVED (a short). */
@@ -146,25 +223,51 @@ export function groupByUnderlying(
 
 /** The server prices at most eight legs in one payoff (payoffBodySchema). */
 export const PAYOFF_MAX_LEGS = 8;
+/** payoffLegSchema's `price` bound. */
+const PAYOFF_MAX_PRICE = 1_000_000;
 
 /**
- * A held position as a payoff leg: the SIGNED lot count becomes the side (the wire wants
- * positive lots), and the leg is priced at its ENTRY — the curve then answers "what does this
+ * A held position as payoff legs: the SIGNED lot count becomes the side (the wire wants
+ * positive lots), and each leg is priced at its ENTRY — the curve then answers "what does this
  * pay me at expiry" against what it actually cost, not what re-opening it today would.
+ *
+ * A leg is capped at 100 lots on the wire (payoffLegSchema) but a position is not — two
+ * 100-lot fills make a 200-lot line — so a big line is sent as several same-priced legs,
+ * which sum to exactly the same curve.
  */
 export function payoffLegs(
   positions: readonly Pick<FnoPositionView, 'tradingsymbol' | 'exchange' | 'lots' | 'avgPrice'>[],
 ): PayoffLegInput[] {
-  return positions.map((p) => {
-    const leg: PayoffLegInput = {
-      tradingsymbol: p.tradingsymbol,
-      side: p.lots < 0 ? 'SELL' : 'BUY',
-      lots: Math.abs(p.lots),
-    };
-    if (p.exchange === 'NFO' || p.exchange === 'BFO') leg.exchange = p.exchange as PaperExchange;
-    // The schema wants a positive price; a zero-cost entry (a settled leg) is priced live.
-    if (p.avgPrice > 0) leg.price = p.avgPrice;
-    return leg;
+  const legs: PayoffLegInput[] = [];
+  for (const p of positions) {
+    const side = p.lots < 0 ? 'SELL' : 'BUY';
+    let remaining = Number.isFinite(p.lots) ? Math.abs(Math.trunc(p.lots)) : 0;
+    while (remaining > 0) {
+      const lots = Math.min(PAPER_MAX_LOTS, remaining);
+      const leg: PayoffLegInput = { tradingsymbol: p.tradingsymbol, side, lots };
+      if (p.exchange === 'NFO' || p.exchange === 'BFO') leg.exchange = p.exchange as PaperExchange;
+      // The schema wants a positive, bounded price; anything else is priced live instead.
+      if (p.avgPrice > 0 && p.avgPrice <= PAYOFF_MAX_PRICE) leg.price = p.avgPrice;
+      legs.push(leg);
+      remaining -= lots;
+    }
+  }
+  return legs;
+}
+
+export interface PayoffGroup {
+  underlying: string;
+  positions: FnoPositionView[];
+  /** Wire legs after splitting; more than eight cannot be priced in one request. */
+  legCount: number;
+  tooMany: boolean;
+}
+
+/** The book, one payoff per underlying (the x-axis is ONE underlying's price). */
+export function payoffGroups(positions: readonly FnoPositionView[]): PayoffGroup[] {
+  return groupByUnderlying(positions).map((g) => {
+    const legCount = payoffLegs(g.positions).length;
+    return { ...g, legCount, tooMany: legCount > PAYOFF_MAX_LEGS };
   });
 }
 
@@ -320,4 +423,122 @@ export function basketOutcome(orders: readonly Pick<FnoOrderView, 'status'>[]): 
   total: number;
 } {
   return { filled: orders.filter((o) => o.status === 'FILLED').length, total: orders.length };
+}
+
+/** The order log's page size — the web's, and well inside the server's cap of 200. */
+export const PAPER_ORDERS_LIMIT = 100;
+
+export type PaperOrderFilter = 'all' | 'filled' | 'rejected';
+
+export const PAPER_ORDER_FILTERS: readonly { key: PaperOrderFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'filled', label: 'Filled' },
+  { key: 'rejected', label: 'Rejected' },
+];
+
+export function filterPaperOrders<T extends Pick<FnoOrderView, 'status'>>(
+  orders: readonly T[],
+  filter: PaperOrderFilter,
+): T[] {
+  if (filter === 'filled') return orders.filter((o) => o.status === 'FILLED');
+  if (filter === 'rejected') return orders.filter((o) => o.status === 'REJECTED');
+  return [...orders];
+}
+
+export function countPaperOrders(
+  orders: readonly Pick<FnoOrderView, 'status'>[],
+): Record<PaperOrderFilter, number> {
+  const filled = orders.filter((o) => o.status === 'FILLED').length;
+  return { all: orders.length, filled, rejected: orders.length - filled };
+}
+
+/** A contract note's lines, in the order a broker prints them. */
+export function chargeLines(c: FnoCharges): { label: string; value: number }[] {
+  return [
+    { label: 'Brokerage', value: c.brokerage },
+    { label: 'STT', value: c.stt },
+    { label: 'Exchange transaction', value: c.exchangeTxn },
+    { label: 'SEBI fee', value: c.sebiFee },
+    { label: 'GST', value: c.gst },
+    { label: 'Stamp duty', value: c.stampDuty },
+  ];
+}
+
+/* ── Chain ────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The latest quote for a ticket's contract in a (refreshed) chain — an option leg by symbol,
+ * or the chain's future. Null when the contract is no longer in the chain's window.
+ */
+export function chainQuote(
+  chain: Pick<OptionChain, 'rows' | 'future'> | null | undefined,
+  tradingsymbol: string,
+): PaperTicketQuote | null {
+  if (!chain) return null;
+  for (const row of chain.rows) {
+    const leg =
+      row.call?.tradingsymbol === tradingsymbol
+        ? row.call
+        : row.put?.tradingsymbol === tradingsymbol
+          ? row.put
+          : null;
+    if (leg) {
+      return {
+        lastPrice: leg.lastPrice,
+        impliedVolatility: leg.impliedVolatility,
+        delta: leg.greeks?.delta ?? null,
+      };
+    }
+  }
+  if (chain.future?.tradingsymbol === tradingsymbol) {
+    return { lastPrice: chain.future.lastPrice, impliedVolatility: null, delta: null };
+  }
+  return null;
+}
+
+/* ── Explore ──────────────────────────────────────────────────────────────────────────── */
+
+/** The fields of GET /market/indices (and its socket) the paper Explore reads. */
+export interface IndexQuoteLike {
+  exchange: string;
+  symbol: string;
+  label?: string;
+  ltp: number | null;
+  change?: number | null;
+  changePct?: number | null;
+  /** Server-computed (IST): an option on this index expires today. */
+  isExpiryToday?: boolean;
+}
+
+export interface PaperIndexTile {
+  key: string;
+  label: string;
+  ltp: number;
+  change: number | null;
+  changePct: number | null;
+  /** The chain to open, or null when the catalogue lists no options on this index. */
+  underlying: string | null;
+  expiryToday: boolean;
+}
+
+/** Priced indices, each linked to its paper chain only when the catalogue really lists one. */
+export function paperIndexTiles(
+  indices: readonly IndexQuoteLike[],
+  catalogue: ReadonlySet<string>,
+): PaperIndexTile[] {
+  const out: PaperIndexTile[] = [];
+  for (const idx of indices) {
+    if (typeof idx.ltp !== 'number' || !Number.isFinite(idx.ltp)) continue;
+    const label = idx.label ?? idx.symbol;
+    out.push({
+      key: `${idx.exchange}:${idx.symbol}`,
+      label,
+      ltp: idx.ltp,
+      change: idx.change ?? null,
+      changePct: idx.changePct ?? null,
+      underlying: indexUnderlying(label, catalogue),
+      expiryToday: idx.isExpiryToday === true,
+    });
+  }
+  return out;
 }

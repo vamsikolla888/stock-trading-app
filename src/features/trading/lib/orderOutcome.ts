@@ -44,7 +44,7 @@ export function describeLiveOrder(order: LiveOrder): OrderOutcome {
       return {
         tone: 'pending',
         title: 'Order placed',
-        message: `Your order for ${what} is open. Track it under Portfolio → Orders.`,
+        message: `Your order for ${what} is open. Track it under Your live orders on the Trade tab.`,
         details: [],
       };
     case 'RISK_REJECTED':
@@ -75,7 +75,7 @@ export function describeLiveOrder(order: LiveOrder): OrderOutcome {
         tone: 'warning',
         title: 'Waiting for confirmation',
         message:
-          "The broker didn't confirm in time. Check Portfolio → Orders before trying again — do not place this order a second time.",
+          "The broker didn't confirm in time. Check Your live orders on the Trade tab before trying again — do not place this order a second time.",
         details: [],
       };
     default:

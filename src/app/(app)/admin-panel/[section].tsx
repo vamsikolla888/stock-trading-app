@@ -17,6 +17,8 @@ import { UsersPanel } from '@/features/admin/panels/UsersPanel';
 import { adminSection, type AdminSectionId } from '@/features/admin/sections';
 import { useAuthStore } from '@/store/authStore';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 /** One screen per admin console section; each panel owns its StackScreen. */
 const PANELS: Record<AdminSectionId, React.ComponentType> = {
   health: HealthPanel,

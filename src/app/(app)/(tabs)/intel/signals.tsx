@@ -124,7 +124,8 @@ function ReliabilitySection() {
         <>
           <ListCard className="mt-1">
             {rows.map((row, index) => (
-              <View key={row.screenerKey}>
+              // One record per screener AND hold period (the server's unique key).
+              <View key={`${row.screenerKey}:${row.holdDays}`}>
                 {index > 0 ? <RowDivider /> : null}
                 <View
                   accessible

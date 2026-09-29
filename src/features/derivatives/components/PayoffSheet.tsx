@@ -4,6 +4,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { InlineError } from '@/components/common/InlineError';
 import { Caveats, Disclosure, FieldLabel, Note } from '@/features/fno/components/primitives';
 import { Sheet } from '@/features/fno/components/Sheet';
+import { formatNumber } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { usePaperPayoff } from '../hooks';
@@ -78,7 +79,8 @@ function PayoffBody({ positions }: { positions: FnoPositionView[] }) {
         Modelled from the legs’ entry prices and the market’s implied volatility — not a forecast.
       </Note>
       <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint">
-        {data.legs.length} leg{data.legs.length === 1 ? '' : 's'} · {data.underlying}
+        {positions.length} position{positions.length === 1 ? '' : 's'} · {data.underlying}
+        {data.spot != null ? ` · spot ${formatNumber(data.spot)}` : ''}
       </Text>
     </View>
   );

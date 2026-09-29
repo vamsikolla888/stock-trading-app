@@ -6,13 +6,19 @@ import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import React, { useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { InlineError } from '@/components/common/InlineError';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
+import { Banner } from '@/components/ui/Banner';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import type { DerivedAlert } from '@/features/alerts/deriveAlerts';
 import { useNotifications } from '@/features/alerts/hooks';
+import { useTodayPicks } from '@/features/insights/api';
+import { useBrokerConnections } from '@/features/trading/hooks';
 import { stockHref } from '@/lib/navigation';
 import { cn } from '@/lib/utils/cn';
 import { useTheme } from '@/theme/ThemeProvider';
+
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 /** Opening the list marks everything read after a moment — like the web bell's panel. */
 const MARK_READ_DELAY_MS = 1200;
@@ -21,6 +27,14 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { alerts, isRead, markAllRead, isLoading, refetch } = useNotifications();
+  // The same cached queries the bell derives from — read here only for their failure
+  // state, so an unreachable server isn't shown as "all caught up".
+  const picks = useTodayPicks();
+  const brokers = useBrokerConnections();
+  // Only a source with nothing loaded counts: a failed background refresh keeps its data.
+  const sourceError =
+    (picks.data === undefined ? picks.error : null) ??
+    (brokers.data === undefined ? brokers.error : null);
 
   useEffect(() => {
     const timer = setTimeout(markAllRead, MARK_READ_DELAY_MS);
@@ -43,8 +57,17 @@ export default function NotificationsScreen() {
 
   return (
     <StackScreen title="Notifications" onRefresh={refetch}>
+      {sourceError && !isLoading && alerts.length > 0 ? (
+        <Banner
+          tone="warning"
+          className="mb-3"
+          message="Some alerts couldn’t be checked just now. Pull to refresh."
+        />
+      ) : null}
       {isLoading ? (
         <ListSkeleton rows={3} />
+      ) : alerts.length === 0 && sourceError ? (
+        <InlineError what="your alerts" error={sourceError} onRetry={() => void refetch()} />
       ) : alerts.length === 0 ? (
         <View className="items-center gap-3 py-16">
           <BellOff size={32} color={colors.textFaint} />

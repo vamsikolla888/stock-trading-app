@@ -50,12 +50,29 @@ export function costShares(groups: readonly UsageGroup[]): Map<string, number> {
   return new Map(groups.map((group) => [group.key, max > 0 ? (group.costUsd / max) * 100 : 0]));
 }
 
+// Reused across bars — building an Intl.DateTimeFormat per label is slow on Hermes. The
+// server buckets in IST, so labels are read in IST too (a device elsewhere would otherwise
+// show the previous day for an IST-midnight bucket).
+let monthFormat: Intl.DateTimeFormat | null = null;
+let dayFormat: Intl.DateTimeFormat | null = null;
+
 export function usageBucketLabel(iso: string, period: UsagePeriod): string {
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return '';
-  if (period === 'month')
-    return new Intl.DateTimeFormat('en-IN', { month: 'short', year: '2-digit' }).format(ms);
-  const day = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(ms);
+  if (period === 'month') {
+    monthFormat ??= new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      year: '2-digit',
+    });
+    return monthFormat.format(ms);
+  }
+  dayFormat ??= new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+  });
+  const day = dayFormat.format(ms);
   return period === 'week' ? `w/c ${day}` : day;
 }
 

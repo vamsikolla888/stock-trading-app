@@ -1,7 +1,7 @@
 module.exports = {
   root: true,
   extends: ['expo', 'prettier'],
-  ignorePatterns: ['/dist/*', '/node_modules/*', '/.expo/*', '/android/*', '/ios/*'],
+  ignorePatterns: ['/dist/*', '/node_modules/*', '/.expo/*', '/.kilo/*', '/android/*', '/ios/*'],
   rules: {
     'import/order': [
       'warn',

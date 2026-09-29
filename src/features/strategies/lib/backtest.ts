@@ -52,6 +52,17 @@ export function recentTrades(trades: readonly BacktestTrade[], limit = 12): Back
   return [...trades].sort((a, b) => b.exitTime - a.exitTime).slice(0, limit);
 }
 
+/**
+ * A trade's net return in PERCENT units. The server stores each trade's `returnPct` as a
+ * FRACTION (0.031 = +3.1%, see backtest.service.ts makeTrade), unlike every aggregate on the
+ * run (win rate, expectancy, totals), which are already percentages.
+ */
+export function tradeReturnPercent(trade: Pick<BacktestTrade, 'returnPct'>): number | null {
+  return typeof trade.returnPct === 'number' && Number.isFinite(trade.returnPct)
+    ? trade.returnPct * 100
+    : null;
+}
+
 export const EXIT_REASON_LABEL: Record<ExitReason, string> = {
   target: 'Target',
   stop: 'Stop',
@@ -89,7 +100,7 @@ export function parameterRows(
   if (universe.maxSymbols != null) {
     rows.push({ label: 'Max symbols', value: formatNumber(universe.maxSymbols, 0) });
   }
-  if (run) rows.push({ label: 'Max positions', value: String(run.maxOpenPositions) });
+  if (run) rows.push({ label: 'Max positions', value: formatNumber(run.maxOpenPositions, 0) });
   rows.push({ label: 'Position sizing', value: 'Equal weight' });
   const exit = rules.exit ?? { any: [] };
   if (exit.targetPct != null) rows.push({ label: 'Target', value: `+${exit.targetPct}%` });
@@ -97,13 +108,14 @@ export function parameterRows(
   if (exit.maxHoldBars != null) {
     rows.push({ label: 'Time stop', value: `${exit.maxHoldBars} bars` });
   }
-  if (exit.any.length > 0) {
+  const exitRules = exit.any ?? [];
+  if (exitRules.length > 0) {
     rows.push({
       label: 'Exit rules',
-      value: `${exit.any.length} condition${exit.any.length === 1 ? '' : 's'}`,
+      value: `${exitRules.length} condition${exitRules.length === 1 ? '' : 's'}`,
     });
   }
-  if (run) rows.push({ label: 'Costs', value: `${run.costBps} bps per side` });
+  if (run) rows.push({ label: 'Costs', value: `${formatNumber(run.costBps, 0)} bps per side` });
   return rows;
 }
 
@@ -119,22 +131,60 @@ export interface MatrixModel {
 }
 
 /**
+ * The strategies the matrix compares: only ones whose backtest produced trades (there is
+ * nothing to plot otherwise), in the list's own order (most recently updated first), capped
+ * like the web — eight rows is a comparison, forty is a scroll bar. `total` is what the cap
+ * left out of, so the screen can say so.
+ */
+export function matrixCandidates<T extends { metrics: { totalTrades: number } | null }>(
+  strategies: readonly T[],
+  maxRows = MATRIX_MAX_ROWS,
+): { shown: T[]; total: number } {
+  const runnable = strategies.filter((s) => s.metrics != null && s.metrics.totalTrades > 0);
+  return { shown: runnable.slice(0, maxRows), total: runnable.length };
+}
+
+/** "NSE:RELIANCE" → { exchange: 'NSE', symbol: 'RELIANCE' }. */
+export function splitMatrixKey(key: string): { exchange: string; symbol: string } {
+  const at = key.indexOf(':');
+  return at < 0
+    ? { exchange: 'NSE', symbol: key }
+    : { exchange: key.slice(0, at), symbol: key.slice(at + 1) };
+}
+
+/**
+ * Column headings: the bare symbol, plus the exchange only when the same symbol heads two
+ * columns (NSE and BSE listings of one company) — two identical headings would read as one.
+ */
+export function matrixColumnLabels(columns: readonly string[]): string[] {
+  const parts = columns.map(splitMatrixKey);
+  const seen = new Map<string, number>();
+  for (const { symbol } of parts) seen.set(symbol, (seen.get(symbol) ?? 0) + 1);
+  return parts.map(({ exchange, symbol }) =>
+    (seen.get(symbol) ?? 0) > 1 ? `${symbol} · ${exchange}` : symbol,
+  );
+}
+
+/**
  * Columns are the stocks every compared strategy actually traded, ranked by trades summed
- * across them — so no cell is a blank masquerading as a zero.
+ * across them — so no cell is a blank masquerading as a zero. A row without per-stock stats
+ * (a run recorded before they existed) has traded nothing in common with anyone.
  */
 export function buildMatrix(
-  symbolStatsPerStrategy: readonly (readonly SymbolStats[])[],
+  symbolStatsPerStrategy: readonly (readonly SymbolStats[] | null | undefined)[],
   maxCols = MATRIX_MAX_COLS,
 ): MatrixModel {
   const rows = symbolStatsPerStrategy.map((stats) => {
     const map = new Map<string, SymbolStats>();
-    for (const s of stats) map.set(`${s.exchange}:${s.symbol}`, s);
+    for (const s of stats ?? []) map.set(`${s.exchange}:${s.symbol}`, s);
     return map;
   });
   if (rows.length === 0) return { columns: [], rows };
   const counts = new Map<string, number>();
   for (const map of rows) {
-    for (const [key, s] of map) counts.set(key, (counts.get(key) ?? 0) + s.trades);
+    for (const [key, s] of map) {
+      counts.set(key, (counts.get(key) ?? 0) + (Number.isFinite(s.trades) ? s.trades : 0));
+    }
   }
   const columns = [...counts.keys()]
     .filter((key) => rows.every((map) => map.has(key)))
@@ -163,4 +213,29 @@ export function matrixCell(stats: SymbolStats | undefined, metric: MatrixMetric)
   const good = metric === 'profitFactor' ? value > 1 : value > 50;
   const strong = metric === 'profitFactor' ? value >= 1.5 : value >= 60;
   return { text, tone: strong ? 'strong' : good ? 'good' : 'weak' };
+}
+
+export interface MatrixLegendItem {
+  tone: Extract<CellTone, 'strong' | 'good' | 'weak' | 'thin'>;
+  /** A value that falls in the band, drawn in the band's style. */
+  sample: string;
+  label: string;
+}
+
+/** The colour key for the active metric — the thresholds `matrixCell` applies, in words. */
+export function matrixLegend(metric: MatrixMetric): MatrixLegendItem[] {
+  const thin = `Under ${MIN_TRADES_FOR_SYMBOL_STATS} trades`;
+  return metric === 'profitFactor'
+    ? [
+        { tone: 'strong', sample: '1.80', label: '1.50 or more' },
+        { tone: 'good', sample: '1.20', label: 'Above 1' },
+        { tone: 'weak', sample: '0.80', label: '1 or below' },
+        { tone: 'thin', sample: '2.40', label: thin },
+      ]
+    : [
+        { tone: 'strong', sample: '64%', label: '60% or more' },
+        { tone: 'good', sample: '55%', label: 'Above 50%' },
+        { tone: 'weak', sample: '42%', label: '50% or below' },
+        { tone: 'thin', sample: '80%', label: thin },
+      ];
 }

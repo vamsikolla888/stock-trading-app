@@ -68,7 +68,7 @@ export function fromLinkedHolding(holding: LinkedHoldingRow): HoldingView {
 
 /** Same product → kind rule the server applies to mStock rows (portfolio-positions.ts). */
 export function fromLinkedPosition(position: LinkedPositionRow): PositionRow {
-  const product = position.product.toUpperCase();
+  const product = (position.product ?? '').toUpperCase();
   return {
     sym: position.sym,
     exch: position.exch,

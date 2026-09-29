@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Logo } from '@/components/brand/Logo';
 import { Button } from '@/components/ui/Button';
+import { appConfig } from '@/config/app';
 import { useLogout } from '@/features/auth/hooks/useAuth';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -31,12 +32,16 @@ export function AppLock({ children }: { children: React.ReactNode }) {
     setPrompting(true);
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Unlock The Ledger',
+        promptMessage: `Unlock ${appConfig.name}`,
         cancelLabel: 'Cancel',
         disableDeviceFallback: false,
       });
       setFailed(!result.success);
       if (result.success) setLocked(false);
+    } catch {
+      // The native prompt itself failed (no biometrics set up any more, a system error):
+      // stay locked and offer the retry and sign-out buttons rather than an unhandled error.
+      setFailed(true);
     } finally {
       setPrompting(false);
     }

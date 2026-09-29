@@ -1,5 +1,6 @@
 import { apiClient } from '@/services/api/client';
 
+import { normalizeStrongPicks } from './lib/strongPicks';
 import type { StrongPicksResponse } from './types';
 
 export const strongPicksApi = {
@@ -9,6 +10,6 @@ export const strongPicksApi = {
       params: date ? { date } : undefined,
       signal,
     });
-    return data;
+    return normalizeStrongPicks(data);
   },
 };

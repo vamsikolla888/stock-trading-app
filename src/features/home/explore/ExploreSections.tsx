@@ -6,7 +6,6 @@ import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
-import { Sparkline } from '@/components/market/Sparkline';
 import { StockLogo } from '@/components/market/StockLogo';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Badge } from '@/components/ui/Badge';
@@ -33,7 +32,6 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
 import { MoverRow } from '../components/MoverRow';
-import { moverTrendShape } from '../lib/dayShape';
 import { formatIstDateTime } from '../lib/istTime';
 
 const numbers = { fontVariant: ['tabular-nums' as const] };
@@ -148,7 +146,10 @@ export function MoversPreview() {
       title="Top movers"
       action={{
         label: 'See all',
-        onPress: () => router.push({ pathname: '/movers', params: { kind } }),
+        onPress: () =>
+          router.push(
+            kind === 'volume' ? '/most-traded' : { pathname: '/movers', params: { kind } },
+          ),
       }}
     >
       <Chips items={MOVER_CHIPS} value={kind} onChange={setKind} className="mb-3" />
@@ -255,7 +256,7 @@ export function MostTradedShelf() {
       title="Most traded"
       action={{
         label: 'See all',
-        onPress: () => router.push({ pathname: '/movers', params: { kind: 'volume' } }),
+        onPress: () => router.push('/most-traded'),
       }}
     >
       {body}

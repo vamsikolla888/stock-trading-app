@@ -23,6 +23,7 @@ import { OverviewTab } from '@/features/stock/components/OverviewTab';
 import { PriceChartSection } from '@/features/stock/components/PriceChartSection';
 import { StockHeader } from '@/features/stock/components/StockHeader';
 import { newsSymbolFor, stockPriceView } from '@/features/stock/lib/priceView';
+import { parseStockParams } from '@/features/stock/lib/routeParams';
 import { useListsContaining } from '@/features/watchlists/hooks';
 import { useNow } from '@/hooks/useNow';
 import { orderHref } from '@/lib/navigation';
@@ -31,6 +32,8 @@ import { formatINR } from '@/lib/utils/formatters';
 import { isMarketOpen } from '@/lib/utils/market';
 import { useTheme } from '@/theme/ThemeProvider';
 import { isApiError } from '@/types/api';
+
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
 type DetailTab = 'overview' | 'analysis' | 'news';
 
@@ -97,10 +100,11 @@ export default function StockDetailScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
-  const params = useLocalSearchParams<{ symbol: string; exchange?: string }>();
-  const symbol = decodeURIComponent(params.symbol ?? '').toUpperCase();
-  // The stocks API knows two exchanges; anything else is treated as the NSE listing.
-  const exchange = params.exchange?.toUpperCase() === 'BSE' ? 'BSE' : 'NSE';
+  const params = useLocalSearchParams<{
+    symbol?: string | string[];
+    exchange?: string | string[];
+  }>();
+  const { symbol, exchange } = parseStockParams(params);
 
   const detail = useStockDetail(symbol, exchange);
   // `mutate` is stable across renders, so this records once per stock opened.
@@ -114,11 +118,17 @@ export default function StockDetailScreen() {
   const marketOpen = isMarketOpen(new Date(now));
   const todayIst = istDayKey(now) ?? '';
 
-  useEffect(() => {
-    if (symbol) recordView({ exchange, symbol });
-  }, [recordView, exchange, symbol]);
-
   const data = detail.data;
+
+  // Recorded once the stock is known to exist, under its catalogue key: the server rejects
+  // an unknown symbol, so recording from the raw link would fail for every mistyped one.
+  const viewedExchange = data?.exchange;
+  const viewedSymbol = data?.symbol;
+  useEffect(() => {
+    if (viewedExchange && viewedSymbol)
+      recordView({ exchange: viewedExchange, symbol: viewedSymbol });
+  }, [recordView, viewedExchange, viewedSymbol]);
+
   // The latest daily bar is only needed when the snapshot's volume isn't today's.
   const needDailyVolume = Boolean(data) && istDayKey(data?.volumeAsOf) !== todayIst;
   const daily = useCandles(symbol, exchange, '1Y', needDailyVolume || tab === 'analysis');
@@ -131,7 +141,12 @@ export default function StockDetailScreen() {
   const displaySymbol =
     data?.listings?.find((listing) => listing.exchange === exchange)?.displaySymbol ?? symbol;
   const watched = watch.containing.size > 0;
-  const notFound = !data && isApiError(detail.error) && detail.error.status === 404;
+  // No symbol in the link, no such stock (404), or one the API refuses to look up (422).
+  const notFound =
+    !symbol ||
+    (!data &&
+      isApiError(detail.error) &&
+      (detail.error.status === 404 || detail.error.status === 422));
 
   const priceNote = !data
     ? null
@@ -179,26 +194,28 @@ export default function StockDetailScreen() {
 
   return (
     <StackScreen
-      title={displaySymbol}
+      title={displaySymbol || 'Stock'}
       subtitle={exchange}
-      onRefresh={onRefresh}
+      onRefresh={symbol ? onRefresh : undefined}
       footer={footer}
       right={
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={watched ? 'In your watchlist — manage lists' : 'Add to watchlist'}
-          hitSlop={8}
-          onPress={() =>
-            router.push({ pathname: '/watchlist-picker', params: { symbol, exchange } })
-          }
-          className="h-10 w-10 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
-        >
-          <Star
-            size={22}
-            color={watched ? colors.accent : colors.text}
-            fill={watched ? colors.accent : 'none'}
-          />
-        </Pressable>
+        notFound ? undefined : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={watched ? 'In your watchlist — manage lists' : 'Add to watchlist'}
+            hitSlop={8}
+            onPress={() =>
+              router.push({ pathname: '/watchlist-picker', params: { symbol, exchange } })
+            }
+            className="h-10 w-10 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+          >
+            <Star
+              size={22}
+              color={watched ? colors.accent : colors.text}
+              fill={watched ? colors.accent : 'none'}
+            />
+          </Pressable>
+        )
       }
     >
       {notFound ? (
@@ -206,7 +223,11 @@ export default function StockDetailScreen() {
           <Banner
             tone="info"
             title="Stock not found"
-            message={`${exchange}:${symbol} isn’t in our stock catalogue. Check the symbol, or search for the company instead.`}
+            message={
+              symbol
+                ? `${exchange}:${symbol} isn’t in our stock catalogue. Check the symbol, or search for the company instead.`
+                : 'This link doesn’t name a stock. Search for the company instead.'
+            }
           />
           <Button
             label="Search stocks"

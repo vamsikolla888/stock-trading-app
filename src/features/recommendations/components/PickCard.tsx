@@ -50,9 +50,13 @@ export const PickCard = memo(function PickCard({ pick, review }: PickCardProps) 
   const change = quote.data?.ltp != null ? (quote.data.changePct ?? null) : null;
   const upside = upsidePct(price, pick.target);
   const progress = levelProgress(price, pick.stop, pick.target);
+  // Rows written before a field existed come back without it; neither may take the card down.
+  const reasons = Array.isArray(pick.why) ? pick.why : [];
   const signal =
-    pick.why[0]?.head ?? (pick.source === 'historical' ? 'Technical setup' : 'News signal');
-  const verdict = review ? VERDICT[review.verdict] : null;
+    reasons[0]?.head ?? (pick.source === 'historical' ? 'Technical setup' : 'News signal');
+  // Unknown verdicts (a value added server-side later) show no badge rather than crash.
+  const verdict = review ? (VERDICT[review.verdict] ?? null) : null;
+  const contradictions = Array.isArray(review?.contradictions) ? review.contradictions : [];
 
   return (
     <View className="overflow-hidden rounded-card border border-line bg-surface dark:border-line-dark dark:bg-surface-dark">
@@ -149,7 +153,7 @@ export const PickCard = memo(function PickCard({ pick, review }: PickCardProps) 
 
       {open ? (
         <View className="px-4 pb-4">
-          {pick.why.map((reason, index) => (
+          {reasons.map((reason, index) => (
             <View key={`${index}-${reason.head}`} className="mt-2 flex-row gap-2">
               <Text className="text-[13px] text-ink-faint dark:text-ink-dark-faint">•</Text>
               <View className="flex-1">
@@ -185,14 +189,16 @@ export const PickCard = memo(function PickCard({ pick, review }: PickCardProps) 
           {review ? (
             <View className="mt-4 rounded-lg bg-surface-sunk p-3 dark:bg-surface-sunk-dark">
               <Text className="text-xs font-semibold text-ink dark:text-ink-dark">
-                {VERDICT[review.verdict].label}
+                {verdict?.label ?? 'Cross-check'}
               </Text>
-              <Text className="mt-1 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
-                {review.reasoning}
-              </Text>
-              {review.contradictions.map((line) => (
+              {review.reasoning ? (
+                <Text className="mt-1 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
+                  {review.reasoning}
+                </Text>
+              ) : null}
+              {contradictions.map((line, index) => (
                 <Text
-                  key={line}
+                  key={`${index}-${line}`}
                   className="mt-1 text-xs leading-[17px] text-warning-600 dark:text-warning-dark"
                 >
                   Against: {line}

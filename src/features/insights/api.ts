@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { strongPicksApi } from '@/features/strong-picks/api';
 import { livePriceInterval } from '@/lib/utils/market';
 import { apiClient } from '@/services/api/client';
 
@@ -15,9 +16,12 @@ export const insightsApi = {
     const { data } = await apiClient.get<CurrentRecommendationsResponse>('/recommendations/today');
     return data;
   },
+  /**
+   * Shares its cache entry with the Strong picks screen (same key), so it goes through the
+   * same normalising read — whichever fetches first, the cached shape is the same.
+   */
   async strongPicks(): Promise<StrongPicksResponse> {
-    const { data } = await apiClient.get<StrongPicksResponse>('/recommendations/strong-picks');
-    return data;
+    return strongPicksApi.get();
   },
   async signals(): Promise<SignalsResponse> {
     const { data } = await apiClient.get<SignalsResponse>('/signals');

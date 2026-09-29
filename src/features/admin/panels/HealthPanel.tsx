@@ -27,7 +27,7 @@ const DESCRIPTION: Record<string, string> = {
   mongo: 'Primary datastore · admin ping',
   redis: 'Cache, queues, pub/sub · PING',
   mstock: 'Broker REST · from circuit breakers',
-  'quant-service': 'Python backtester · /health/live',
+  'quant-service': 'Python backtester · /api/v1/health/live',
   worker: 'Jobs process · Redis heartbeat',
   'screener-worker': 'Screener process · Redis heartbeat',
 };

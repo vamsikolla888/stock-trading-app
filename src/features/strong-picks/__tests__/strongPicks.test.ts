@@ -3,10 +3,16 @@ import {
   formatRewardRisk,
   groupRejections,
   monitorSampleNote,
+  normalizeStrongPicks,
   progressPercent,
   stageLabel,
 } from '@/features/strong-picks/lib/strongPicks';
-import type { MarketSegment, StrongPick, StrongPickRejection } from '@/features/strong-picks/types';
+import type {
+  MarketSegment,
+  StrongPick,
+  StrongPickRejection,
+  StrongPicksResponse,
+} from '@/features/strong-picks/types';
 
 function pick(symbol: string, suitable: Partial<Record<MarketSegment, boolean>>): StrongPick {
   const segments = (['equity', 'intraday', 'fno'] as const).map((segment) => ({
@@ -130,5 +136,47 @@ describe('formatting', () => {
     expect(progressPercent(1.4)).toBe(100);
     expect(progressPercent(-0.2)).toBe(0);
     expect(progressPercent(null)).toBeNull();
+  });
+});
+
+describe('normalizeStrongPicks', () => {
+  const response = (picks: unknown[]): StrongPicksResponse =>
+    ({
+      date: '2026-09-01',
+      picks,
+      generatedAt: null,
+      run: {
+        status: 'published',
+        verdict: 'Published 1.',
+        considered: 1,
+        consideredBySource: [],
+        survivedOpen: 1,
+        reachedModel: 1,
+        published: 1,
+        rejections: [],
+        minSetupScore: 55,
+        minCalibratedWinRate: 55,
+        unavailableSources: [],
+        finishedAt: null,
+      },
+      lastPublished: null,
+      marketOpen: false,
+      caveats: undefined,
+    }) as unknown as StrongPicksResponse;
+
+  it('gives a pick stored before per-segment verdicts empty arrays the screen can filter', () => {
+    const legacy: Partial<StrongPick> = pick('OLD', { equity: true });
+    delete legacy.segments;
+    delete legacy.segmentVerdicts;
+    const normalized = normalizeStrongPicks(response([legacy]));
+    expect(normalized.picks[0]?.segmentVerdicts).toEqual([]);
+    expect(normalized.picks[0]?.segments).toEqual([]);
+    expect(normalized.caveats).toEqual([]);
+    expect(filterBySegment(normalized.picks, 'intraday')).toEqual([]);
+  });
+
+  it('leaves a current pick as it is', () => {
+    const current = pick('NEW', { equity: true, fno: true });
+    expect(normalizeStrongPicks(response([current])).picks[0]).toEqual(current);
   });
 });

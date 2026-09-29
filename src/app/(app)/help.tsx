@@ -8,10 +8,12 @@ import { appConfig } from '@/config/app';
 import { appVersion } from '@/config/env';
 import { useTheme } from '@/theme/ThemeProvider';
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
+
 const FAQ: { q: string; a: string }[] = [
   {
     q: 'How do I connect my broker?',
-    a: 'Go to Account → Broker connections. mStock asks for your API key, checksum and login, then a daily code. Groww needs an API key and TOTP secret once — its daily token renews automatically.',
+    a: 'Go to Settings → Broker connections. mStock asks for your API key, checksum and login, then a daily code. Groww needs an API key and TOTP secret once — its daily token renews automatically.',
   },
   {
     q: 'Why does mStock ask for a code every day?',
