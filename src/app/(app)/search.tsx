@@ -5,9 +5,10 @@ import Search from 'lucide-react-native/icons/search';
 import X from 'lucide-react-native/icons/x';
 import React, { useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
+import { SCREEN_EDGES_NO_BOTTOM } from '@/components/common/safeArea';
 import { StockRow } from '@/components/market/StockRow';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { ListCard, RowDivider, Section } from '@/components/ui/Section';
@@ -39,6 +40,7 @@ const POPULAR_SHOWN = 6;
 export default function SearchScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
   const [query, setQuery] = useState('');
   const debounced = useDebounce(query.trim(), SEARCH_DEBOUNCE_MS);
@@ -134,7 +136,10 @@ export default function SearchScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.background }}>
+    <SafeAreaView
+      edges={SCREEN_EDGES_NO_BOTTOM}
+      style={{ flex: 1, backgroundColor: colors.background }}
+    >
       <View className="flex-row items-center gap-2 border-b border-line px-3 pb-3 pt-2 dark:border-line-dark">
         <Pressable
           accessibilityRole="button"
@@ -182,7 +187,8 @@ export default function SearchScreen() {
         contentContainerStyle={{
           paddingHorizontal: 20,
           paddingTop: phase === 'idle' ? 0 : 16,
-          paddingBottom: 40,
+          // The bottom edge is left to the list, so it scrolls under the home indicator.
+          paddingBottom: insets.bottom + 24,
         }}
         showsVerticalScrollIndicator={false}
       >

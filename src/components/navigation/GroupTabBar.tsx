@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from 'expo-router/tabs';
-import React, { useEffect, useRef } from 'react';
-import { type LayoutRectangle, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '@/components/navigation/AppHeader';
@@ -10,40 +10,116 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 /**
  * The top of every main-menu tab: the app bar, then the group's sub-tabs as a scrollable
- * row of text tabs with an underline on the active one — Groww's "Explore | Holdings |
+ * row of text tabs with an underline under the active one — Groww's "Explore | Holdings |
  * Positions | Orders" pattern, and the mobile form of the web's second-tier nav row.
- * Rendered as the inner tab navigator's tab bar, so every sub-screen stays mounted after
- * its first visit and switching back is instant.
+ *
+ * ONE underline, sliding: under the swipeable navigator it rides the pager's `position`, so it
+ * follows the finger and stretches to each label's width mid-swipe; without one (tap-only tabs)
+ * it springs to the tapped tab. Both run on the native driver — no JS work per frame.
  */
-export interface GroupTabBarProps extends BottomTabBarProps {
+export interface GroupTabBarProps {
   group?: string;
+  state: BottomTabBarProps['state'];
+  descriptors: Record<string, { options: { title?: string } } | undefined>;
+  navigation: Pick<BottomTabBarProps['navigation'], 'emit' | 'navigate'>;
+  /** The pager's index plus swipe progress — given by the swipeable navigator. */
+  position?: Animated.AnimatedInterpolation<number>;
 }
 
-export function GroupTabBar({ group, state, descriptors, navigation }: GroupTabBarProps) {
+/** The tab's side padding (px-3.5): the underline spans the label, not the touch target. */
+const TAB_PAD_X = 14;
+/** The underline is drawn at this width and scaled to each label's. */
+const INDICATOR_BASE = 100;
+
+interface TabLayout {
+  x: number;
+  width: number;
+}
+
+export function GroupTabBar({ group, state, descriptors, navigation, position }: GroupTabBarProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const scrollRef = useRef<ScrollView>(null);
-  const layouts = useRef<Record<string, LayoutRectangle>>({});
   const viewportWidth = useRef(0);
+  const [layouts, setLayouts] = useState<Readonly<Record<string, TabLayout>>>({});
+  // Tap-only tabs have no pager position: the underline springs on its own value instead.
+  const [ownPosition] = useState(() => new Animated.Value(state.index));
 
-  // `href: null` on a Tabs.Screen (e.g. Admin for non-admins) arrives as display: none.
-  const visible = state.routes.filter(
-    (route) =>
-      StyleSheet.flatten(descriptors[route.key]?.options.tabBarItemStyle)?.display !== 'none',
-  );
-  const activeKey = state.routes[state.index]?.key;
+  const { routes, index } = state;
+  const activeKey = routes[index]?.key;
 
-  // Keep the active tab in view — it may start off-screen after a deep link.
   useEffect(() => {
-    const layout = activeKey ? layouts.current[activeKey] : undefined;
-    if (!layout || viewportWidth.current === 0) return;
-    const target = Math.max(0, layout.x - (viewportWidth.current - layout.width) / 2);
+    if (position) return;
+    Animated.spring(ownPosition, {
+      toValue: index,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 0,
+    }).start();
+  }, [position, ownPosition, index]);
+
+  // Keep the active tab in view — it may start off-screen after a deep link, or be swiped to.
+  const activeLayout = activeKey ? layouts[activeKey] : undefined;
+  useEffect(() => {
+    if (!activeLayout || viewportWidth.current === 0) return;
+    const target = Math.max(0, activeLayout.x - (viewportWidth.current - activeLayout.width) / 2);
     scrollRef.current?.scrollTo({ x: target, animated: true });
-  }, [activeKey]);
+  }, [activeLayout]);
+
+  const onTabLayout = useCallback((key: string, x: number, width: number) => {
+    setLayouts((current) => {
+      const known = current[key];
+      return known && known.x === x && known.width === width
+        ? current
+        : { ...current, [key]: { x, width } };
+    });
+  }, []);
+
+  const measured = routes.map((route) => layouts[route.key]);
+  const ready = measured.length > 0 && measured.every(Boolean);
+
+  let indicator: React.ReactNode = null;
+  if (ready) {
+    const spans = (measured as TabLayout[]).map((layout) => ({
+      x: layout.x + TAB_PAD_X,
+      scale: Math.max(0, layout.width - TAB_PAD_X * 2) / INDICATOR_BASE,
+    }));
+    const progress = position ?? ownPosition;
+    // interpolate needs two stops; a group of one has a still underline.
+    const inputRange = spans.length > 1 ? spans.map((_, i) => i) : [0, 1];
+    const at = (pick: (span: (typeof spans)[number]) => number) =>
+      progress.interpolate({
+        inputRange,
+        outputRange: spans.length > 1 ? spans.map(pick) : [pick(spans[0]!), pick(spans[0]!)],
+        extrapolate: 'clamp',
+      });
+    indicator = (
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          bottom: 0,
+          height: 3,
+          width: INDICATOR_BASE,
+          borderTopLeftRadius: 2,
+          borderTopRightRadius: 2,
+          backgroundColor: colors.accent,
+          transformOrigin: 'left',
+          transform: [{ translateX: at((span) => span.x) }, { scaleX: at((span) => span.scale) }],
+        }}
+      />
+    );
+  }
 
   return (
     <View
-      style={{ paddingTop: insets.top, backgroundColor: colors.background }}
+      style={{
+        paddingTop: insets.top,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+        backgroundColor: colors.background,
+      }}
       className="border-b border-line dark:border-line-dark"
     >
       <AppHeader group={group} />
@@ -57,7 +133,7 @@ export function GroupTabBar({ group, state, descriptors, navigation }: GroupTabB
         }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 7, paddingBottom: 0 }}
       >
-        {visible.map((route) => {
+        {routes.map((route) => {
           const options = descriptors[route.key]?.options;
           const label = options?.title ?? route.name;
           const focused = route.key === activeKey;
@@ -82,7 +158,8 @@ export function GroupTabBar({ group, state, descriptors, navigation }: GroupTabB
               accessibilityLabel={label}
               onPress={onPress}
               onLayout={(event) => {
-                layouts.current[route.key] = event.nativeEvent.layout;
+                const { x, width } = event.nativeEvent.layout;
+                onTabLayout(route.key, x, width);
               }}
               className="mr-1.5 px-3.5 pt-2.5 pb-0"
             >
@@ -96,12 +173,17 @@ export function GroupTabBar({ group, state, descriptors, navigation }: GroupTabB
               >
                 {label}
               </Text>
+              {/* Until every tab is measured, the active one draws its own underline. */}
               <View
-                className={cn('h-[3px] rounded-t-full', focused ? 'bg-brand' : 'bg-transparent')}
+                className={cn(
+                  'h-[3px] rounded-t-full',
+                  !ready && focused ? 'bg-brand' : 'bg-transparent',
+                )}
               />
             </Pressable>
           );
         })}
+        {indicator}
       </ScrollView>
     </View>
   );

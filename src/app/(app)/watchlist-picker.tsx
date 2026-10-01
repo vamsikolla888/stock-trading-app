@@ -7,6 +7,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InlineError } from '@/components/common/InlineError';
+import { SCREEN_EDGES } from '@/components/common/safeArea';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import { CreateListForm } from '@/features/watchlists/components/CreateListForm';
 import {
@@ -46,7 +47,7 @@ export default function WatchlistPickerScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.surface }}>
+    <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.surface }}>
       <View className="flex-row items-center gap-3 px-5 pb-3 pt-4">
         <View className="flex-1">
           <Text

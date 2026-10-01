@@ -4,6 +4,7 @@ import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SCREEN_EDGES } from '@/components/common/safeArea';
 import { LiveScope } from '@/features/market/live';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -17,8 +18,9 @@ interface StackScreenProps {
   /** Render children without the built-in ScrollView (for FlatList screens). */
   scroll?: boolean;
   /**
-   * Full screen: no header bar, and only the side safe areas (where the notch sits in landscape)
-   * — the screen draws its own controls. Used by the advanced chart's full-screen mode.
+   * Full screen: no header bar — the screen draws its own controls. Used by the advanced chart's
+   * full-screen mode. The status bar is hidden there, but the notch / Dynamic Island is not, so
+   * every safe-area edge still applies.
    */
   immersive?: boolean;
 }
@@ -54,10 +56,7 @@ export function StackScreen({
 
   return (
     <LiveScope active={focused}>
-      <SafeAreaView
-        edges={immersive ? ['left', 'right'] : ['top', 'bottom']}
-        style={{ flex: 1, backgroundColor: colors.background }}
-      >
+      <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.background }}>
         {immersive ? null : (
           <View className="min-h-[56px] flex-row items-center gap-2 border-b border-line px-2 dark:border-line-dark">
             <Pressable

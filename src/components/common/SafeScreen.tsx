@@ -1,18 +1,20 @@
 import React from 'react';
 import { StyleSheet, View, type ViewProps } from 'react-native';
-import { type Edge, SafeAreaView } from 'react-native-safe-area-context';
+import { type Edges, SafeAreaView } from 'react-native-safe-area-context';
 
 import { cn } from '@/lib/utils/cn';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { SCREEN_EDGES } from './safeArea';
+
 interface SafeScreenProps extends ViewProps {
-  edges?: Edge[];
+  edges?: Edges;
   scroll?: boolean;
 }
 
 /** Standard screen container: safe-area aware, theme-aware background, consistent horizontal padding. */
 export function SafeScreen({
-  edges = ['top', 'bottom'],
+  edges = SCREEN_EDGES,
   className,
   children,
   ...rest

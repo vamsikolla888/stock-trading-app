@@ -181,7 +181,7 @@ export function PriceChartSection({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Full screen chart"
-            accessibilityHint="Opens the detailed chart in landscape, with intervals and indicators"
+            accessibilityHint="Opens the detailed chart full screen, with intervals and indicators"
             hitSlop={6}
             onPress={() => router.push(chartHref(symbol, exchange, { fullscreen: true }))}
             className="flex-row items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 active:bg-surface-sunk dark:border-line-dark dark:active:bg-surface-sunk-dark"

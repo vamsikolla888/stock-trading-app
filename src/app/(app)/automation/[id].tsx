@@ -47,6 +47,7 @@ import { SwitchRow } from '@/features/settings/components/SwitchRow';
 import { confirmAction } from '@/features/settings/lib/confirm';
 import { formatDateTime, relativeTime } from '@/features/settings/lib/time';
 import { useNow } from '@/hooks/useNow';
+import { animateNextLayout } from '@/lib/animation';
 import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
@@ -449,11 +450,12 @@ export default function AutomationDetailScreen() {
                             execution={execution}
                             now={now}
                             expanded={expanded === execution.id}
-                            onToggle={() =>
+                            onToggle={() => {
+                              animateNextLayout();
                               setExpanded((current) =>
                                 current === execution.id ? null : execution.id,
-                              )
-                            }
+                              );
+                            }}
                             onRetry={blocked ? undefined : () => retryExecution(execution.id)}
                             retrying={retry.isPending}
                           />

@@ -1,7 +1,8 @@
 import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from 'expo-router/tabs';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GroupIcon, type GroupIconName } from '@/components/navigation/GroupIcon';
@@ -41,8 +42,9 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
   const primarySize = Math.max(52, Math.min(64, slotWidth));
   const primaryIconSize = Math.max(22, Math.min(27, primarySize * 0.44));
   const primaryLift = Math.min(16, primarySize * 0.23);
-  const bottomPadding =
-    Platform.OS === 'android' ? 0 : Platform.OS === 'ios' ? Math.max(insets.bottom, 6) : 0;
+  // Clear the home indicator (iOS) and the system navigation bar (Android draws edge to edge,
+  // so the gesture handle or the three buttons sit inside the window).
+  const bottomPadding = Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 6);
 
   return (
     <View
@@ -56,9 +58,7 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
         },
       ]}
     >
-      <View
-        style={[styles.widthConstraint, Platform.OS === 'android' ? styles.androidLowered : null]}
-      >
+      <View style={styles.widthConstraint}>
         <View
           accessibilityRole="tablist"
           style={[
@@ -153,45 +153,77 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
                 android_ripple={{ color: colors.accentWash, borderless: false }}
                 style={({ pressed }) => [styles.slot, pressed && styles.pressed]}
               >
-                <View style={styles.contentColumn}>
-                  <View style={styles.iconWell}>
-                    {icon ? (
+                <TabContent
+                  focused={focused}
+                  label={label}
+                  icon={
+                    icon ? (
                       <GroupIcon
                         name={icon}
                         color={focused ? colors.link : colors.textMuted}
                         focused={focused}
                         size={21}
                       />
-                    ) : null}
-                  </View>
-                  <View style={styles.labelGroup}>
-                    <Text
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.8}
-                      maxFontSizeMultiplier={1.0}
-                      style={[
-                        styles.label,
-                        {
-                          color: focused ? colors.link : colors.textMuted,
-                          fontWeight: focused ? '700' : '500',
-                        },
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                    <View
-                      style={[
-                        styles.activeDot,
-                        { backgroundColor: focused ? colors.link : 'transparent' },
-                      ]}
-                    />
-                  </View>
-                </View>
+                    ) : null
+                  }
+                  activeColor={colors.link}
+                  idleColor={colors.textMuted}
+                />
               </Pressable>
             );
           })}
         </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * A tab's icon, label and dot. Focusing lifts the icon a touch and grows the dot in — one short
+ * timing on the UI thread, so it never waits on the screen that is mounting underneath.
+ */
+function TabContent({
+  focused,
+  label,
+  icon,
+  activeColor,
+  idleColor,
+}: {
+  focused: boolean;
+  label: string;
+  icon: React.ReactNode;
+  activeColor: string;
+  idleColor: string;
+}) {
+  const progress = useSharedValue(focused ? 1 : 0);
+  useEffect(() => {
+    progress.set(withTiming(focused ? 1 : 0, { duration: 180 }));
+  }, [focused, progress]);
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -1.5 * progress.get() }, { scale: 1 + 0.08 * progress.get() }],
+  }));
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: progress.get(),
+    transform: [{ scale: progress.get() }],
+  }));
+
+  return (
+    <View style={styles.contentColumn}>
+      <Animated.View style={[styles.iconWell, iconStyle]}>{icon}</Animated.View>
+      <View style={styles.labelGroup}>
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+          maxFontSizeMultiplier={1.0}
+          style={[
+            styles.label,
+            { color: focused ? activeColor : idleColor, fontWeight: focused ? '700' : '500' },
+          ]}
+        >
+          {label}
+        </Text>
+        <Animated.View style={[styles.activeDot, { backgroundColor: activeColor }, dotStyle]} />
       </View>
     </View>
   );
@@ -205,9 +237,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 560,
     alignSelf: 'center',
-  },
-  androidLowered: {
-    transform: [{ translateY: 4 }],
   },
   bar: {
     width: '100%',

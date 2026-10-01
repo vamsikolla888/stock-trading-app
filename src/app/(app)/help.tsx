@@ -1,11 +1,12 @@
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import React, { useState } from 'react';
-import { LayoutAnimation, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { StackScreen } from '@/components/navigation/StackScreen';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import { appConfig } from '@/config/app';
 import { appVersion } from '@/config/env';
+import { animateNextLayout } from '@/lib/animation';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
@@ -50,7 +51,7 @@ export default function HelpScreen() {
   const [open, setOpen] = useState<number | null>(0);
 
   const toggle = (index: number) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    animateNextLayout();
     setOpen((current) => (current === index ? null : index));
   };
 

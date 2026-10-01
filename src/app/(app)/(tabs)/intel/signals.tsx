@@ -25,6 +25,7 @@ import {
 import { SignalCard } from '@/features/signals/components/SignalCard';
 import { ACTION_FILTERS, sortReliability } from '@/features/signals/lib/signals';
 import type { PushGateStatus, SignalAction } from '@/features/signals/types';
+import { animateNextLayout } from '@/lib/animation';
 import { formatNumber, formatPercent, formatSignedPercent } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -87,7 +88,10 @@ function ReliabilitySection() {
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        onPress={() => setOpen((value) => !value)}
+        onPress={() => {
+          animateNextLayout();
+          setOpen((value) => !value);
+        }}
         className="flex-row items-center justify-between py-2 active:opacity-60"
       >
         <Text

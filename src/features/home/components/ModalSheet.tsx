@@ -1,8 +1,9 @@
 import X from 'lucide-react-native/icons/x';
 import React from 'react';
-import { Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SheetFrame } from '@/components/ui/SheetFrame';
 import { useTheme } from '@/theme/ThemeProvider';
 
 interface ModalSheetProps {
@@ -22,30 +23,15 @@ interface ModalSheetProps {
 export function ModalSheet({ visible, title, onClose, children, footer }: ModalSheetProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
 
   return (
-    <Modal
+    <SheetFrame
       visible={visible}
-      transparent
-      animationType="slide"
-      statusBarTranslucent
-      navigationBarTranslucent
       onRequestClose={onClose}
-    >
-      <View className="flex-1 justify-end">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={onClose}
-          className="absolute inset-0"
-          style={{ backgroundColor: colors.overlay }}
-        />
-        <View
-          accessibilityViewIsModal
-          className="rounded-t-3xl bg-surface pt-3 dark:bg-surface-dark"
-          style={{ maxHeight: height * 0.85, paddingBottom: Math.max(insets.bottom, 16) }}
-        >
+      maxHeight={0.85}
+      style={{ paddingTop: 12, paddingBottom: Math.max(insets.bottom, 16) }}
+      handle={
+        <>
           <View className="mb-3 h-1 w-10 self-center rounded-full bg-line-strong dark:bg-line-dark-strong" />
           <View className="flex-row items-center gap-3 px-5 pb-2">
             <Text
@@ -65,17 +51,18 @@ export function ModalSheet({ visible, title, onClose, children, footer }: ModalS
               <X size={18} color={colors.textMuted} />
             </Pressable>
           </View>
-          <ScrollView
-            contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 8 }}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-          </ScrollView>
-          {footer ? <View className="px-5 pt-3">{footer}</View> : null}
-        </View>
-      </View>
-    </Modal>
+        </>
+      }
+    >
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 8 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {children}
+      </ScrollView>
+      {footer ? <View className="px-5 pt-3">{footer}</View> : null}
+    </SheetFrame>
   );
 }
 

@@ -10,6 +10,7 @@ import { KeyboardAvoidingView, Pressable, ScrollView, Text, View } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
+import { SCREEN_EDGES } from '@/components/common/safeArea';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
@@ -354,7 +355,7 @@ export default function OrderScreen() {
   // Opened without a stock (a stale link): nothing can be priced or placed.
   if (!symbol) {
     return (
-      <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.surface }}>
+      <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.surface }}>
         <View className="flex-1 justify-center px-5">
           <InlineEmpty
             title="No stock selected"
@@ -367,7 +368,7 @@ export default function OrderScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.surface }}>
+    <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.surface }}>
       <View className="flex-row items-start gap-3 px-5 pb-3 pt-4">
         <View className="flex-1">
           <Text

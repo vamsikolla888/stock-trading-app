@@ -1,17 +1,9 @@
 import X from 'lucide-react-native/icons/x';
 import React from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SheetFrame } from '@/components/ui/SheetFrame';
 import { useTheme } from '@/theme/ThemeProvider';
 
 interface SheetProps {
@@ -27,46 +19,29 @@ interface SheetProps {
 }
 
 /**
- * Bottom sheet on RN's Modal — the Trade screens' detail and edit surface (a holding, an
- * order, a list's settings). A Modal rather than @gorhom's sheet because these open from
- * inside scrolling screens and nested lists, where an inline sheet would need to be
- * hoisted to the screen root; the Modal also brings back-button and screen-reader focus
- * handling for free. The body scrolls, capped at ~85% of the screen, and lifts over the
- * keyboard for the sheets that edit a value.
+ * Bottom sheet — the Trade screens' detail and edit surface (a holding, an order, a list's
+ * settings). On the shared SheetFrame (RN's Modal) rather than @gorhom's sheet because these
+ * open from inside scrolling screens and nested lists, where an inline sheet would need to be
+ * hoisted to the screen root. The body scrolls, capped at ~88% of the screen, and lifts over
+ * the keyboard for the sheets that edit a value; a swipe down on the title closes it.
  */
 export function Sheet({ visible, onClose, title, subtitle, children, footer, busy }: SheetProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
   const close = () => {
     if (!busy) onClose();
   };
 
   return (
-    <Modal
+    <SheetFrame
       visible={visible}
-      transparent
-      animationType="slide"
-      statusBarTranslucent
-      navigationBarTranslucent
-      onRequestClose={close}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1, justifyContent: 'flex-end' }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={close}
-          className="absolute inset-0"
-          style={{ backgroundColor: colors.overlay }}
-        />
-        <View
-          accessibilityViewIsModal
-          className="rounded-t-3xl bg-surface dark:bg-surface-dark"
-          style={{ maxHeight: height * 0.88, paddingBottom: Math.max(insets.bottom, 12) }}
-        >
+      onRequestClose={onClose}
+      locked={busy}
+      maxHeight={0.88}
+      avoidKeyboard
+      style={{ paddingBottom: Math.max(insets.bottom, 12) }}
+      handle={
+        <>
           <View className="mb-1 mt-3 h-1 w-10 self-center rounded-full bg-line-strong dark:bg-line-dark-strong" />
           <View className="flex-row items-start gap-3 px-5 pb-2 pt-2">
             <View className="min-w-0 flex-1">
@@ -97,24 +72,26 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, bus
               <X size={16} color={colors.text} />
             </Pressable>
           </View>
-          <ScrollView
-            style={{ flexGrow: 0 }}
-            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 }}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {children}
-          </ScrollView>
-          {footer ? <View className="gap-2 px-5 pt-2">{footer}</View> : null}
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+        </>
+      }
+    >
+      <ScrollView
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {children}
+      </ScrollView>
+      {footer ? <View className="gap-2 px-5 pt-2">{footer}</View> : null}
+    </SheetFrame>
   );
 }
 
 /**
- * Runs `action` once a closing sheet has finished animating away. Navigating to a modal
- * route (the order ticket) while an RN Modal is still dismissing is refused on iOS.
+ * Runs `action` once a closing sheet has finished animating away (SheetFrame's slide is
+ * 220 ms). Navigating to a modal route (the order ticket) while an RN Modal is still
+ * dismissing is refused on iOS.
  */
 export function afterSheetClose(action: () => void): void {
   setTimeout(action, Platform.OS === 'ios' ? 380 : 60);

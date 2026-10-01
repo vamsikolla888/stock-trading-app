@@ -103,6 +103,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-splash-screen',
       {
+        // A clear image: the native splash is the plain ground alone, and the animated launch
+        // screen (src/components/brand/BrandSplash.tsx) brings the whole logo in on top of it.
         image: './src/assets/images/splash.png',
         imageWidth: 96,
         resizeMode: 'contain',

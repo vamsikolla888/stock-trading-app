@@ -3,6 +3,7 @@ import CircleCheck from 'lucide-react-native/icons/circle-check';
 import Info from 'lucide-react-native/icons/info';
 import React from 'react';
 import { Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast, { type ToastConfig, type ToastConfigParams } from 'react-native-toast-message';
 
 import type { IconComponent } from '@/components/ui/icon';
@@ -71,6 +72,11 @@ const config: ToastConfig = {
   info: ({ text1, text2 }) => <Snack kind="info" text1={text1} text2={text2} />,
 };
 
+/**
+ * Above the main tab bar, which sits on the bottom safe area (MainTabBar) — so the offset grows
+ * with the home indicator or Android's navigation bar instead of landing on the tabs.
+ */
 export function ThemedToast() {
-  return <Toast config={config} position="bottom" bottomOffset={96} />;
+  const insets = useSafeAreaInsets();
+  return <Toast config={config} position="bottom" bottomOffset={Math.max(insets.bottom, 6) + 92} />;
 }

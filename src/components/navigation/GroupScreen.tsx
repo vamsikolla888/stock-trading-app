@@ -1,6 +1,7 @@
 import { useIsFocused } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LiveScope } from '@/features/market/live';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -24,6 +25,9 @@ interface GroupScreenProps {
  * above it (GroupTabBar), so this owns only the scroll area: pull-to-refresh, the page
  * gutter, and a width cap for tablets. Its tree streams live prices only while the screen is
  * focused (LiveScope) — a visited tab left mounted behind another holds no subscriptions.
+ *
+ * Safe areas: the group's header pads the top and the main tab bar the bottom; this pads the
+ * sides, where the notch sits once the phone is turned.
  */
 export function GroupScreen({
   onRefresh,
@@ -34,6 +38,7 @@ export function GroupScreen({
   scroll = true,
 }: GroupScreenProps) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -59,7 +64,10 @@ export function GroupScreen({
 
   return (
     <LiveScope active={focused}>
-      <View className="flex-1 bg-canvas dark:bg-canvas-dark">
+      <View
+        className="flex-1 bg-canvas dark:bg-canvas-dark"
+        style={{ paddingLeft: insets.left, paddingRight: insets.right }}
+      >
         {scroll ? (
           <ScrollView
             className="flex-1"

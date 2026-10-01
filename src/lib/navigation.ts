@@ -6,7 +6,7 @@ export function stockHref(symbol: string, exchange: string | null | undefined) {
   };
 }
 
-/** The advanced chart for one listing; `fullscreen` opens it straight into landscape full screen. */
+/** The advanced chart for one listing; `fullscreen` opens it straight into full screen. */
 export function chartHref(
   symbol: string,
   exchange: string | null | undefined,

@@ -126,7 +126,7 @@ export const UnderlyingChart = memo(function UnderlyingChart({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Full screen chart"
-          accessibilityHint="Opens the detailed chart in landscape, with intervals and indicators"
+          accessibilityHint="Opens the detailed chart full screen, with intervals and indicators"
           hitSlop={8}
           onPress={onFullScreen}
           className="absolute bottom-2 right-4 h-11 w-11 items-center justify-center rounded-full border border-line bg-surface active:opacity-80 dark:border-line-dark dark:bg-surface-dark"

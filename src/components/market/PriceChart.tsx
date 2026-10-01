@@ -2,6 +2,7 @@ import React, { memo, useCallback, useMemo, useState } from 'react';
 import { View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
 
+import { useSwipeHold } from '@/components/navigation/swipeLock';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export interface ChartPoint {
@@ -68,6 +69,8 @@ export const PriceChart = memo(function PriceChart({
   const { colors } = useTheme();
   const [width, setWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  // Scrubbing sideways must not turn a swipeable tab page underneath (swipeLock.ts).
+  const swipe = useSwipeHold();
 
   const geometry = useMemo(
     () => buildChartGeometry(points, width, height, baseline),
@@ -94,10 +97,19 @@ export const PriceChart = memo(function PriceChart({
     [geometry, points, width, onScrub],
   );
 
+  const startScrub = useCallback(
+    (event: GestureResponderEvent) => {
+      swipe.take();
+      scrubTo(event);
+    },
+    [swipe, scrubTo],
+  );
+
   const endScrub = useCallback(() => {
+    swipe.release();
     setActiveIndex(null);
     onScrub?.(null);
-  }, [onScrub]);
+  }, [swipe, onScrub]);
 
   const activeX = activeIndex !== null ? geometry?.xs[activeIndex] : undefined;
   const activeY = activeIndex !== null ? geometry?.ys[activeIndex] : undefined;
@@ -107,7 +119,7 @@ export const PriceChart = memo(function PriceChart({
       style={{ height }}
       onLayout={onLayout}
       onStartShouldSetResponder={() => Boolean(geometry)}
-      onResponderGrant={scrubTo}
+      onResponderGrant={startScrub}
       onResponderMove={scrubTo}
       onResponderRelease={endScrub}
       onResponderTerminate={endScrub}

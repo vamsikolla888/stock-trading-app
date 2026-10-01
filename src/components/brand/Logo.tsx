@@ -8,8 +8,9 @@ import { brandFont } from '@/theme/fonts';
 import { palette } from '@/theme/tokens';
 
 // The brand mark: a bold rising arrow over three soft volume bars on a mint-to-emerald
-// gradient tile. The same geometry (30-unit tile) is rasterized into the app icon, splash
-// and favicon by scripts/generate-brand-assets.py — change both together.
+// gradient tile. The same geometry (30-unit tile) is rasterized into the app icon and favicon
+// by scripts/generate-brand-assets.py — change both together. The native splash shows no logo:
+// the launch screen (brand/splash/AnimatedMark.tsx) builds this whole mark on screen.
 export const MARK_GRADIENT = { from: '#1fd1a0', to: '#00805e' } as const;
 export const MARK_TREND = 'M6.8 19.2L12 14l3.6 3.2 7.6-7.6';
 export const MARK_ARROW = 'M18.6 9.6h4.6v4.6';

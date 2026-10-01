@@ -21,6 +21,7 @@ import {
 } from '@/features/account/lib/account';
 import type { AccountSession } from '@/features/account/types';
 import { confirmAction } from '@/features/settings/lib/confirm';
+import { animateNextLayout } from '@/lib/animation';
 import { cn } from '@/lib/utils/cn';
 import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -57,7 +58,10 @@ export default function SessionsScreen() {
   const ended = sessions.filter((s) => s.status !== 'active');
   const pendingId = revoke.isPending ? (revoke.variables ?? null) : null;
 
-  const toggle = useCallback((id: string) => setExpanded((open) => (open === id ? null : id)), []);
+  const toggle = useCallback((id: string) => {
+    animateNextLayout();
+    setExpanded((open) => (open === id ? null : id));
+  }, []);
 
   const signOut = useCallback(
     (session: AccountSession) => {

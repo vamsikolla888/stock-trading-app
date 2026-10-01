@@ -72,8 +72,9 @@ def draw_glyph(canvas: Image.Image, scale: float, ox: float, oy: float, bars: bo
     return canvas
 
 
-def tile(size: int, rounded: bool) -> Image.Image:
-    """The full mark: gradient tile + glyph. `rounded=False` is full-bleed (iOS masks it)."""
+def tile(size: int, rounded: bool, glyph: bool = True) -> Image.Image:
+    """The mark: gradient tile + glyph. `rounded=False` is full-bleed (iOS masks it); `glyph=False`
+    is the bare tile the animated splash builds the glyph into."""
     s = size * SUPERSAMPLE
     scale = s / 30
     canvas = gradient(s)
@@ -83,7 +84,8 @@ def tile(size: int, rounded: bool) -> Image.Image:
         clipped = Image.new("RGBA", (s, s), CLEAR)
         clipped.paste(canvas, (0, 0), mask)
         canvas = clipped
-    canvas = draw_glyph(canvas, scale, 0, 0)
+    if glyph:
+        canvas = draw_glyph(canvas, scale, 0, 0)
     return canvas.resize((size, size), Image.LANCZOS)
 
 
@@ -117,9 +119,10 @@ def main() -> None:
     # Themed (Material You) icon: one flat colour, the OS tints it — bars would read as noise.
     save(glyph_only(1024, 0.8, bars=False), "adaptive-icon-monochrome.png")
 
-    # Splash: the rounded tile itself, on transparency so one file works on the light and
-    # dark splash backgrounds. Logo.tsx draws the same tile for the in-app hand-off.
-    save(tile(512, rounded=True), "splash.png")
+    # Splash: nothing but the theme's ground (light or dark, from app.config.ts) — a fully clear
+    # image. The animated launch screen (src/components/brand/splash) opens on that same plain
+    # frame and brings the whole logo in itself.
+    save(Image.new("RGBA", (512, 512), CLEAR), "splash.png")
 
     # Web favicon.
     save(tile(48, rounded=True), "favicon.png")

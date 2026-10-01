@@ -31,6 +31,7 @@ import type {
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { confirmAction } from '@/features/settings/lib/confirm';
 import { formatDate } from '@/features/settings/lib/time';
+import { animateNextLayout } from '@/lib/animation';
 import { toast } from '@/lib/utils/toast';
 import { initialsFromEmail } from '@/lib/utils/user';
 import { useAuthStore } from '@/store/authStore';
@@ -282,9 +283,10 @@ export function UsersPanel() {
                         isSelf={user.id === selfId}
                         expanded={expanded === user.id}
                         busy={update.isPending && update.variables?.userId === user.id}
-                        onToggle={() =>
-                          setExpanded((current) => (current === user.id ? null : user.id))
-                        }
+                        onToggle={() => {
+                          animateNextLayout();
+                          setExpanded((current) => (current === user.id ? null : user.id));
+                        }}
                         onChange={(next) => change(user, next)}
                       />
                     </View>

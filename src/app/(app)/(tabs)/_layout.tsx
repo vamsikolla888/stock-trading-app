@@ -21,8 +21,12 @@ export default function MainTabsLayout() {
         headerShown: false,
         tabBarHideOnKeyboard: true,
         sceneStyle: { backgroundColor: colors.background },
+        // A short cross-fade between menus — the bar stays put, the content dissolves.
+        animation: 'fade',
         // Unvisited tabs never render, so launch only pays for Markets.
         lazy: true,
+        // A tab out of sight stops re-rendering (its queries still refresh) until it is back.
+        freezeOnBlur: true,
       }}
     >
       {NAV_GROUPS.map(({ route, label, tabLabel }) => (

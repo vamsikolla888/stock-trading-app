@@ -1,40 +1,49 @@
 import * as SplashScreen from 'expo-splash-screen';
-import React, { useCallback, useRef } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useId, useRef, useState } from 'react';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
+  ReduceMotion,
+  type SharedValue,
+  useAnimatedReaction,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { LogoMark } from '@/components/brand/Logo';
+import { Ambient, type AmbientTones } from '@/components/brand/splash/Ambient';
+import { AnimatedMark } from '@/components/brand/splash/AnimatedMark';
+import { EASE_GRAPH, EASE_OUT, EASE_SOFT } from '@/components/brand/splash/easing';
+import { progressIn, SETTLED_AT, SPLASH_MS, TIMELINE } from '@/components/brand/splash/timeline';
 import { appConfig } from '@/config/app';
 import { brandFont } from '@/theme/fonts';
 import { useTheme } from '@/theme/ThemeProvider';
+import { palette } from '@/theme/tokens';
 
 /*
- * The launch screen, kept deliberately quiet: one motion, one typeface, the brand's own colours.
+ * The launch screen — three seconds, one clock, the brand's own colours on the theme's ground
+ * (white, or the dark canvas in dark mode; the native splash has both).
  *
- * The first frame is the native splash, pixel for pixel — the mark at the centre of a plain
- * background — so the handover is invisible. Then the mark glides up and settles into the
- * lockup while the wordmark and its line fade up beneath it; a short hold, and the screen
- * dissolves onto the app, which has been mounted and fetching underneath the whole time (none of
- * this delays startup — it only decides when the curtain lifts).
+ * The first frame is the native splash, pixel for pixel: the theme's plain ground — no logo, so
+ * the whole logo arrives animated. The tile springs in, and the mark builds itself inside it
+ * (splash/AnimatedMark.tsx): volume bars from zero, then the rise graph drawing 0 → 100 % with
+ * its arrowhead riding the tip, landing as the logo's arrow and lifting — while the count under
+ * it runs 0 % → 100 % in step, over a soft glow, with faint market glyphs drifting up around it
+ * and a long market line climbing the lower screen (splash/Ambient.tsx). The finished mark
+ * glides up into the lockup; "Stocks" (Inter Display) and its line (Inter) rise in beneath; a
+ * beat; and the whole screen dissolves onto the app, which has been mounted and fetching
+ * underneath the whole time — signed out, that is the sign-in screen. The score is in
+ * splash/timeline.ts.
  *
- *     0 ─ stillness: the native frame, held for a beat
- *   140 ─ the mark lifts and settles to 72 pt (560 ms)
- *   300 ─ "Stocks" fades up (520 ms)
- *   440 ─ the line under it follows (480 ms)
- *  1120 ─ the screen fades out (260 ms) — gone by ~1.4 s
- *
- * With Reduce Motion on nothing moves: the native frame simply dissolves.
+ * Every frame runs on the UI thread, so the app booting underneath cannot make it stutter. With
+ * Reduce Motion on, nothing moves: the finished lockup shows, holds, and dissolves.
  */
 
-/** Must equal the expo-splash-screen plugin's `imageWidth` in app.config.ts. */
+/** The mark's size as it builds, before it settles into the lockup. */
 const MARK_SIZE = 96;
 const SETTLED_SCALE = 0.75;
 const SETTLED_SIZE = MARK_SIZE * SETTLED_SCALE;
@@ -58,65 +67,68 @@ const LIFT = -(LOCKUP_TOP + SETTLED_SIZE / 2);
 const COPY_TOP = LOCKUP_TOP + SETTLED_SIZE + MARK_GAP;
 
 /** Rising text travels only this far — enough to read as arriving, not as moving. */
-const WORDMARK_RISE = 10;
-const TAGLINE_RISE = 6;
+const WORDMARK_RISE = 12;
+const TAGLINE_RISE = 8;
+/** The glow behind the mark, at the mark's starting size. */
+const GLOW_SIZE = 320;
+/** On the way out the lockup comes forward a touch as it fades. */
+const OUTRO_GROW = 0.04;
 
-const SETTLE_DELAY_MS = 140;
-const SETTLE_MS = 560;
-const WORDMARK_DELAY_MS = 300;
-const WORDMARK_MS = 520;
-const TAGLINE_DELAY_MS = 440;
-const TAGLINE_MS = 480;
-const OUTRO_DELAY_MS = 1120;
-const OUTRO_MS = 260;
-const REDUCED_DELAY_MS = 120;
-const REDUCED_MS = 200;
+/** The reduced sequence: the finished lockup, held, then a plain dissolve (no movement). */
+const REDUCED_HOLD_MS = 900;
+const REDUCED_FADE_MS = 300;
 /** If the native hide never settles, run the sequence anyway rather than hang on the logo. */
 const HIDE_FALLBACK_MS = 300;
 
-const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
-const EASE_IN_OUT = Easing.bezier(0.4, 0, 0.2, 1);
+/** The count sits this far under the building mark. */
+const COUNT_GAP = 18;
 
 const TAGLINE = 'Invest in stocks, the simple way';
 
 export function BrandSplash({ onFinish }: { onFinish: () => void }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const reduceMotion = useReducedMotion();
-  const settle = useSharedValue(0);
-  const wordmark = useSharedValue(0);
-  const tagline = useSharedValue(0);
-  const outro = useSharedValue(0);
+  const { width, height } = useWindowDimensions();
+  const glowId = `splash-glow-${useId().replace(/[^a-zA-Z0-9-]/g, '')}`;
+  const clock = useSharedValue(0);
   const started = useRef(false);
+
+  // Dark mode lifts the greens so they read on the dark canvas, and lets the texture show a
+  // little more — dark grounds swallow faint colour.
+  const tones: AmbientTones = isDark
+    ? { up: palette.darkGreenText, down: palette.darkRedText, lineOpacity: 0.3 }
+    : { up: palette.green, down: palette.red, lineOpacity: 0.22 };
+  const glowOpacity = isDark ? 0.22 : 0.14;
 
   const start = useCallback(() => {
     if (started.current) return;
     started.current = true;
 
-    // Runs even if the outro is interrupted: the overlay must never outlive its sequence
-    // and sit over a working app.
+    // Runs even if the clock is interrupted: the overlay must never outlive its sequence and
+    // sit over a working app.
     const finish = () => {
       'worklet';
       scheduleOnRN(onFinish);
     };
 
     if (reduceMotion) {
-      outro.set(withDelay(REDUCED_DELAY_MS, withTiming(1, { duration: REDUCED_MS }, finish)));
+      clock.set(SETTLED_AT);
+      clock.set(
+        withDelay(
+          REDUCED_HOLD_MS,
+          withTiming(
+            SPLASH_MS,
+            { duration: REDUCED_FADE_MS, reduceMotion: ReduceMotion.Never },
+            finish,
+          ),
+          ReduceMotion.Never,
+        ),
+      );
       return;
     }
     // .set() rather than `.value =`: the React Compiler-safe way to drive shared values.
-    settle.set(
-      withDelay(SETTLE_DELAY_MS, withTiming(1, { duration: SETTLE_MS, easing: EASE_OUT })),
-    );
-    wordmark.set(
-      withDelay(WORDMARK_DELAY_MS, withTiming(1, { duration: WORDMARK_MS, easing: EASE_OUT })),
-    );
-    tagline.set(
-      withDelay(TAGLINE_DELAY_MS, withTiming(1, { duration: TAGLINE_MS, easing: EASE_OUT })),
-    );
-    outro.set(
-      withDelay(OUTRO_DELAY_MS, withTiming(1, { duration: OUTRO_MS, easing: EASE_IN_OUT }, finish)),
-    );
-  }, [onFinish, outro, reduceMotion, settle, tagline, wordmark]);
+    clock.set(withTiming(SPLASH_MS, { duration: SPLASH_MS, easing: Easing.linear }, finish));
+  }, [clock, onFinish, reduceMotion]);
 
   const onLayout = useCallback(() => {
     const fallback = setTimeout(start, HIDE_FALLBACK_MS);
@@ -128,21 +140,30 @@ export function BrandSplash({ onFinish }: { onFinish: () => void }) {
       });
   }, [start]);
 
-  const containerStyle = useAnimatedStyle(() => ({ opacity: 1 - outro.value }));
-  const markStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: -LIFT * settle.value },
-      { scale: 1 - (1 - SETTLED_SCALE) * settle.value },
-    ],
+  const containerStyle = useAnimatedStyle(() => ({
+    opacity: 1 - EASE_SOFT(progressIn(clock.get(), TIMELINE.outro)),
   }));
-  const wordmarkStyle = useAnimatedStyle(() => ({
-    opacity: wordmark.value,
-    transform: [{ translateY: WORDMARK_RISE * (1 - wordmark.value) }],
+  const lockupStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + OUTRO_GROW * EASE_OUT(progressIn(clock.get(), TIMELINE.outro)) }],
   }));
-  const taglineStyle = useAnimatedStyle(() => ({
-    opacity: tagline.value,
-    transform: [{ translateY: TAGLINE_RISE * (1 - tagline.value) }],
-  }));
+  const markStyle = useAnimatedStyle(() => {
+    const p = EASE_OUT(progressIn(clock.get(), TIMELINE.lift));
+    return {
+      transform: [{ translateY: -LIFT * p }, { scale: 1 - (1 - SETTLED_SCALE) * p }],
+    };
+  });
+  const glowStyle = useAnimatedStyle(() => {
+    const p = EASE_OUT(progressIn(clock.get(), TIMELINE.glow));
+    return { opacity: p, transform: [{ scale: 0.6 + 0.4 * p }] };
+  });
+  const wordmarkStyle = useAnimatedStyle(() => {
+    const p = EASE_OUT(progressIn(clock.get(), TIMELINE.wordmark));
+    return { opacity: p, transform: [{ translateY: WORDMARK_RISE * (1 - p) }] };
+  });
+  const taglineStyle = useAnimatedStyle(() => {
+    const p = EASE_OUT(progressIn(clock.get(), TIMELINE.tagline));
+    return { opacity: p, transform: [{ translateY: TAGLINE_RISE * (1 - p) }] };
+  });
 
   return (
     <Animated.View
@@ -157,35 +178,98 @@ export function BrandSplash({ onFinish }: { onFinish: () => void }) {
         containerStyle,
       ]}
     >
-      <Animated.View style={markStyle}>
-        <LogoMark size={MARK_SIZE} />
-      </Animated.View>
+      {/* Texture first, far under everything; no movement at all under Reduce Motion. */}
+      {reduceMotion ? null : <Ambient clock={clock} width={width} height={height} tones={tones} />}
 
-      <View style={styles.copy} pointerEvents="none">
-        <Animated.View style={wordmarkStyle}>
-          {/* A logo, not text to read: it keeps its size under large accessibility type. */}
-          <Text
-            allowFontScaling={false}
-            style={[styles.wordmark, { color: colors.text }, brandFont('display')]}
-          >
-            {appConfig.name}
-          </Text>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.center, lockupStyle]}>
+        <Animated.View style={markStyle}>
+          <Animated.View pointerEvents="none" style={[styles.glow, glowStyle]}>
+            <Svg width={GLOW_SIZE} height={GLOW_SIZE}>
+              <Defs>
+                <RadialGradient id={glowId} cx="50%" cy="50%" r="50%">
+                  <Stop offset="0" stopColor={tones.up} stopOpacity={glowOpacity} />
+                  <Stop offset="0.55" stopColor={tones.up} stopOpacity={glowOpacity * 0.35} />
+                  <Stop offset="1" stopColor={tones.up} stopOpacity={0} />
+                </RadialGradient>
+              </Defs>
+              <Circle
+                cx={GLOW_SIZE / 2}
+                cy={GLOW_SIZE / 2}
+                r={GLOW_SIZE / 2}
+                fill={`url(#${glowId})`}
+              />
+            </Svg>
+          </Animated.View>
+          <AnimatedMark clock={clock} size={MARK_SIZE} />
         </Animated.View>
-        <Animated.View style={taglineStyle}>
-          <Text
-            maxFontSizeMultiplier={1.3}
-            style={[styles.tagline, { color: colors.textMuted }, brandFont('text')]}
-          >
-            {TAGLINE}
-          </Text>
-        </Animated.View>
-      </View>
+
+        <RiseCounter clock={clock} color={isDark ? palette.darkGreenText : palette.greenText} />
+
+        <View style={styles.copy} pointerEvents="none">
+          <Animated.View style={wordmarkStyle}>
+            {/* A logo, not text to read: it keeps its size under large accessibility type. */}
+            <Text
+              allowFontScaling={false}
+              style={[styles.wordmark, { color: colors.text }, brandFont('display')]}
+            >
+              {appConfig.name}
+            </Text>
+          </Animated.View>
+          <Animated.View style={taglineStyle}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[styles.tagline, { color: colors.textMuted }, brandFont('text')]}
+            >
+              {TAGLINE}
+            </Text>
+          </Animated.View>
+        </View>
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+/**
+ * The rise in numbers: 0 % → 100 % under the logo, reading exactly the share of the rise graph
+ * that is drawn (same window, same curve), then giving way to the name. Only this small text
+ * re-renders as it counts — at most a hundred times, and only when the number changes.
+ */
+function RiseCounter({ clock, color }: { clock: SharedValue<number>; color: string }) {
+  const [value, setValue] = useState(0);
+  useAnimatedReaction(
+    () => Math.round(100 * EASE_GRAPH(progressIn(clock.get(), TIMELINE.trend))),
+    (next, previous) => {
+      if (next !== previous) scheduleOnRN(setValue, next);
+    },
+  );
+  const style = useAnimatedStyle(() => {
+    const t = clock.get();
+    const shown = EASE_OUT(progressIn(t, TIMELINE.countIn));
+    const gone = EASE_SOFT(progressIn(t, TIMELINE.countOut));
+    return {
+      opacity: shown * (1 - gone),
+      transform: [{ translateY: 6 * (1 - shown) - 8 * gone }],
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.counter, style]} pointerEvents="none">
+      <Text allowFontScaling={false} style={[styles.count, { color }, brandFont('display')]}>
+        {value}%
+      </Text>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
+  glow: {
+    position: 'absolute',
+    left: (MARK_SIZE - GLOW_SIZE) / 2,
+    top: (MARK_SIZE - GLOW_SIZE) / 2,
+    width: GLOW_SIZE,
+    height: GLOW_SIZE,
+  },
   copy: {
     position: 'absolute',
     top: '50%',
@@ -194,6 +278,21 @@ const styles = StyleSheet.create({
     marginTop: COPY_TOP,
     alignItems: 'center',
     paddingHorizontal: 24,
+  },
+  counter: {
+    position: 'absolute',
+    top: '50%',
+    left: 0,
+    right: 0,
+    marginTop: MARK_SIZE / 2 + COUNT_GAP,
+    alignItems: 'center',
+  },
+  count: {
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.2,
+    fontVariant: ['tabular-nums'],
+    includeFontPadding: false,
   },
   wordmark: {
     fontSize: WORDMARK_SIZE,

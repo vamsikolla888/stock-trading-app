@@ -39,6 +39,7 @@ import type { MfaSetup, MfaStatus } from '@/features/account/types';
 import { challengeSecondsLeft, normaliseMfaCode } from '@/features/auth/authFlowStore';
 import { OtpInput } from '@/features/auth/components/OtpInput';
 import { useNow } from '@/hooks/useNow';
+import { animateNextLayout } from '@/lib/animation';
 import { toast } from '@/lib/utils/toast';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -359,7 +360,10 @@ function SetupStep({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: showQr }}
-          onPress={() => setShowQr((open) => !open)}
+          onPress={() => {
+            animateNextLayout();
+            setShowQr((open) => !open);
+          }}
           className="flex-row items-center justify-between py-1 active:opacity-60"
         >
           <Text className="text-[13px] font-semibold text-ink dark:text-ink-dark">

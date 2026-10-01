@@ -18,6 +18,7 @@ import type { LogRecord } from '@/features/admin/types';
 import { JsonBlock, monoFont } from '@/features/settings/components/JsonBlock';
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { formatClock } from '@/features/settings/lib/time';
+import { animateNextLayout } from '@/lib/animation';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type LevelKey = '10' | '30' | '40' | '50';
@@ -217,9 +218,10 @@ export function LogsPanel() {
                   <LogRow
                     line={line}
                     expanded={expanded === line.key}
-                    onToggle={() =>
-                      setExpanded((current) => (current === line.key ? null : line.key))
-                    }
+                    onToggle={() => {
+                      animateNextLayout();
+                      setExpanded((current) => (current === line.key ? null : line.key));
+                    }}
                   />
                 </View>
               ))}

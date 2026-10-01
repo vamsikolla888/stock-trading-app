@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Logo } from '@/components/brand/Logo';
+import { SCREEN_EDGES } from '@/components/common/safeArea';
 import { Button } from '@/components/ui/Button';
 import { OnboardingCarousel } from '@/features/auth/components/OnboardingCarousel';
 import { usePreferencesStore } from '@/store/preferencesStore';
@@ -20,7 +21,7 @@ export default function WelcomeScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.background }}>
+    <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.background }}>
       <View className="h-14 w-full max-w-[440px] flex-row items-center self-center px-5">
         <Logo size="md" />
       </View>

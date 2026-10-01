@@ -7,7 +7,7 @@ import ChevronsRight from 'lucide-react-native/icons/chevrons-right';
 import Maximize2 from 'lucide-react-native/icons/maximize-2';
 import Minimize2 from 'lucide-react-native/icons/minimize-2';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Pressable, ScrollView, Text, View } from 'react-native';
+import { BackHandler, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
@@ -37,7 +37,6 @@ import { useLiveQuote } from '@/features/market/live';
 import { usable } from '@/features/stock/lib/priceView';
 import { parseStockParams } from '@/features/stock/lib/routeParams';
 import { useNow } from '@/hooks/useNow';
-import { lockLandscape, unlockOrientation } from '@/lib/orientation';
 import { cn } from '@/lib/utils/cn';
 import { formatINR, formatSignedINR, formatSignedPercent } from '@/lib/utils/formatters';
 import { isMarketOpen } from '@/lib/utils/market';
@@ -58,10 +57,12 @@ const NUM = { fontVariant: ['tabular-nums' as const] };
  * F&O (`src=fno` — an index or F&O stock charted through `anchor`, any listed contract of it,
  * or a contract itself — the F&O candles API and the F&O feed). Everything else is shared.
  *
- * FULL SCREEN (the toolbar's expand button, or `?full=1` from the stock page): landscape, no
- * status bar or header, every control in one slim bar above the chart. The chart stays the same
- * instance, so the view and zoom carry over. Opened full screen from another screen, closing it
- * goes back there; toggled here, it returns to this layout.
+ * FULL SCREEN (the toolbar's expand button, or `?full=1` from the stock page): no status bar or
+ * header, the controls in a slim bar above the chart. It never turns the screen itself — it stays
+ * the way the phone is held, and follows the phone when the user turns it: two rows of controls
+ * in portrait, one in landscape. The chart stays the same instance, so the view and zoom carry
+ * over. Opened full screen from another screen, closing it goes back there; toggled here, it
+ * returns to this layout.
  *
  * Live price precedence: the streamed tick (the viewer's broker feed), else — while the market
  * is open — the polled quote, so the forming candle still moves without a broker connection.
@@ -167,12 +168,8 @@ export default function AdvancedChartScreen() {
     [setInterval, setCrosshair, setAtLatest],
   );
 
-  // Landscape while full screen; the app's normal behaviour again on leaving (or unmounting).
-  useEffect(() => {
-    if (!fullscreen) return undefined;
-    void lockLandscape();
-    return () => void unlockOrientation();
-  }, [fullscreen]);
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height;
 
   const exitFullscreen = useCallback(() => {
     if (openedFull && router.canGoBack()) router.back();
@@ -262,23 +259,20 @@ export default function AdvancedChartScreen() {
     >
       {fullscreen ? <StatusBar hidden /> : null}
       {fullscreen ? (
-        <View className="flex-row items-center border-b border-line dark:border-line-dark">
-          <ToolButton
-            label={openedFull ? 'Close the full-screen chart' : 'Exit full screen'}
-            onPress={exitFullscreen}
-            icon={<Minimize2 size={18} color={colors.text} />}
-          />
-          <View className="min-w-0 flex-row items-center gap-3 pr-2">
-            <Text className="text-[15px] font-bold text-ink dark:text-ink-dark" numberOfLines={1}>
-              {displaySymbol}
-            </Text>
-            {price}
-          </View>
-          <View className="h-6 w-px bg-line dark:bg-line-dark" />
-          <IntervalChips value={interval} onChange={onInterval} />
-          <View className="h-6 w-px bg-line dark:bg-line-dark" />
-          {tools}
-        </View>
+        <FullscreenBar
+          landscape={landscape}
+          close={
+            <ToolButton
+              label={openedFull ? 'Close the full-screen chart' : 'Exit full screen'}
+              onPress={exitFullscreen}
+              icon={<Minimize2 size={18} color={colors.text} />}
+            />
+          }
+          title={displaySymbol}
+          price={price}
+          intervals={<IntervalChips value={interval} onChange={onInterval} />}
+          tools={tools}
+        />
       ) : null}
       <ChartLegend
         bar={bars[legendIndex]}
@@ -353,6 +347,65 @@ export default function AdvancedChartScreen() {
         onClose={() => setPickingStudies(false)}
       />
     </StackScreen>
+  );
+}
+
+/**
+ * Full screen's controls. Landscape has the width for one slim row; portrait stacks them — close,
+ * name, price and tools, then the intervals across the full width.
+ */
+function FullscreenBar({
+  landscape,
+  close,
+  title,
+  price,
+  intervals,
+  tools,
+}: {
+  landscape: boolean;
+  close: React.ReactNode;
+  title: string;
+  price: React.ReactNode;
+  intervals: React.ReactNode;
+  tools: React.ReactNode;
+}) {
+  const name = (
+    <Text
+      className="min-w-0 shrink text-[15px] font-bold text-ink dark:text-ink-dark"
+      numberOfLines={1}
+    >
+      {title}
+    </Text>
+  );
+
+  if (landscape) {
+    return (
+      <View className="flex-row items-center border-b border-line dark:border-line-dark">
+        {close}
+        <View className="min-w-0 flex-row items-center gap-3 pr-2">
+          {name}
+          {price}
+        </View>
+        <View className="h-6 w-px bg-line dark:bg-line-dark" />
+        {intervals}
+        <View className="h-6 w-px bg-line dark:bg-line-dark" />
+        {tools}
+      </View>
+    );
+  }
+
+  return (
+    <View className="border-b border-line dark:border-line-dark">
+      <View className="flex-row items-center">
+        {close}
+        <View className="min-w-0 flex-1 flex-row items-center justify-between gap-3 pr-1">
+          {name}
+          {price}
+        </View>
+        {tools}
+      </View>
+      <View className="flex-row">{intervals}</View>
+    </View>
   );
 }
 

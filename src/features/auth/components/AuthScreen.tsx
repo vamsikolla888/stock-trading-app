@@ -5,6 +5,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LogoMark } from '@/components/brand/Logo';
+import { SCREEN_EDGES } from '@/components/common/safeArea';
 import { useTheme } from '@/theme/ThemeProvider';
 
 interface AuthScreenProps {
@@ -36,7 +37,7 @@ export function AuthScreen({
   const canGoBack = showBack && (onBack !== undefined || router.canGoBack());
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.background }}>
+    <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Edge-to-edge Android no longer resizes the window for the keyboard, so padding
           is correct on both platforms. */}
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>

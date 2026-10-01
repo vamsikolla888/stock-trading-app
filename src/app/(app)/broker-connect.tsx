@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+import { SCREEN_EDGES } from '@/components/common/safeArea';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -127,7 +128,7 @@ export default function BrokerConnectScreen() {
     /^[A-Z2-7]{16,}=*$/.test(fields.totpSecret.replace(/\s+/g, '').toUpperCase());
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.surface }}>
+    <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.surface }}>
       <View className="flex-row items-center gap-3 px-5 pb-3 pt-4">
         <View className="flex-1">
           <Text

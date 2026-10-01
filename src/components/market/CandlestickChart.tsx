@@ -7,6 +7,7 @@ import {
   candleGroupSize,
   groupCandles,
 } from '@/components/market/candleLayout';
+import { useSwipeHold } from '@/components/navigation/swipeLock';
 import type { Candle } from '@/features/market/types';
 import { formatINR, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -35,6 +36,8 @@ export const CandlestickChart = memo(function CandlestickChart({
   const { colors } = useTheme();
   const [width, setWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  // Scrubbing sideways must not turn a swipeable tab page underneath (swipeLock.ts).
+  const swipe = useSwipeHold();
 
   // More bars than fit at a readable width merge into wider candles (candleLayout.ts).
   const drawn = useMemo(
@@ -61,10 +64,19 @@ export const CandlestickChart = memo(function CandlestickChart({
     [geometry, drawn, width, onScrub],
   );
 
+  const startScrub = useCallback(
+    (event: GestureResponderEvent) => {
+      swipe.take();
+      scrubTo(event);
+    },
+    [swipe, scrubTo],
+  );
+
   const endScrub = useCallback(() => {
+    swipe.release();
     setActiveIndex(null);
     onScrub?.(null);
-  }, [onScrub]);
+  }, [swipe, onScrub]);
 
   const activeCandle = activeIndex !== null ? drawn[activeIndex] : null;
   const activeGeo = activeIndex !== null ? geometry?.candlesGeo[activeIndex] : null;
@@ -78,7 +90,7 @@ export const CandlestickChart = memo(function CandlestickChart({
       style={{ height }}
       onLayout={onLayout}
       onStartShouldSetResponder={() => Boolean(geometry)}
-      onResponderGrant={scrubTo}
+      onResponderGrant={startScrub}
       onResponderMove={scrubTo}
       onResponderRelease={endScrub}
       onResponderTerminate={endScrub}
