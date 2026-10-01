@@ -1,4 +1,5 @@
 export const appConfig = {
+  /** Shown in-app (header, splash, sign-in). The launcher label is app.config.ts `name`. */
   name: 'Stocks',
   scheme: 'stocktrading',
   supportEmail: 'support@example.com',
@@ -10,6 +11,13 @@ export const appConfig = {
     /** Also the persisted cache's max age — cold starts paint from anything newer. */
     gcTimeMs: 24 * 60 * 60_000,
     retry: 2,
+    /**
+     * Version of the response shapes the persisted cache holds. BUMP IT whenever a response the
+     * app reads changes shape: a restored cache bypasses the API layer's checks and goes straight
+     * to the screens, and neither a dev reload nor an OTA update changes the app version.
+     * 2 — one paper wallet, strategy runState, screener scan state (2026-10-01).
+     */
+    cacheSchema: 2,
   },
   market: {
     /** Quote/index refresh while the exchange is open; polling stops outside hours. */

@@ -155,7 +155,10 @@ function JobCard({ job, kind, now }: { job: AdminJob; kind: AdminJobKind; now: n
         ) : (
           <StatusPill tone="neutral" label="Event-driven" />
         )}
-        {kind === 'cron' && !editing ? (
+        {kind === 'cron' && job.editable === false ? (
+          <StatusPill tone="neutral" label="Set by the worker’s environment" />
+        ) : null}
+        {kind === 'cron' && !editing && job.editable !== false ? (
           <Button
             label="Edit schedule"
             size="sm"

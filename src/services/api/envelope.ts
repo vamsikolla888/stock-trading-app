@@ -1,6 +1,12 @@
 import { ApiError, type ApiErrorDetail, type Envelope } from '@/types/api';
 
+import { SERVER_OUTDATED } from './contract';
+
 const SERVER_ERROR_MESSAGE = 'Something went wrong on our side. Please try again in a moment.';
+const ROUTE_MISSING_MESSAGE =
+  'This feature needs a newer server version than the one this app is connected to.';
+/** The server's catch-all for a path no route handles (error.middleware.ts notFound). */
+const ROUTE_MISSING = /^No route matches /;
 
 export function isEnvelope(body: unknown): body is Envelope<unknown> {
   return (
@@ -49,6 +55,18 @@ export function toApiError(
   const errors = envelope?.errors ?? [];
   const primary = errors[0];
   const retryAfterSeconds = parseRetryAfter(headers?.['retry-after']);
+
+  // A path the server has no route for — the endpoint isn't deployed there yet (the app is ahead
+  // of its API). Not a "not found" the screen should explain (e.g. "connect Groww"), and the raw
+  // "No route matches GET /api/v1/…" is no message for a user.
+  if (status === 404 && ROUTE_MISSING.test(primary?.message || envelope?.message || '')) {
+    return new ApiError({
+      status: 426,
+      code: SERVER_OUTDATED,
+      message: ROUTE_MISSING_MESSAGE,
+      requestId: envelope?.requestId || undefined,
+    });
+  }
 
   let message = primary?.message || envelope?.message || 'Something went wrong. Please try again.';
   if (status === 429) message = rateLimitMessage(retryAfterSeconds);

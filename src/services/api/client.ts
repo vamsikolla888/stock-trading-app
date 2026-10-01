@@ -4,12 +4,15 @@ import axios, {
   type AxiosInstance,
   type InternalAxiosRequestConfig,
 } from 'axios';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 
 import { appConfig } from '@/config/app';
-import { env } from '@/config/env';
+import { appVersion, env } from '@/config/env';
 import { isTokenExpiring } from '@/lib/auth/jwt';
 import { secureTokens } from '@/lib/storage/secureTokens';
 import { toApiError, unwrapEnvelope } from '@/services/api/envelope';
+import { buildUserAgent } from '@/services/api/userAgent';
 import { ApiError, type ClientErrorCode } from '@/types/api';
 import type { AuthTokens } from '@/types/auth';
 
@@ -42,10 +45,25 @@ export function registerAuthHandlers(handlers: {
   onUnauthorized = handlers.onUnauthorized;
 }
 
+// Browsers own their User-Agent (setting it is refused); native apps must send their own.
+const nativeUserAgent =
+  Platform.OS === 'web'
+    ? null
+    : buildUserAgent({
+        appName: appConfig.name,
+        version: appVersion,
+        platform: Platform.OS,
+        osVersion: Device.osVersion,
+        model: Device.modelName,
+      });
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: env.apiUrl,
   timeout: appConfig.api.timeoutMs,
-  headers: { Accept: 'application/json' },
+  headers: {
+    Accept: 'application/json',
+    ...(nativeUserAgent ? { 'User-Agent': nativeUserAgent } : {}),
+  },
 });
 
 function clientError(code: ClientErrorCode, message: string, status = 0): ApiError {

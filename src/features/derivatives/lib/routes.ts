@@ -7,10 +7,12 @@ import type { PaperView } from '../types';
  * and anything else is dropped rather than sent to a `.strict()` schema to be refused.
  */
 
+/** The web's /fno/paper trading screen: the book first, discovery last. */
 export const PAPER_VIEWS: readonly { key: PaperView; label: string }[] = [
-  { key: 'explore', label: 'Explore' },
   { key: 'positions', label: 'Positions' },
   { key: 'orders', label: 'Orders' },
+  { key: 'analytics', label: 'Analytics' },
+  { key: 'explore', label: 'Explore' },
 ];
 
 type RawParam = string | string[] | undefined | null;
@@ -55,7 +57,7 @@ export function parseExpiry(value: RawParam): string | null {
 
 export function parsePaperView(value: RawParam): PaperView {
   const raw = first(value);
-  return raw === 'positions' || raw === 'orders' ? raw : 'explore';
+  return raw === 'orders' || raw === 'analytics' || raw === 'explore' ? raw : 'positions';
 }
 
 export interface PaperChainParams {

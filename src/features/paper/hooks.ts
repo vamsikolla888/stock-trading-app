@@ -240,13 +240,16 @@ export function usePaperMutations(profileId?: string) {
       onSettled: invalidate,
     }),
     reset: useMutation({
-      mutationFn: (segment: CashSegment) => paperApi.reset(segment, profileId),
+      mutationFn: () => paperApi.reset(profileId),
+      onSettled: invalidate,
+    }),
+    resetAll: useMutation({
+      mutationFn: () => paperApi.resetAll(),
       onSettled: invalidate,
     }),
     sweep: useMutation({ mutationFn: paperApi.sweepIntraday, onSettled: invalidate }),
     setWallet: useMutation({
-      mutationFn: (args: { segment: CashSegment; amount: number }) =>
-        paperApi.setWallet({ ...args, profileId }),
+      mutationFn: (amount: number) => paperApi.setWallet({ amount, profileId }),
       onSettled: invalidate,
     }),
     // The list is patched in place before the refetch lands, so selecting a profile that

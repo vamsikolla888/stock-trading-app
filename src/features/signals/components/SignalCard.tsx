@@ -3,10 +3,13 @@ import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { ChangeText } from '@/components/market/ChangeText';
+import { LiveFlash } from '@/components/market/LiveFlash';
 import { StockLogo } from '@/components/market/StockLogo';
 import { Badge } from '@/components/ui/Badge';
 import { Meter } from '@/components/ui/Meter';
 import { stockLogoUrl } from '@/features/market/api';
+import { overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
 import { metricSummary } from '@/features/screeners/lib/metrics';
 import { stockHref } from '@/lib/navigation';
 import {
@@ -32,6 +35,8 @@ export const SignalCard = memo(function SignalCard({ signal }: { signal: Signal 
   const alert = alertState(signal);
   const evidence = metricSummary(signal.metrics, 3);
   const measured = signal.hitRatePct != null;
+  const quote = useLiveQuote(signal.exchange, signal.symbol);
+  const view = overlayQuote({ price: signal.ltp, changePct: signal.changePct }, quote);
 
   return (
     <Pressable
@@ -61,11 +66,13 @@ export const SignalCard = memo(function SignalCard({ signal }: { signal: Signal 
       </View>
 
       <View className="mt-3 flex-row items-baseline gap-1.5">
-        <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={numbers}>
-          {formatINR(signal.ltp)}
-        </Text>
-        <ChangeText value={signal.changePct} className="text-xs" style={numbers}>
-          {formatSignedPercent(signal.changePct)}
+        <LiveFlash seq={quote?.seq} dir={quote?.dir}>
+          <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={numbers}>
+            {formatINR(view.price)}
+          </Text>
+        </LiveFlash>
+        <ChangeText value={view.changePct} className="text-xs" style={numbers}>
+          {formatSignedPercent(view.changePct)}
         </ChangeText>
       </View>
 

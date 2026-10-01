@@ -4,30 +4,38 @@ import React, { useCallback } from 'react';
 import { Text, View } from 'react-native';
 
 import { GroupScreen } from '@/components/navigation/GroupScreen';
-import { SegmentedControl } from '@/components/ui/Tabs';
+import { Button } from '@/components/ui/Button';
+import { ScrollTabs } from '@/components/ui/Tabs';
+import { PaperAnalytics } from '@/features/derivatives/components/PaperAnalytics';
 import { PaperExplore } from '@/features/derivatives/components/PaperExplore';
+import { PaperFnoSummary } from '@/features/derivatives/components/PaperFnoSummary';
 import { PaperOrders } from '@/features/derivatives/components/PaperOrders';
 import { PaperPositions } from '@/features/derivatives/components/PaperPositions';
-import { derivativesKeys } from '@/features/derivatives/hooks';
-import { PAPER_VIEWS, parsePaperView } from '@/features/derivatives/lib/routes';
+import { derivativesKeys, usePaperOrders } from '@/features/derivatives/hooks';
+import { PAPER_ORDERS_LIMIT } from '@/features/derivatives/lib/book';
+import { PAPER_VIEWS, paperChainHref, parsePaperView } from '@/features/derivatives/lib/routes';
 import type { PaperView } from '@/features/derivatives/types';
 import { marketKeys } from '@/features/market/hooks';
 
 /**
- * F&O › Paper trading — the simulated F&O book, the web's three /fno/paper screens (Explore,
- * Positions, Orders) as one tab with a segmented control. The view lives in the route
- * (`?view=positions`), so a ticket's "View paper positions" lands on the right one. The chain
- * itself is a stack screen (/paper-option-chain) pushed from every underlying here.
+ * F&O › Paper trading — the simulated F&O account, shaped like the web's /fno/paper: the
+ * account summary (with its OWN wallet, separate from the cash paper wallet), then the book —
+ * Positions, Orders (a resting LIMIT order waits here), Analytics — and Explore for finding the
+ * next contract. The view lives in the route (`?view=orders`), so a ticket's "View paper
+ * positions" lands on the right one. The chain is a stack screen, opened from the footer.
  */
 export default function FnoPaperScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const params = useLocalSearchParams<{ view?: string }>();
   const view = parsePaperView(params.view);
-
   const setView = useCallback((next: PaperView) => router.setParams({ view: next }), [router]);
 
-  // Only what the open view is showing: an inactive query has no observer to refresh.
+  // Shared with the Orders view (same key), so the resting-order count costs no extra request.
+  const orders = usePaperOrders(PAPER_ORDERS_LIMIT);
+  const resting = orders.data?.filter((o) => o.status === 'PENDING').length ?? 0;
+
+  // Only what is on screen: an inactive query has no observer to refresh.
   const onRefresh = useCallback(
     () =>
       Promise.all([
@@ -40,22 +48,46 @@ export default function FnoPaperScreen() {
   );
 
   return (
-    <GroupScreen onRefresh={onRefresh}>
-      <SegmentedControl items={PAPER_VIEWS} value={view} onChange={setView} />
-      <View className="mb-4 mt-2.5 flex-row items-center gap-2">
+    <GroupScreen
+      onRefresh={onRefresh}
+      footer={
+        <View className="border-t border-line px-5 pb-2 pt-3 dark:border-line-dark">
+          <Button
+            label="Trade on the option chain"
+            size="lg"
+            fullWidth
+            onPress={() => router.push(paperChainHref())}
+          />
+        </View>
+      }
+    >
+      <View className="mb-4 flex-row items-center gap-2">
         <View className="rounded-md bg-info-wash px-1.5 py-0.5 dark:bg-info-wash-dark">
           <Text className="text-[10px] font-bold text-info dark:text-info-dark">PAPER</Text>
         </View>
         <Text className="flex-1 text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={2}>
-          Simulated futures &amp; options with paper money. Nothing reaches a broker.
+          Simulated futures &amp; options with their own paper wallet. Nothing reaches a broker.
         </Text>
       </View>
-      {view === 'positions' ? (
-        <PaperPositions />
-      ) : view === 'orders' ? (
+
+      <PaperFnoSummary />
+
+      <ScrollTabs
+        items={PAPER_VIEWS}
+        value={view}
+        onChange={setView}
+        className="mb-4 mt-6"
+        badges={{ orders: resting }}
+      />
+
+      {view === 'orders' ? (
         <PaperOrders />
-      ) : (
+      ) : view === 'analytics' ? (
+        <PaperAnalytics />
+      ) : view === 'explore' ? (
         <PaperExplore onOpenView={setView} />
+      ) : (
+        <PaperPositions />
       )}
     </GroupScreen>
   );

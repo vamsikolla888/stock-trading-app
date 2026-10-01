@@ -334,6 +334,23 @@ export function BrokerUsagePanel() {
                       valueClassName:
                         data.live.indexFeed.consecutiveFailures > 0 ? redTone : undefined,
                     },
+                    ...(data.live.indexFeed.source
+                      ? [
+                          {
+                            label: 'Answered by',
+                            value:
+                              data.live.indexFeed.failover?.source === 'fallback'
+                                ? `${data.live.indexFeed.source === 'groww' ? 'Groww' : 'mStock'} · failover`
+                                : data.live.indexFeed.source === 'groww'
+                                  ? 'Groww'
+                                  : 'mStock',
+                            valueClassName:
+                              data.live.indexFeed.failover?.source === 'fallback'
+                                ? redTone
+                                : undefined,
+                          },
+                        ]
+                      : []),
                   ]}
                 />
                 <SocketCard

@@ -22,6 +22,7 @@ import {
   periodBase,
   PERIODS,
   SECTION_META,
+  underlyingHref,
   type ListOrder,
 } from '@/features/fno/lib/explore';
 import {
@@ -157,7 +158,7 @@ function FnoList({ section, initialFilter }: { section: ExploreSection; initialF
             change={move.change}
             changePct={move.changePct}
             trailing={item.volume != null ? `Vol ${formatCompactNumber(item.volume)}` : null}
-            onPress={() => router.push(chainHref(item.exchange, item.underlying))}
+            onPress={() => router.push(underlyingHref(item.exchange, item.underlying))}
           />
         </View>
       );

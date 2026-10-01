@@ -1,11 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import Bell from 'lucide-react-native/icons/bell';
+import CandlestickChart from 'lucide-react-native/icons/chart-candlestick';
 import CircleQuestionMark from 'lucide-react-native/icons/circle-question-mark';
 import EyeOff from 'lucide-react-native/icons/eye-off';
 import FingerprintPattern from 'lucide-react-native/icons/fingerprint-pattern';
 import FlaskConical from 'lucide-react-native/icons/flask-conical';
 import Link from 'lucide-react-native/icons/link';
+import LockKeyhole from 'lucide-react-native/icons/lock-keyhole';
 import LogOut from 'lucide-react-native/icons/log-out';
 import Palette from 'lucide-react-native/icons/palette';
 import ServerCog from 'lucide-react-native/icons/server-cog';
@@ -22,6 +24,7 @@ import { ListCard, RowDivider, Section } from '@/components/ui/Section';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { appConfig } from '@/config/app';
 import { appVersion } from '@/config/env';
+import { useAccountSecurity } from '@/features/account/hooks';
 import { useNotifications } from '@/features/alerts/hooks';
 import { useLogout } from '@/features/auth/hooks/useAuth';
 import { useBiometricAuth } from '@/features/auth/hooks/useBiometricAuth';
@@ -110,6 +113,8 @@ export default function PreferencesScreen() {
   const hideValues = usePreferencesStore((state) => state.hideValues);
   const toggleHideValues = usePreferencesStore((state) => state.toggleHideValues);
   const { isAvailable, authenticate } = useBiometricAuth();
+  const security = useAccountSecurity();
+  const mfa = security.data?.mfa;
 
   const onRefresh = () =>
     Promise.all([
@@ -156,7 +161,25 @@ export default function PreferencesScreen() {
 
   return (
     <GroupScreen onRefresh={onRefresh}>
-      <ProfileCard user={user} />
+      <ProfileCard user={user} onPress={() => router.push('/profile')} />
+
+      <Section title="Account">
+        <ListCard>
+          <MenuRow
+            Icon={LockKeyhole}
+            iconTone="green"
+            title="Security"
+            subtitle={
+              mfa
+                ? mfa.enabled
+                  ? 'Two-factor on · password and devices'
+                  : 'Two-factor off — turn it on'
+                : 'Two-factor, password and devices'
+            }
+            onPress={() => router.push('/profile/two-factor')}
+          />
+        </ListCard>
+      </Section>
 
       <Section title="Trading">
         <ListCard>
@@ -185,9 +208,17 @@ export default function PreferencesScreen() {
           <MenuRow
             Icon={FlaskConical}
             iconTone="violet"
-            title="Paper trading"
-            subtitle="Practise with virtual cash"
-            onPress={() => router.push('/trade/paper')}
+            title="Paper wallet"
+            subtitle="Virtual cash for delivery and intraday"
+            onPress={() => router.navigate({ pathname: '/trade/paper', params: { tab: 'funds' } })}
+          />
+          <RowDivider />
+          <MenuRow
+            Icon={CandlestickChart}
+            iconTone="blue"
+            title="F&O paper wallet"
+            subtitle="Its own pool for paper futures and options"
+            onPress={() => router.navigate('/fno/paper')}
           />
         </ListCard>
       </Section>

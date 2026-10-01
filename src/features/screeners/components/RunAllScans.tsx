@@ -5,36 +5,29 @@ import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
-import { useAllScansStatus, useRunAllScans } from '../hooks';
-import type { AllScansStatus } from '../types';
-
-function progressText(status: AllScansStatus | undefined): string {
-  if (status?.builtInRunning && status.customRunning) {
-    return 'Built-in screens and custom screeners are both in the queue…';
-  }
-  if (status?.customRunning) return 'Working through the custom screeners…';
-  return 'Built-in screens scanning…';
-}
+import { useRunAllScans, useScreenerScanStatus } from '../hooks';
+import { scanFailure, scanProgressText } from '../lib/scans';
 
 /**
- * "Run all scans": the built-in scan plus a sweep of every custom screener. The two halves are
- * separate jobs — the built-in scan is shared and may already be running for someone else —
- * so the progress line names them separately rather than one vague "scanning…".
+ * "Run all scans": the built-in scan plus a sweep of the whole screener library. The two
+ * halves are separate jobs — the built-in scan is shared and may already be running — so the
+ * progress line names them separately, and says so when a job has waited suspiciously long.
  */
 export function useRunAllScansControl() {
-  // Polling starts only once the POST has resolved; the poll stops itself when idle.
+  // The status is read once on mount (a sweep may already be running) and then polled only
+  // while something runs; the poll stops itself when idle.
   const [queuedHere, setQueuedHere] = useState(false);
   const runAll = useRunAllScans({ onQueued: () => setQueuedHere(true) });
-  const status = useAllScansStatus(queuedHere);
-  const running = status.data?.running === true;
+  const status = useScreenerScanStatus(true);
+  const running = status.data?.running === true || (queuedHere && status.isFetching);
   const busy = running || runAll.isPending;
 
   const start = () =>
     runAll.mutate(undefined, {
       onSuccess: (result) =>
         toast.info(
-          result.builtIn.alreadyRunning
-            ? 'A built-in scan was already running'
+          result.builtIn.alreadyRunning && result.custom.alreadyRunning
+            ? 'Scans are already running'
             : `Queued ${result.screenersQueued} screener${result.screenersQueued === 1 ? '' : 's'} + built-in scan`,
           'Match counts update here when the scans finish.',
         ),
@@ -45,9 +38,9 @@ export function useRunAllScansControl() {
     busy,
     start,
     /** A line to show while scanning, or null. */
-    progress: busy ? progressText(status.data) : null,
+    progress: busy ? (scanProgressText(status.data) ?? 'Scanning…') : null,
     /** The last run's failure, as the server reported it. */
-    lastError: !busy ? (status.data?.lastError ?? null) : null,
+    lastError: !busy ? scanFailure(status.data) : null,
   };
 }
 

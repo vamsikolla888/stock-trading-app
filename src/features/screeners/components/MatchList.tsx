@@ -3,10 +3,13 @@ import React, { memo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { ChangeText } from '@/components/market/ChangeText';
+import { LiveFlash } from '@/components/market/LiveFlash';
 import { Sparkline } from '@/components/market/Sparkline';
 import { StockLogo } from '@/components/market/StockLogo';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import { stockLogoUrl } from '@/features/market/api';
+import { overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
 import { stockHref } from '@/lib/navigation';
 import { formatINR, formatNumber, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -21,8 +24,8 @@ const numbers = { fontVariant: ['tabular-nums' as const] };
 
 /**
  * One match: the stock, the figures that satisfied the screen, a ~30-close trend and the
- * price the scan recorded. The sparkline is coloured by its own window, so a green day
- * inside a falling month never draws a red line under a green number.
+ * price — the scan's, then the live feed's. The sparkline is coloured by its own window, so a
+ * green day inside a falling month never draws a red line under a green number.
  */
 const MatchRow = memo(function MatchRow({ match }: { match: ScreenerMatch }) {
   const router = useRouter();
@@ -34,11 +37,13 @@ const MatchRow = memo(function MatchRow({ match }: { match: ScreenerMatch }) {
   const last = trend[trend.length - 1];
   const trendColor =
     first !== undefined && last !== undefined && last < first ? colors.loss : colors.gain;
+  const quote = useLiveQuote(match.exchange, match.symbol);
+  const view = overlayQuote({ price: match.ltp, changePct: match.changePct }, quote);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${match.companyName ?? match.symbol} on ${match.exchange}, ${formatINR(match.ltp)}, ${formatSignedPercent(match.changePct)}${evidence ? `. ${evidence}` : ''}`}
+      accessibilityLabel={`${match.companyName ?? match.symbol} on ${match.exchange}, ${formatINR(view.price)}, ${formatSignedPercent(view.changePct)}${evidence ? `. ${evidence}` : ''}`}
       onPress={() => router.push(stockHref(match.symbol, match.exchange))}
       className="flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
     >
@@ -63,11 +68,13 @@ const MatchRow = memo(function MatchRow({ match }: { match: ScreenerMatch }) {
       </View>
       {trend.length > 1 ? <Sparkline data={trend} color={trendColor} /> : null}
       <View className="items-end">
-        <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={numbers}>
-          {formatINR(match.ltp)}
-        </Text>
-        <ChangeText value={match.changePct} className="mt-0.5 text-xs" style={numbers}>
-          {formatSignedPercent(match.changePct)}
+        <LiveFlash seq={quote?.seq} dir={quote?.dir}>
+          <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={numbers}>
+            {formatINR(view.price)}
+          </Text>
+        </LiveFlash>
+        <ChangeText value={view.changePct} className="mt-0.5 text-xs" style={numbers}>
+          {formatSignedPercent(view.changePct)}
         </ChangeText>
       </View>
     </Pressable>

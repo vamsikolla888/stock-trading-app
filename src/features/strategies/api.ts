@@ -1,17 +1,19 @@
 import { apiClient } from '@/services/api/client';
 
 import type {
-  BacktestJobStatus,
   CreateStrategyBody,
   EnqueueBacktestResult,
   GenerationView,
   IndexSummary,
   PairingResult,
+  RulesPreview,
+  RunStaleResult,
   StartGenerationInput,
   StrategyCatalog,
   StrategyDetail,
   StrategyMatchesResult,
   StrategyPack,
+  StrategyRules,
   StrategySummary,
   StrategyTemplate,
   UpdateStrategyBody,
@@ -55,12 +57,39 @@ export const strategiesApi = {
   async remove(id: string): Promise<void> {
     await apiClient.delete(path(id));
   },
+  /** A copy with the rules and settings, no results — named "<name> (copy)". */
+  async duplicate(id: string): Promise<StrategyDetail> {
+    const { data } = await apiClient.post<StrategyDetail>(`${path(id)}/duplicate`);
+    return data;
+  },
+  /**
+   * Queues a run. There is no status endpoint any more: the strategy's own `runState` (read
+   * with the queue consulted) is the answer, polled on the detail while `active`.
+   */
   async runBacktest(id: string): Promise<EnqueueBacktestResult> {
     const { data } = await apiClient.post<EnqueueBacktestResult>(`${path(id)}/backtest`);
     return data;
   },
-  async backtestStatus(id: string): Promise<BacktestJobStatus> {
-    const { data } = await apiClient.get<BacktestJobStatus>(`${path(id)}/backtest-status`);
+  /** Every strategy with missing, failed or stale results — at most 30 per call. */
+  async runStale(): Promise<RunStaleResult> {
+    const { data } = await apiClient.post<RunStaleResult>('/strategies/run-stale');
+    return data;
+  },
+  /** A live check of draft rules — issues, lint and the readback. Pure CPU, never a 422. */
+  async preview(rules: unknown, signal?: AbortSignal): Promise<RulesPreview> {
+    const { data } = await apiClient.post<RulesPreview>(
+      '/strategies/preview',
+      { rules },
+      { signal },
+    );
+    return data;
+  },
+  /** What unsaved rules would buy today (validated — 422 when invalid). */
+  async previewMatches(rules: StrategyRules, limit = 25): Promise<StrategyMatchesResult> {
+    const { data } = await apiClient.post<StrategyMatchesResult>('/strategies/preview/matches', {
+      rules,
+      limit,
+    });
     return data;
   },
   async startGeneration(body: StartGenerationInput): Promise<{ generationId: string }> {
@@ -73,6 +102,23 @@ export const strategiesApi = {
     );
     return data;
   },
+  async generations(limit = 8): Promise<GenerationView[]> {
+    const { data } = await apiClient.get<{ generations: GenerationView[] }>(
+      '/strategies/generations',
+      { params: { limit } },
+    );
+    return data.generations;
+  },
+  /** Saves a kept candidate beyond the requested count. Idempotent. */
+  async saveCandidate(
+    generationId: string,
+    index: number,
+  ): Promise<{ savedId: string; kind: 'strategy' | 'screener' }> {
+    const { data } = await apiClient.post<{ savedId: string; kind: 'strategy' | 'screener' }>(
+      `/strategies/generations/${encodeURIComponent(generationId)}/candidates/${index}/save`,
+    );
+    return data;
+  },
   /** What the entry accepts on the latest bar — a multi-second server pass. */
   async matches(id: string, limit = 25): Promise<StrategyMatchesResult> {
     const { data } = await apiClient.get<StrategyMatchesResult>(`${path(id)}/matches`, {
@@ -80,10 +126,14 @@ export const strategiesApi = {
     });
     return data;
   },
-  /** Screeners that corroborate the strategy; `explain` spends one AI call server-side. */
-  async pairing(id: string): Promise<PairingResult> {
+  /**
+   * Screeners that corroborate the strategy. `explain` is OPT-IN (it spends one AI call with a
+   * 20 s ceiling); the deterministic ranking is complete without it.
+   */
+  async pairing(id: string, explain = false): Promise<PairingResult> {
     const { data } = await apiClient.get<PairingResult>(`${path(id)}/screeners`, {
-      params: { explain: true },
+      params: { explain },
+      timeout: explain ? 30_000 : undefined,
     });
     return data;
   },

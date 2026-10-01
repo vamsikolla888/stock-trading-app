@@ -11,6 +11,7 @@ import {
   expiredCount,
   fillSummary,
   filterPaperOrders,
+  parseLimitPrice,
   isExpired,
   legOrderValue,
   matchUnderlyings,
@@ -226,10 +227,23 @@ describe('orders', () => {
     { status: 'FILLED' as const },
   ];
 
-  it('filters and counts by status', () => {
-    expect(countPaperOrders(orders)).toEqual({ all: 3, filled: 2, rejected: 1 });
-    expect(filterPaperOrders(orders, 'rejected')).toHaveLength(1);
-    expect(filterPaperOrders(orders, 'all')).toHaveLength(3);
+  it('filters and counts by status — a resting order is open, a cancel is closed', () => {
+    const book = [...orders, { status: 'PENDING' as const }, { status: 'CANCELLED' as const }];
+    expect(countPaperOrders(book)).toEqual({ all: 5, open: 1, filled: 2, closed: 2 });
+    expect(filterPaperOrders(book, 'closed').map((o) => o.status)).toEqual([
+      'REJECTED',
+      'CANCELLED',
+    ]);
+    expect(filterPaperOrders(book, 'open')).toHaveLength(1);
+    expect(filterPaperOrders(book, 'all')).toHaveLength(5);
+  });
+
+  it('parses a limit price, refusing anything that is not one', () => {
+    expect(parseLimitPrice(' 12.35 ')).toBe(12.35);
+    expect(parseLimitPrice('0')).toBeNull();
+    expect(parseLimitPrice('-5')).toBeNull();
+    expect(parseLimitPrice('abc')).toBeNull();
+    expect(parseLimitPrice('')).toBeNull();
   });
 
   it('prints a premium flow in words — negative is received', () => {

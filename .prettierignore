@@ -6,3 +6,4 @@ ios
 coverage
 package-lock.json
 .kilo
+src/features/charts/web/chartHtml.generated.ts

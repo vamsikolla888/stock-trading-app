@@ -15,6 +15,7 @@ import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { OptionSheet } from '@/components/ui/OptionSheet';
 import { SegmentedControl } from '@/components/ui/Tabs';
+import { ChainChart } from '@/features/fno/components/ChainChart';
 import {
   ChainGrid,
   ChainGridHeader,
@@ -35,6 +36,7 @@ import {
   useOptionChain,
 } from '@/features/fno/hooks';
 import { isUnlistedExpiryError } from '@/features/fno/lib/access';
+import { chartAnchor } from '@/features/fno/lib/candles';
 import {
   atmRowIndex,
   chainMaxOi,
@@ -56,7 +58,16 @@ import {
   timeIst,
   venueOf,
 } from '@/features/fno/lib/format';
-import type { FnoChainLeg, FnoContract, FnoExchange, FnoSide } from '@/features/fno/types';
+import type {
+  ChartTarget,
+  FnoChainLeg,
+  FnoContract,
+  FnoExchange,
+  FnoFutures,
+  FnoSide,
+} from '@/features/fno/types';
+import { liveKey, overlayQuote, type LiveQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuotes, type LiveTarget } from '@/features/market/live';
 import { useNow } from '@/hooks/useNow';
 import { cn } from '@/lib/utils/cn';
 import { formatINR } from '@/lib/utils/formatters';
@@ -114,6 +125,15 @@ export default function OptionChainScreen() {
   const [searching, setSearching] = useState(false);
   const [pickingWindow, setPickingWindow] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [chartOpen, setChartOpen] = useState(false);
+  // The contract last picked (a premium, a future, a searched contract): the chart switches to
+  // it, and its chip switches back. Cleared with the underlying, expiry or tab, like the web's.
+  const [picked, setPicked] = useState<FnoContract | null>(null);
+  const [chartTarget, setChartTarget] = useState<ChartTarget>('underlying');
+  const pickForChart = useCallback((contract: FnoContract | null) => {
+    setPicked(contract);
+    setChartTarget(contract ? 'contract' : 'underlying');
+  }, []);
 
   const universe = useFnoUnderlyings();
   const meta =
@@ -152,6 +172,37 @@ export default function OptionChainScreen() {
   // different underlying or expiry it is dimmed and cannot open a ticket.
   const placeholder = chain.isPlaceholderData;
 
+  /* Live premiums: every contract on screen, and the spot, on the F&O feed (the viewer's Groww
+     session), laid over the polled chain or futures. A placeholder chain — the previous
+     underlying, shown while the next loads — is not watched. */
+  const spotExchange = sel.exchange === 'BFO' ? 'BSE' : 'NSE';
+  const spotSymbol = meta?.spotSymbol ?? null;
+  // Rebuilt each render on purpose: useLiveQuotes keys on the symbol SET, not the array.
+  const fnoTargets: LiveTarget[] = [];
+  if (tab === 'options' && data && !placeholder) {
+    for (const row of data.rows) {
+      for (const leg of [row.call, row.put]) {
+        if (leg?.contract) {
+          fnoTargets.push({ exchange: leg.contract.exchange, symbol: leg.tradingSymbol });
+        }
+      }
+    }
+  }
+  if (tab === 'futures') {
+    for (const f of futures.data?.futures ?? []) {
+      fnoTargets.push({ exchange: f.contract.exchange, symbol: f.contract.tradingSymbol });
+    }
+  }
+  if (spotSymbol) fnoTargets.push({ exchange: spotExchange, symbol: spotSymbol });
+  const fnoQuotes = useLiveQuotes(fnoTargets, { mode: 'fno' });
+  const liveOf = useCallback(
+    (contract: Pick<FnoContract, 'exchange' | 'tradingSymbol'>) =>
+      fnoQuotes.get(liveKey(contract.exchange, contract.tradingSymbol)),
+    [fnoQuotes],
+  );
+  const liveSpot = spotSymbol ? fnoQuotes.get(liveKey(spotExchange, spotSymbol))?.ltp : undefined;
+  const liveFutures = repriceFutures(futures.data, fnoQuotes, liveSpot);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -167,7 +218,7 @@ export default function OptionChainScreen() {
   }, [tab, chain, futures, expiries, status, expiryUnlistedLocally]);
 
   const now = useNow(15_000);
-  const spot = data?.spot ?? futures.data?.spot ?? null;
+  const spot = liveSpot ?? data?.spot ?? futures.data?.spot ?? null;
   const activeQuery = tab === 'options' ? chain : futures;
   const priceStale =
     (activeQuery.isError && !!activeQuery.data) ||
@@ -192,30 +243,70 @@ export default function OptionChainScreen() {
           },
     [view, maxOi],
   );
-  const ltpOf = useCallback((leg: FnoChainLeg) => leg.ltp, []);
+  const ltpOf = useCallback(
+    (leg: FnoChainLeg) => (leg.contract ? liveOf(leg.contract)?.ltp : undefined) ?? leg.ltp,
+    [liveOf],
+  );
+  // The live premium's move against its close; the chain's own figure until the first tick.
+  const changeOf = useCallback(
+    (leg: FnoChainLeg) =>
+      overlayQuote(
+        { price: leg.ltp, changePct: leg.dayChangePct },
+        leg.contract ? liveOf(leg.contract) : undefined,
+      ).changePct,
+    [liveOf],
+  );
   const canPick = useCallback(
     (leg: FnoChainLeg) => !placeholder && leg.contract != null,
     [placeholder],
   );
-  const onPick = useCallback((leg: FnoChainLeg) => {
-    if (!leg.contract) return;
-    setTicket({ contract: leg.contract, leg, side: 'BUY', nonce: Date.now() });
-  }, []);
-  const onTradeFuture = useCallback((contract: FnoContract, side: FnoSide) => {
-    setTicket({ contract, leg: null, side, nonce: Date.now() });
-  }, []);
+  const onPick = useCallback(
+    (leg: FnoChainLeg) => {
+      if (!leg.contract) return;
+      pickForChart(leg.contract);
+      setTicket({ contract: leg.contract, leg, side: 'BUY', nonce: Date.now() });
+    },
+    [pickForChart],
+  );
+  const onTradeFuture = useCallback(
+    (contract: FnoContract, side: FnoSide) => {
+      pickForChart(contract);
+      setTicket({ contract, leg: null, side, nonce: Date.now() });
+    },
+    [pickForChart],
+  );
 
-  // The ticket's price follows every refresh of the chain or futures list.
-  const ticketLtp = useMemo(() => {
-    if (!ticket) return null;
-    const symbol = ticket.contract.tradingSymbol;
-    for (const row of data?.rows ?? []) {
-      if (row.call?.tradingSymbol === symbol) return row.call.ltp;
-      if (row.put?.tradingSymbol === symbol) return row.put.ltp;
-    }
-    const future = futures.data?.futures.find((f) => f.contract.tradingSymbol === symbol);
-    return future?.ltp ?? ticket.leg?.ltp ?? null;
-  }, [ticket, data, futures.data]);
+  // A contract's price follows every refresh of the chain or futures list. `undefined`: not on
+  // screen; `null`: on screen with no trade yet — which is shown as such, not as a stale price.
+  const ltpOfContract = useCallback(
+    (contract: Pick<FnoContract, 'exchange' | 'tradingSymbol'>): number | null | undefined => {
+      const live = liveOf(contract)?.ltp;
+      if (live !== undefined) return live;
+      const symbol = contract.tradingSymbol;
+      for (const row of data?.rows ?? []) {
+        if (row.call?.tradingSymbol === symbol) return row.call.ltp;
+        if (row.put?.tradingSymbol === symbol) return row.put.ltp;
+      }
+      return futures.data?.futures.find((f) => f.contract.tradingSymbol === symbol)?.ltp;
+    },
+    [liveOf, data, futures.data],
+  );
+  const ticketOnScreenLtp = ticket ? ltpOfContract(ticket.contract) : undefined;
+  const ticketLtp =
+    ticketOnScreenLtp !== undefined ? ticketOnScreenLtp : (ticket?.leg?.ltp ?? null);
+
+  /* Chart. The underlying is charted through a listed contract of THIS chain — never through a
+     placeholder chain still showing the previous underlying. */
+  const chartAnchorContract = useMemo(
+    () => chartAnchor(tab, placeholder ? null : data, futures.data),
+    [tab, placeholder, data, futures.data],
+  );
+  const chartsContract = chartTarget === 'contract' && picked != null;
+  const chartLivePrice = chartsContract
+    ? (ltpOfContract(picked) ?? null)
+    : placeholder
+      ? null
+      : spot;
 
   /* Centre the ATM strike once per (underlying, expiry) — never on a refresh, which would yank
      the table away from wherever the user had scrolled. Rows are a fixed height, so the ATM
@@ -300,13 +391,29 @@ export default function OptionChainScreen() {
         refreshFailed={activeQuery.isError && !!activeQuery.data}
       />
       <GrowwAccessBanner className="mt-3" />
+      <ChainChart
+        className="mt-3"
+        open={chartOpen}
+        onToggle={() => setChartOpen((open) => !open)}
+        exchange={sel.exchange}
+        underlying={sel.underlying}
+        anchor={chartAnchorContract}
+        anchorLoading={tab === 'options' ? chain.isLoading || placeholder : futures.isLoading}
+        picked={picked}
+        target={chartTarget}
+        onTargetChange={setChartTarget}
+        livePrice={chartLivePrice}
+      />
       <SegmentedControl
         className="mt-3"
         items={TABS.filter(
           (t) => !meta || (t.key === 'options' ? meta.hasOptions : meta.hasFutures),
         )}
         value={tab}
-        onChange={(tab) => setSel((s) => ({ ...s, tab }))}
+        onChange={(tab) => {
+          pickForChart(null);
+          setSel((s) => ({ ...s, tab }));
+        }}
       />
     </View>
   );
@@ -337,7 +444,10 @@ export default function OptionChainScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ selected: on }}
                 accessibilityLabel={`Expiry ${expiryLabel(e.expiry)}, ${dteLabel(e.daysToExpiry)}`}
-                onPress={() => setSel((s) => ({ ...s, expiry: e.expiry }))}
+                onPress={() => {
+                  if (e.expiry !== selectedExpiry) pickForChart(null);
+                  setSel((s) => ({ ...s, expiry: e.expiry }));
+                }}
                 className={cn(
                   'rounded-full border px-3.5 py-2',
                   on
@@ -382,6 +492,7 @@ export default function OptionChainScreen() {
 
   const showNearestExpiry = () => {
     centredFor.current = null;
+    pickForChart(null);
     setSel((s) => ({ ...s, expiry: null }));
   };
 
@@ -433,6 +544,7 @@ export default function OptionChainScreen() {
             atmStrike={data.atmStrike}
             spot={spot}
             ltp={ltpOf}
+            change={changeOf}
             outer={outer}
             itm={legItm}
             canPick={canPick}
@@ -456,7 +568,7 @@ export default function OptionChainScreen() {
   } else if (futures.data) {
     body = (
       <View className="w-full max-w-[720px] self-center px-5">
-        <FuturesList data={futures.data} onTrade={onTradeFuture} />
+        <FuturesList data={liveFutures ?? futures.data} onTrade={onTradeFuture} />
       </View>
     );
   }
@@ -562,10 +674,12 @@ export default function OptionChainScreen() {
         onPickUnderlying={(u) => {
           setTicket(null);
           centredFor.current = null;
+          pickForChart(null);
           setSel({ exchange: u.exchange, underlying: u.underlying, expiry: null, tab: 'options' });
         }}
         onPickContract={(c) => {
           centredFor.current = null;
+          pickForChart(c);
           setSel({
             exchange: c.exchange,
             underlying: c.underlying,
@@ -583,6 +697,40 @@ export default function OptionChainScreen() {
       />
     </StackScreen>
   );
+}
+
+/**
+ * The futures list re-priced at its live ticks: each future's price, day move and basis to the
+ * (live) spot. The same object back when nothing on it has ticked.
+ */
+function repriceFutures(
+  base: FnoFutures | undefined,
+  quotes: ReadonlyMap<string, LiveQuote>,
+  liveSpot: number | undefined,
+): FnoFutures | undefined {
+  if (!base || quotes.size === 0) return base;
+  const spotNow = liveSpot ?? base.spot;
+  return {
+    ...base,
+    spot: spotNow,
+    futures: base.futures.map((row) => {
+      const quote = quotes.get(liveKey(row.contract.exchange, row.contract.tradingSymbol));
+      if (!quote) return row;
+      const move = overlayQuote(
+        { price: row.ltp, changeAbs: row.dayChange, changePct: row.dayChangePct },
+        quote,
+      );
+      const basis = spotNow != null && move.price != null ? move.price - spotNow : row.basis;
+      return {
+        ...row,
+        ltp: move.price,
+        dayChange: move.change,
+        dayChangePct: move.changePct,
+        basis,
+        basisPct: basis != null && spotNow ? (basis / spotNow) * 100 : row.basisPct,
+      };
+    }),
+  };
 }
 
 function HeaderStat({ label, value }: { label: string; value: string }) {

@@ -82,11 +82,14 @@ export function StockHeader({
   exchange,
   detail,
   marketOpen,
+  streaming = false,
 }: {
   symbol: string;
   exchange: string;
   detail: StockDetail | undefined;
   marketOpen: boolean;
+  /** Ticks are arriving on the live feed right now. */
+  streaming?: boolean;
 }) {
   const displaySymbol =
     detail?.listings?.find((listing) => listing.exchange === exchange)?.displaySymbol ?? symbol;
@@ -96,7 +99,7 @@ export function StockHeader({
         ...detail.indices.sectors.filter((tag) => tag.key !== detail.indices?.primary?.key),
       ].slice(0, 3)
     : [];
-  const live = marketOpen && detail?.priceSource === 'broker';
+  const live = streaming || (marketOpen && detail?.priceSource === 'broker');
 
   return (
     <View>

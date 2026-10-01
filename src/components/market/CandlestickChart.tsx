@@ -2,6 +2,11 @@ import React, { memo, useCallback, useMemo, useState } from 'react';
 import { View, Text, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 import Svg, { Rect, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 
+import {
+  buildCandlestickGeometry,
+  candleGroupSize,
+  groupCandles,
+} from '@/components/market/candleLayout';
 import type { Candle } from '@/features/market/types';
 import { formatINR, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -15,94 +20,7 @@ export interface CandlestickChartProps {
   onScrub?: (candle: Candle | null) => void;
 }
 
-const PAD_Y = 16;
 const NUMBERS = { fontVariant: ['tabular-nums' as const] };
-
-interface CandleGeometry {
-  x: number;
-  highY: number;
-  lowY: number;
-  openY: number;
-  closeY: number;
-  topY: number;
-  bottomY: number;
-  bodyHeight: number;
-  isBullish: boolean;
-  volHeight: number;
-  candle: Candle;
-}
-
-interface ChartGeometry {
-  candlesGeo: CandleGeometry[];
-  slotWidth: number;
-  bodyWidth: number;
-  baselineY: number | null;
-}
-
-export function buildCandlestickGeometry(
-  candles: readonly Candle[],
-  width: number,
-  height: number,
-  baseline?: number | null,
-): ChartGeometry | null {
-  if (width <= 0 || candles.length < 2) return null;
-
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
-  const volumes = candles.map((c) => c.volume || 0);
-
-  if (typeof baseline === 'number' && Number.isFinite(baseline)) {
-    highs.push(baseline);
-    lows.push(baseline);
-  }
-
-  const minPrice = Math.min(...lows);
-  const maxPrice = Math.max(...lows.concat(highs));
-  const priceRange = maxPrice - minPrice || 1;
-
-  const maxVolume = Math.max(...volumes) || 1;
-  const maxVolHeight = height * 0.22;
-
-  const slotWidth = width / candles.length;
-  const bodyWidth = Math.max(1.8, Math.min(9, slotWidth * 0.65));
-
-  const toY = (price: number) =>
-    PAD_Y + (1 - (price - minPrice) / priceRange) * (height - PAD_Y * 2);
-
-  const candlesGeo: CandleGeometry[] = candles.map((candle, index) => {
-    const x = index * slotWidth + slotWidth / 2;
-    const highY = toY(candle.high);
-    const lowY = toY(candle.low);
-    const openY = toY(candle.open);
-    const closeY = toY(candle.close);
-    const topY = Math.min(openY, closeY);
-    const bottomY = Math.max(openY, closeY);
-    const bodyHeight = Math.max(1.2, bottomY - topY);
-    const isBullish = candle.close >= candle.open;
-    const volHeight = ((candle.volume || 0) / maxVolume) * maxVolHeight;
-
-    return {
-      x,
-      highY,
-      lowY,
-      openY,
-      closeY,
-      topY,
-      bottomY,
-      bodyHeight,
-      isBullish,
-      volHeight,
-      candle,
-    };
-  });
-
-  return {
-    candlesGeo,
-    slotWidth,
-    bodyWidth,
-    baselineY: typeof baseline === 'number' && Number.isFinite(baseline) ? toY(baseline) : null,
-  };
-}
 
 /**
  * Interactive TradingView-style Candlestick Chart rendered with react-native-svg.
@@ -118,9 +36,14 @@ export const CandlestickChart = memo(function CandlestickChart({
   const [width, setWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
+  // More bars than fit at a readable width merge into wider candles (candleLayout.ts).
+  const drawn = useMemo(
+    () => groupCandles(candles, candleGroupSize(candles.length, width)),
+    [candles, width],
+  );
   const geometry = useMemo(
-    () => buildCandlestickGeometry(candles, width, height, baseline),
-    [candles, width, height, baseline],
+    () => buildCandlestickGeometry(drawn, width, height, baseline),
+    [drawn, width, height, baseline],
   );
 
   const onLayout = useCallback((event: LayoutChangeEvent) => {
@@ -129,13 +52,13 @@ export const CandlestickChart = memo(function CandlestickChart({
 
   const scrubTo = useCallback(
     (event: GestureResponderEvent) => {
-      if (!geometry || candles.length === 0) return;
+      if (!geometry || drawn.length === 0) return;
       const x = Math.max(0, Math.min(width, event.nativeEvent.locationX));
-      const index = Math.min(candles.length - 1, Math.max(0, Math.floor(x / geometry.slotWidth)));
+      const index = Math.min(drawn.length - 1, Math.max(0, Math.floor(x / geometry.slotWidth)));
       setActiveIndex(index);
-      onScrub?.(candles[index] ?? null);
+      onScrub?.(drawn[index] ?? null);
     },
-    [geometry, candles, width, onScrub],
+    [geometry, drawn, width, onScrub],
   );
 
   const endScrub = useCallback(() => {
@@ -143,7 +66,7 @@ export const CandlestickChart = memo(function CandlestickChart({
     onScrub?.(null);
   }, [onScrub]);
 
-  const activeCandle = activeIndex !== null ? candles[activeIndex] : null;
+  const activeCandle = activeIndex !== null ? drawn[activeIndex] : null;
   const activeGeo = activeIndex !== null ? geometry?.candlesGeo[activeIndex] : null;
   const activeChangePct =
     activeCandle && activeCandle.open > 0

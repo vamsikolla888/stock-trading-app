@@ -12,18 +12,22 @@ import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { KpiGrid, type Kpi } from '@/components/ui/KpiGrid';
 import { Section } from '@/components/ui/Section';
 import { EquityCurveCard } from '@/features/strategies/components/EquityCurveCard';
-import { StrategyFormFields, useStrategyForm } from '@/features/strategies/components/StrategyForm';
+import {
+  RulesPreviewCard,
+  StrategyFormFields,
+  useStrategyForm,
+} from '@/features/strategies/components/StrategyForm';
 import { StrategyTodaySection } from '@/features/strategies/components/StrategyTodaySection';
 import { TradeList } from '@/features/strategies/components/TradeList';
 import {
-  useBacktestStatus,
   useDeleteStrategy,
+  useDuplicateStrategy,
   useIndexCatalog,
   useRunBacktest,
   useStrategy,
   useUpdateStrategy,
 } from '@/features/strategies/hooks';
-import { parameterRows, recentTrades } from '@/features/strategies/lib/backtest';
+import { isRunActive, parameterRows, recentTrades } from '@/features/strategies/lib/backtest';
 import { formatProfitFactor } from '@/features/strategies/lib/ranking';
 import type { StrategyDetail } from '@/features/strategies/types';
 import { formatNumber, formatPercent, formatSignedPercent } from '@/lib/utils/formatters';
@@ -44,24 +48,15 @@ export default function StrategyDetailScreen() {
   const notFound = id === '' || (isApiError(query.error) && query.error.status === 404);
   const indices = useIndexCatalog();
   const remove = useDeleteStrategy();
+  const duplicate = useDuplicateStrategy();
 
-  // Status polling starts once the server has accepted a run (or the strategy says one is in
-  // flight) and stops by itself when the job settles — the poll interval is off whenever the
-  // last answer was "not running", so nothing has to switch it off here.
-  const [queuedHere, setQueuedHere] = useState(false);
-  const run = useRunBacktest(id, { onQueued: () => setQueuedHere(true) });
+  // The strategy's own `runState` is the authority: the server reads it with the queue
+  // consulted, so a job the worker lost comes back `stalled` (not active) and cannot lock the
+  // Run button. While it is active the detail query polls itself (useStrategy).
+  const run = useRunBacktest(id);
   const strategy = query.data;
-  const inFlight = strategy?.status === 'queued' || strategy?.status === 'running';
-  const status = useBacktestStatus(id, queuedHere || inFlight);
-  // The queue is the authority once it has answered (as on the web): a strategy left "queued"
-  // by a job the worker lost must not lock the Run button forever. Until it answers — or
-  // while a poll is in flight — the strategy's own status and this screen's click stand in.
-  const queueAnswered = status.data !== undefined && !status.isFetching;
-  const running =
-    run.isPending || (queueAnswered ? status.data?.running === true : inFlight || queuedHere);
-  // Not while the detail is refetching: a finished job invalidates it, and until the new read
-  // lands the old "running" status would read as stuck for a moment.
-  const stuck = inFlight && queueAnswered && !running && !query.isFetching;
+  const running = run.isPending || isRunActive(strategy);
+  const stuck = !running && strategy?.runState?.phase === 'stalled';
 
   const startBacktest = () =>
     run.mutate(undefined, {
@@ -72,6 +67,17 @@ export default function StrategyDetailScreen() {
         ),
       onError: (error) => toast.error("Couldn't start the backtest", getErrorMessage(error)),
     });
+
+  const makeCopy = () => {
+    if (!strategy) return;
+    duplicate.mutate(strategy.id, {
+      onSuccess: (copy) => {
+        toast.success('Copy created', copy.name);
+        router.replace({ pathname: '/strategy/[id]', params: { id: copy.id } });
+      },
+      onError: (error) => toast.error("Couldn't copy the strategy", getErrorMessage(error)),
+    });
+  };
 
   const confirmDelete = () => {
     if (!strategy) return;
@@ -105,6 +111,7 @@ export default function StrategyDetailScreen() {
       name: strategy.name,
       description: strategy.description ?? '',
       rules: strategy.rules,
+      settings: strategy.settings,
     });
     update.reset();
     setEditing(true);
@@ -200,10 +207,11 @@ export default function StrategyDetailScreen() {
           <Banner
             tone="info"
             className="mb-2"
-            message="Changing the rules marks the current backtest out of date until you re-run it."
+            message="Changing the rules or the test settings marks the current backtest out of date until you re-run it."
           />
         ) : null}
         <StrategyFormFields form={form} />
+        <RulesPreviewCard rules={form.rules} />
       </StackScreen>
     );
   }
@@ -268,6 +276,8 @@ export default function StrategyDetailScreen() {
           onEdit={startEditing}
           onDelete={confirmDelete}
           deleting={remove.isPending}
+          onDuplicate={makeCopy}
+          duplicating={duplicate.isPending}
         />
       )}
     </StackScreen>
@@ -276,11 +286,20 @@ export default function StrategyDetailScreen() {
 
 function statusLine(strategy: StrategyDetail, stuck: boolean): string {
   if (stuck) return "Last backtest didn't finish";
-  if (strategy.status === 'queued' || strategy.status === 'running') return 'Backtest running';
-  if (strategy.status === 'never-run') return 'Never backtested';
-  if (strategy.status === 'failed') return 'Last backtest failed';
-  return strategy.resultsStale ? 'Rules changed since the last run' : 'Backtested · daily bars';
+  const phase = strategy.runState?.phase ?? strategy.status;
+  if (phase === 'queued') return 'Backtest queued';
+  if (phase === 'running') return 'Backtest running';
+  if (phase === 'never-run') return 'Never backtested';
+  if (phase === 'failed') return 'Last backtest failed';
+  if (strategy.resultsStale) {
+    return strategy.staleReason === 'settings'
+      ? 'Settings changed since the last run'
+      : 'Rules changed since the last run';
+  }
+  return 'Backtested · daily bars';
 }
+
+const VERDICT_TONE = { good: 'success', warn: 'warning', bad: 'error', unknown: 'info' } as const;
 
 function StrategyBody({
   strategy,
@@ -291,6 +310,8 @@ function StrategyBody({
   onEdit,
   onDelete,
   deleting,
+  onDuplicate,
+  duplicating,
 }: {
   strategy: StrategyDetail;
   running: boolean;
@@ -301,12 +322,17 @@ function StrategyBody({
   onEdit: () => void;
   onDelete: () => void;
   deleting: boolean;
+  onDuplicate: () => void;
+  duplicating: boolean;
 }) {
   const runData = strategy.run;
   const m = runData?.metrics ?? null;
   const analysis = runData?.analysis ?? null;
   const trades = useMemo(() => recentTrades(runData?.trades ?? [], 12), [runData]);
-  const params = parameterRows(strategy.rules, runData, indexLabels);
+  // The run's own settings describe its numbers; before a run, the saved settings.
+  const params = parameterRows(strategy.rules, runData ?? strategy.settings ?? null, indexLabels);
+  const verdict = analysis?.verdict ?? strategy.verdict ?? null;
+  const warnings = strategy.warnings ?? [];
 
   const kpis: Kpi[] = m
     ? [
@@ -349,7 +375,13 @@ function StrategyBody({
 
   const badges: { label: string; variant: 'success' | 'warning' | 'neutral' | 'danger' }[] = [];
   if (strategy.resultsStale)
-    badges.push({ label: 'Rules changed since this run', variant: 'warning' });
+    badges.push({
+      label:
+        strategy.staleReason === 'settings'
+          ? 'Settings changed since this run'
+          : 'Rules changed since this run',
+      variant: 'warning',
+    });
   else if (strategy.status === 'complete') badges.push({ label: 'Backtested', variant: 'success' });
   else if (strategy.status === 'never-run') badges.push({ label: 'Never run', variant: 'neutral' });
   else if (strategy.status === 'failed') badges.push({ label: 'Failed', variant: 'danger' });
@@ -377,7 +409,23 @@ function StrategyBody({
         <Text className="mt-1.5 text-[13px] leading-[19px] text-ink dark:text-ink-dark">
           {strategy.readback}
         </Text>
+        {strategy.universe && strategy.universe.length > 0 ? (
+          <Text className="mt-2 text-xs text-ink-muted dark:text-ink-dark-muted">
+            Looks at {strategy.universe.join(' · ')}
+          </Text>
+        ) : null}
       </Card>
+
+      {warnings.length > 0 ? (
+        <Banner
+          tone="warning"
+          className="mt-3"
+          title={
+            warnings.length === 1 ? 'One thing to check' : `${warnings.length} things to check`
+          }
+          message={warnings.map((w) => w.message).join('\n')}
+        />
+      ) : null}
 
       {running ? (
         <Banner
@@ -390,19 +438,33 @@ function StrategyBody({
           tone="warning"
           className="mt-4"
           title="The last backtest didn't finish"
-          message="It is marked as running, but the job is no longer in the queue — the worker may have restarted. Run it again."
+          message={
+            strategy.runState?.message ??
+            'It is marked as running, but the job is no longer in the queue — the worker may have restarted. Run it again.'
+          }
           action={{ label: 'Run backtest', onPress: onRun }}
         />
+      ) : running && strategy.runState?.message ? (
+        <Banner tone="warning" className="mt-4" message={strategy.runState.message} />
       ) : strategy.status === 'failed' && strategy.lastError ? (
         <Banner
           tone="error"
           className="mt-4"
           title="Backtest failed"
-          message={strategy.lastError}
+          message={strategy.runState?.message ?? strategy.lastError}
         />
       ) : null}
 
       {m ? <KpiGrid items={kpis} className="mt-4" /> : null}
+
+      {m && verdict ? (
+        <Banner
+          tone={VERDICT_TONE[verdict.tone]}
+          className="mt-3"
+          title="Out-of-sample check"
+          message={verdict.text}
+        />
+      ) : null}
 
       <StrategyTodaySection strategyId={strategy.id} />
 
@@ -434,7 +496,11 @@ function StrategyBody({
             )}
             <Text className="mt-2 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
               Fills at the next bar&apos;s open after the signal, charged {runData.costBps} bps per
-              side. Stops are checked on the close, not intrabar.
+              side, at most {runData.maxOpenPositions} positions at once. Stops are checked on the
+              close, not intrabar.
+              {runData.fellBack && runData.fellBack.length > 0
+                ? ` Scanned wider than asked: ${runData.fellBack.join('; ')}.`
+                : ''}
             </Text>
           </Section>
 
@@ -539,18 +605,32 @@ function StrategyBody({
         </Section>
       ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: deleting }}
-        disabled={deleting}
-        onPress={onDelete}
-        hitSlop={8}
-        className="mt-8 self-center px-4 py-2 active:opacity-60"
-      >
-        <Text className="text-[13px] font-semibold text-danger-600 dark:text-danger-dark">
-          {deleting ? 'Deleting…' : 'Delete strategy'}
-        </Text>
-      </Pressable>
+      <View className="mt-8 flex-row justify-center gap-6">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: duplicating }}
+          disabled={duplicating}
+          onPress={onDuplicate}
+          hitSlop={8}
+          className="px-2 py-2 active:opacity-60"
+        >
+          <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">
+            {duplicating ? 'Copying…' : 'Duplicate'}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: deleting }}
+          disabled={deleting}
+          onPress={onDelete}
+          hitSlop={8}
+          className="px-2 py-2 active:opacity-60"
+        >
+          <Text className="text-[13px] font-semibold text-danger-600 dark:text-danger-dark">
+            {deleting ? 'Deleting…' : 'Delete strategy'}
+          </Text>
+        </Pressable>
+      </View>
       <Text className="mt-3 text-center text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
         Not investment advice — review before acting. Backtests use past prices and can&apos;t
         predict returns.

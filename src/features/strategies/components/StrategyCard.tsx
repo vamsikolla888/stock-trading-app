@@ -58,14 +58,25 @@ export const StrategyCard = memo(function StrategyCard({
       variant: engineOn ? 'success' : 'neutral',
     });
   }
-  if (strategy.status === 'never-run')
-    badges.push({ label: 'Never backtested', variant: 'neutral' });
-  if (strategy.status === 'queued' || strategy.status === 'running') {
-    badges.push({ label: 'Backtest running…', variant: 'primary' });
+  const phase = strategy.runState?.phase ?? strategy.status;
+  if (phase === 'never-run') badges.push({ label: 'Never backtested', variant: 'neutral' });
+  if (phase === 'queued') badges.push({ label: 'Backtest queued…', variant: 'primary' });
+  if (phase === 'running') badges.push({ label: 'Backtest running…', variant: 'primary' });
+  if (phase === 'stalled')
+    badges.push({ label: 'Backtest stalled — run again', variant: 'warning' });
+  if (phase === 'failed') badges.push({ label: 'Backtest failed', variant: 'danger' });
+  if (strategy.resultsStale && phase === 'complete') {
+    badges.push({
+      label:
+        strategy.staleReason === 'settings' ? 'Settings changed' : 'Rules changed since this run',
+      variant: 'warning',
+    });
   }
-  if (strategy.status === 'failed') badges.push({ label: 'Backtest failed', variant: 'danger' });
-  if (strategy.resultsStale && strategy.status === 'complete') {
-    badges.push({ label: 'Rules changed since this run', variant: 'warning' });
+  if (strategy.verdict && strategy.metrics && phase === 'complete') {
+    if (strategy.verdict.tone === 'good')
+      badges.push({ label: 'Held out of sample', variant: 'success' });
+    if (strategy.verdict.tone === 'bad')
+      badges.push({ label: 'Failed out of sample', variant: 'danger' });
   }
   if (duplicated) badges.push({ label: 'Duplicate name', variant: 'neutral' });
 

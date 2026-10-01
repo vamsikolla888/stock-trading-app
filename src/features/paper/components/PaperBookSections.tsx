@@ -74,7 +74,7 @@ function useMarks(
 
 // ── Holdings: the delivery (CNC) pool ────────────────────────────────────────────────────
 
-/** The delivery pool as a broker's holdings list: qty · cost-inclusive avg, value, returns. */
+/** Delivery holdings as a broker lists them: qty · average price paid, value, returns. */
 export function PaperHoldingsSection({
   portfolio,
   now,
@@ -127,8 +127,8 @@ export function PaperHoldingsSection({
         ))}
       </ListCard>
       <Note>
-        Avg is cost-inclusive — it already contains the charges paid on the way in, so it's your
-        break-even price.
+        Avg is the price you paid, as a broker shows it — so a stock that hasn't moved reads ₹0.00.
+        Charges are counted once, in the net P&L above; each holding's break-even includes them.
       </Note>
 
       <PositionSheets
@@ -186,7 +186,7 @@ export function PaperPositionsSection({
           className="mb-3"
           tone="error"
           title={`${formatINR(shortfall)} short`}
-          message="A forced square-off lost more than the margin behind it. That loss is real and isn't floored at zero — reset the intraday pool from Funds to start again."
+          message="A forced square-off lost more than the margin behind it. That loss is real and isn't floored at zero — deposit or reset the wallet from Funds to trade again."
         />
       ) : null}
       {called.length > 0 ? (
@@ -431,17 +431,32 @@ function PaperPositionSheet({
         <ChangeText value={mark.pnl} className="mt-0.5 text-[13px]" style={NUMBERS}>
           {mark.pnl === null
             ? 'No price yet — shown at cost'
-            : `${mask(formatReturn(mark.pnl, mark.pnlPct))} unrealised`}
+            : `${mask(formatReturn(mark.pnl, mark.pnlPct))} unrealised, before charges`}
         </ChangeText>
       </View>
 
       <KeyValueRow label="Quantity" value={formatQuantity(position.quantity)} />
       <KeyValueRow
         label="Average price"
-        hint="Cost-inclusive — your break-even"
+        hint={
+          position.basisTracked === false
+            ? 'Includes the buy charges (an older position)'
+            : 'The price paid, charges excluded'
+        }
         value={formatINR(position.avgPrice)}
         divider
       />
+      {position.breakEvenPrice != null ? (
+        <KeyValueRow
+          label="Break-even"
+          hint="Recovers the price and the buy charges"
+          value={formatINR(position.breakEvenPrice)}
+          divider
+        />
+      ) : null}
+      {position.buyCharges != null && position.buyCharges > 0 ? (
+        <KeyValueRow label="Buy charges" value={mask(formatINR(position.buyCharges))} divider />
+      ) : null}
       <KeyValueRow
         label="Last price"
         value={`${formatINR(mark.ltp)}${mark.changePct !== null ? `  ${formatSignedPercent(mark.changePct)}` : ''}`}

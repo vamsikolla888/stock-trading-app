@@ -57,13 +57,20 @@ export function InlineEmpty({
   title,
   message,
   action,
+  className,
 }: {
   title: string;
   message?: string;
   action?: { label: string; onPress: () => void };
+  className?: string;
 }) {
   return (
-    <View className="items-center gap-1.5 rounded-card border border-dashed border-line-strong px-4 py-6 dark:border-line-dark-strong">
+    <View
+      className={cn(
+        'items-center gap-1.5 rounded-card border border-dashed border-line-strong px-4 py-6 dark:border-line-dark-strong',
+        className,
+      )}
+    >
       <Text className="text-center text-sm font-semibold text-ink dark:text-ink-dark">{title}</Text>
       {message ? (
         <Text className="text-center text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">

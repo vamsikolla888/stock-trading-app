@@ -5,7 +5,11 @@ import { Alert, Text, View } from 'react-native';
 import { GroupScreen } from '@/components/navigation/GroupScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
-import { StrategyFormFields, useStrategyForm } from '@/features/strategies/components/StrategyForm';
+import {
+  RulesPreviewCard,
+  StrategyFormFields,
+  useStrategyForm,
+} from '@/features/strategies/components/StrategyForm';
 import { useCreateStrategy, useStrategyTemplates } from '@/features/strategies/hooks';
 import { toast } from '@/lib/utils/toast';
 import { getErrorMessage } from '@/types/api';
@@ -80,6 +84,7 @@ export default function StrategyBuilderScreen() {
         templates={templates.data ?? []}
         templatesLoading={templates.isPending}
       />
+      <RulesPreviewCard rules={form.rules} />
       <Text className="mt-6 text-center text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
         Not investment advice — review before acting.
       </Text>

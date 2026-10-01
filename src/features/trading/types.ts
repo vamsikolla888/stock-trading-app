@@ -192,5 +192,6 @@ export type {
   PaperPortfolio,
   PaperPosition,
   SegmentOverview,
-  SegmentSummary,
+  ProductSummary,
+  WalletSummary,
 } from '@/features/paper/types';

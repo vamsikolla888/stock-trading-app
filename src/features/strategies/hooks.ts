@@ -1,10 +1,26 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 
 import { insightKeys } from '@/features/insights/api';
+import { useDebounce } from '@/hooks/useDebounce';
 
 import { strategiesApi } from './api';
+import { isRunActive } from './lib/backtest';
 import { pollInterval, retryOnceIfTransient } from './lib/polling';
-import type { CreateStrategyBody, StartGenerationInput, UpdateStrategyBody } from './types';
+import {
+  isGenerationActive,
+  type CreateStrategyBody,
+  type StartGenerationInput,
+  type StrategyDetail,
+  type StrategyRules,
+  type StrategySummary,
+  type UpdateStrategyBody,
+} from './types';
 
 /** Backtest results only change when a backtest runs, so polling hard gains nothing. */
 const STRATEGY_STALE_MS = 60_000;
@@ -17,18 +33,24 @@ export const strategyKeys = {
   catalog: ['strategies', 'catalog'] as const,
   packs: ['strategies', 'packs'] as const,
   detail: (id: string) => ['strategies', 'detail', id] as const,
-  backtestStatus: (id: string) => ['strategies', 'backtest-status', id] as const,
   generation: (id: string | null) => ['strategies', 'generation', id] as const,
+  generations: ['strategies', 'generations'] as const,
+  preview: (signature: string) => ['strategies', 'preview', signature] as const,
   matches: (id: string, limit: number) => ['strategies', id, 'matches', limit] as const,
   pairing: (id: string) => ['strategies', id, 'screeners'] as const,
   indices: ['indices', 'list'] as const,
 };
 
+/** Polls only while some strategy has a backtest in flight, so its card settles by itself. */
 export function useStrategiesList() {
   return useQuery({
     queryKey: strategyKeys.list,
     queryFn: strategiesApi.list,
     staleTime: STRATEGY_STALE_MS,
+    refetchInterval: (query) =>
+      query.state.data?.some((strategy) => isRunActive(strategy))
+        ? pollInterval(query.state.error, 5_000)
+        : false,
   });
 }
 
@@ -66,12 +88,26 @@ export function useIndexCatalog() {
   });
 }
 
+/**
+ * One strategy. While its backtest is in flight (`runState.active`) it polls itself — there is
+ * no separate status endpoint any more — and on the running → settled transition it refreshes
+ * the lists, which is what makes the new numbers appear everywhere without a reload.
+ */
 export function useStrategy(id: string | undefined) {
+  const queryClient = useQueryClient();
+  const invalidateLists = useInvalidateLists();
   return useQuery({
     queryKey: strategyKeys.detail(id ?? ''),
-    queryFn: () => strategiesApi.detail(id!),
+    queryFn: async () => {
+      const before = queryClient.getQueryData<StrategyDetail>(strategyKeys.detail(id!));
+      const detail = await strategiesApi.detail(id!);
+      if (isRunActive(before) && !isRunActive(detail)) void invalidateLists();
+      return detail;
+    },
     enabled: Boolean(id),
     staleTime: STRATEGY_STALE_MS,
+    refetchInterval: (query) =>
+      isRunActive(query.state.data) ? pollInterval(query.state.error, 2_500) : false,
   });
 }
 
@@ -116,6 +152,41 @@ export function useUpdateStrategy(id: string) {
   });
 }
 
+/** A copy with the same rules and settings, and no results. */
+export function useDuplicateStrategy() {
+  const invalidate = useInvalidateLists();
+  return useMutation({
+    mutationFn: (id: string) => strategiesApi.duplicate(id),
+    onSuccess: () => void invalidate(),
+  });
+}
+
+/** Queues every strategy whose results are missing, failed or stale (30 per press). */
+export function useRunStaleBacktests() {
+  const invalidate = useInvalidateLists();
+  return useMutation({
+    mutationFn: strategiesApi.runStale,
+    onSuccess: () => void invalidate(),
+  });
+}
+
+/**
+ * The builder's live check: the draft rules, debounced, sent to /strategies/preview — issues
+ * with their paths, lint ("RSI > 0 is always true") and the readback in the server's words.
+ * A write-nothing POST keyed on the rules, so identical drafts share one answer.
+ */
+export function useRulesPreview(rules: StrategyRules | null) {
+  const signature = useDebounce(rules ? JSON.stringify(rules) : '', 450);
+  return useQuery({
+    queryKey: strategyKeys.preview(signature),
+    queryFn: ({ signal }) => strategiesApi.preview(JSON.parse(signature) as unknown, signal),
+    enabled: signature !== '',
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
 export function useDeleteStrategy() {
   const queryClient = useQueryClient();
   const invalidate = useInvalidateLists();
@@ -129,42 +200,25 @@ export function useDeleteStrategy() {
 }
 
 /**
- * `onQueued` fires only once the server has accepted the job — the earliest moment status
- * polling can tell the truth (flipping a flag on tap could see "not running" and stop). The
- * status read is invalidated too, so an idle poll from an earlier run re-asks now.
+ * Queues a backtest. The answer carries the strategy's new state (queued, `runState.active`),
+ * which is written into the detail at once — that is what starts the detail's own polling, and
+ * what makes the Run button read "running" without waiting for a refetch.
  */
-export function useRunBacktest(id: string, options: { onQueued?: () => void } = {}) {
+export function useRunBacktest(id: string) {
   const queryClient = useQueryClient();
+  const invalidateLists = useInvalidateLists();
   return useMutation({
     mutationFn: () => strategiesApi.runBacktest(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: strategyKeys.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: strategyKeys.backtestStatus(id) });
-      options.onQueued?.();
-    },
-  });
-}
-
-/**
- * Polls while a backtest is in flight; on the transition to finished it refreshes the
- * detail and list, which is what makes the results appear without a manual reload.
- */
-export function useBacktestStatus(id: string | undefined, enabled: boolean) {
-  const invalidate = useInvalidateLists();
-  const queryClient = useQueryClient();
-  return useQuery({
-    queryKey: strategyKeys.backtestStatus(id ?? ''),
-    queryFn: async () => {
-      const status = await strategiesApi.backtestStatus(id!);
-      if (!status.running) {
-        void queryClient.invalidateQueries({ queryKey: strategyKeys.detail(id!) });
-        void invalidate();
+    onSuccess: (result) => {
+      const summary: StrategySummary | undefined = result.strategy;
+      if (summary) {
+        queryClient.setQueryData<StrategyDetail>(strategyKeys.detail(id), (old) =>
+          old ? { ...old, ...summary } : old,
+        );
       }
-      return status;
+      void queryClient.invalidateQueries({ queryKey: strategyKeys.detail(id) });
+      void invalidateLists();
     },
-    enabled: enabled && Boolean(id),
-    refetchInterval: (query) =>
-      query.state.data?.running ? pollInterval(query.state.error, 2_500) : false,
   });
 }
 
@@ -181,7 +235,7 @@ export function useGeneration(id: string | null) {
     queryKey: strategyKeys.generation(id),
     queryFn: async () => {
       const generation = await strategiesApi.generation(id!);
-      if (generation.status === 'complete' || generation.status === 'failed') {
+      if (!isGenerationActive(generation.status)) {
         void queryClient.invalidateQueries({ queryKey: strategyKeys.list });
         void queryClient.invalidateQueries({ queryKey: ['screeners', 'custom'] });
       }
@@ -190,7 +244,7 @@ export function useGeneration(id: string | null) {
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === 'complete' || status === 'failed') return false;
+      if (status && !isGenerationActive(status)) return false;
       // A run that answers 404 (or any 4xx) will never settle — without this the sheet
       // would poll it every two seconds for as long as the screen stays mounted.
       return pollInterval(query.state.error, 2_000);
@@ -210,13 +264,29 @@ export function useStrategyMatches(id: string | undefined, enabled: boolean, lim
   });
 }
 
-/** Gated for the same reason, and because the explanations spend an AI call. */
+/**
+ * Gated for the same reason. The AI "why" sentences are opt-in server-side now; they are asked
+ * for here because this screen shows them, and the query is only enabled on request.
+ */
 export function useStrategyPairing(id: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: strategyKeys.pairing(id ?? ''),
-    queryFn: () => strategiesApi.pairing(id!),
+    queryFn: () => strategiesApi.pairing(id!, true),
     enabled: enabled && Boolean(id),
     staleTime: 5 * 60_000,
     retry: retryOnceIfTransient,
+  });
+}
+
+/** Saves a kept candidate beyond the count asked for; refreshes both libraries. */
+export function useSaveCandidate(generationId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (index: number) => strategiesApi.saveCandidate(generationId!, index),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: strategyKeys.generation(generationId) });
+      void queryClient.invalidateQueries({ queryKey: strategyKeys.list });
+      void queryClient.invalidateQueries({ queryKey: ['screeners', 'custom'] });
+    },
   });
 }

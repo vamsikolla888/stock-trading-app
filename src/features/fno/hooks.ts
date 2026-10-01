@@ -8,10 +8,15 @@ import { isMarketOpen, livePriceInterval } from '@/lib/utils/market';
 import { isApiError } from '@/types/api';
 
 import { fnoApi } from './api';
+import { candleWindow } from './lib/candles';
 import { orderDetailSettled } from './lib/chain';
+import { candleWindows, toCandles, underlyingRange, type UnderlyingRange } from './lib/underlying';
 import type {
+  ChartTarget,
   ExitPositionInput,
   ExploreSection,
+  FnoCandleInterval,
+  FnoContract,
   FnoExchange,
   MarginLeg,
   ModifyFnoOrderInput,
@@ -55,6 +60,15 @@ export const fnoKeys = {
     [...fnoKeys.all, 'futures', exchange, underlying] as const,
   contract: (exchange: FnoExchange, tradingSymbol: string) =>
     [...fnoKeys.all, 'contract', exchange, tradingSymbol] as const,
+  /** `subject`: the underlying for an underlying chart, the trading symbol for a contract's. */
+  candles: (
+    exchange: FnoExchange,
+    subject: string,
+    target: ChartTarget,
+    interval: FnoCandleInterval,
+  ) => [...fnoKeys.all, 'candles', exchange, subject, target, interval] as const,
+  underlyingCandles: (exchange: FnoExchange, underlying: string, range: UnderlyingRange) =>
+    [...fnoKeys.all, 'underlying-candles', exchange, underlying, range] as const,
   positions: () => [...fnoKeys.all, 'positions'] as const,
   orders: () => [...fnoKeys.all, 'orders'] as const,
   order: (growwOrderId: string) => [...fnoKeys.all, 'order', growwOrderId] as const,
@@ -182,6 +196,103 @@ export function useFnoFutures(exchange: FnoExchange, underlying: string | null, 
     enabled: enabled && !!underlying,
     staleTime: 5_000,
     refetchInterval: (q) => livePriceInterval(q.state.data?.source === 'groww' ? 10_000 : 25_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+/**
+ * Bars for the option-chain chart. An underlying's series is keyed by the underlying, not by
+ * the contract that names it to the API: that contract (the ATM one) shifts as the spot moves
+ * or the expiry changes, and neither changes the underlying's bars. The window is computed per
+ * fetch and refetched each minute in market hours, so new bars arrive; between refetches the
+ * polled chain price keeps the forming bar live (lib/candles foldLivePrice).
+ */
+export function useFnoCandles(
+  exchange: FnoExchange,
+  contract: Pick<FnoContract, 'tradingSymbol' | 'underlying'> | null,
+  target: ChartTarget,
+  interval: FnoCandleInterval,
+  enabled = true,
+) {
+  const focused = useIsFocused();
+  const subject = contract
+    ? target === 'underlying'
+      ? contract.underlying
+      : contract.tradingSymbol
+    : '';
+  return useQuery({
+    queryKey: fnoKeys.candles(exchange, subject, target, interval),
+    queryFn: ({ signal }) =>
+      fnoApi.candles(
+        exchange,
+        (contract as Pick<FnoContract, 'tradingSymbol'>).tradingSymbol,
+        { target, interval, ...candleWindow(interval) },
+        signal,
+      ),
+    enabled: enabled && !!contract,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    // Another interval of the SAME instrument stays up (dimmed) while the next loads; a
+    // different instrument never stands in for the one asked for.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === exchange &&
+      previousQuery.queryKey[3] === subject &&
+      previousQuery.queryKey[4] === target
+        ? previous
+        : undefined,
+    refetchInterval: () => livePriceInterval(60_000),
+    retry: retryTransient,
+    subscribed: focused,
+  });
+}
+
+/**
+ * An underlying's bars for one range of its own screen (index or F&O stock), charted through
+ * `anchor` — any listed contract of it; the series is keyed by the underlying, so the anchor
+ * can change without a refetch. A range longer than one request allows is fetched as parallel
+ * windows and merged. 1D refreshes each minute in market hours (new bars); the live feed keeps
+ * the forming bar current in between.
+ */
+export function useUnderlyingCandles(
+  exchange: FnoExchange,
+  underlying: string,
+  anchor: Pick<FnoContract, 'tradingSymbol'> | null,
+  range: UnderlyingRange,
+) {
+  const focused = useIsFocused();
+  const spec = underlyingRange(range);
+  return useQuery({
+    queryKey: fnoKeys.underlyingCandles(exchange, underlying, range),
+    queryFn: async ({ signal }) => {
+      const symbol = (anchor as Pick<FnoContract, 'tradingSymbol'>).tradingSymbol;
+      const windows = candleWindows(spec.days, spec.interval, Math.floor(Date.now() / 1000));
+      const pages = await Promise.all(
+        windows.map((w) =>
+          fnoApi.candles(
+            exchange,
+            symbol,
+            { target: 'underlying', interval: spec.interval, from: w.from, to: w.to },
+            signal,
+          ),
+        ),
+      );
+      const bars = toCandles(pages.map((page) => page.candles));
+      return {
+        bars,
+        source: pages.find((page) => page.source)?.source ?? null,
+        unavailableReason: bars.length === 0 ? (pages[0]?.unavailableReason ?? null) : null,
+      };
+    },
+    enabled: anchor != null && underlying.length > 0,
+    staleTime: spec.intraday ? 60_000 : 10 * 60_000,
+    gcTime: 10 * 60_000,
+    // Another range of the SAME underlying stays up (dimmed) while the next loads.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === exchange && previousQuery.queryKey[3] === underlying
+        ? previous
+        : undefined,
+    refetchInterval: range === '1D' ? () => livePriceInterval(60_000) : false,
     retry: retryTransient,
     subscribed: focused,
   });

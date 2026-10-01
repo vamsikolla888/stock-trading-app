@@ -5,9 +5,11 @@ import type {
   BuildStrategyInput,
   BuildStrategyResult,
   ExpirySettlementResult,
+  FnoAnalytics,
   FnoBook,
   FnoMover,
   FnoOrderView,
+  FnoWallet,
   OptionChain,
   OptionStrategyDefinition,
   PaperChainQuery,
@@ -23,6 +25,18 @@ import type {
  */
 
 const enc = encodeURIComponent;
+
+/**
+ * The order body as the server's strict schema accepts it. MARKET is the server's default, so a
+ * market order carries no `type` at all — and must not: a server from before LIMIT orders rejects
+ * any unknown key (422), which would refuse every paper order. `type` and `limitPrice` go only
+ * with a LIMIT order, which such a server cannot take anyway.
+ */
+export function paperOrderBody(input: PlacePaperFnoOrderInput): PlacePaperFnoOrderInput {
+  const { type, limitPrice, ...base } = input;
+  if (type !== 'LIMIT') return base;
+  return { ...base, type, ...(limitPrice != null ? { limitPrice } : {}) };
+}
 
 export const derivativesApi = {
   async underlyings(signal?: AbortSignal): Promise<UnderlyingSummary[]> {
@@ -73,7 +87,10 @@ export const derivativesApi = {
 
   /** Returns the ORDER even when rejected — status REJECTED plus a `note` saying why. */
   async placeOrder(body: PlacePaperFnoOrderInput): Promise<FnoOrderView> {
-    const { data } = await apiClient.post<FnoOrderView>('/derivatives/orders', body);
+    const { data } = await apiClient.post<FnoOrderView>(
+      '/derivatives/orders',
+      paperOrderBody(body),
+    );
     return data;
   },
 
@@ -81,6 +98,41 @@ export const derivativesApi = {
     const { data } = await apiClient.post<FnoOrderView>(
       `/derivatives/positions/${enc(exchange)}/${enc(tradingsymbol)}/square-off`,
     );
+    return data;
+  },
+
+  /** Withdraws a resting LIMIT order. Only a PENDING order can be cancelled (else 422). */
+  async cancelOrder(orderId: string): Promise<FnoOrderView> {
+    const { data } = await apiClient.post<FnoOrderView>(
+      `/derivatives/orders/${enc(orderId)}/cancel`,
+    );
+    return data;
+  },
+
+  /** The F&O sandbox's OWN wallet — separate from the cash paper wallet, not profile-scoped. */
+  async wallet(signal?: AbortSignal): Promise<FnoWallet> {
+    const { data } = await apiClient.get<FnoWallet>('/derivatives/wallet', { signal });
+    return data;
+  },
+
+  /** A deposit or withdrawal of the difference; positions, orders and booked P&L are untouched. */
+  async setWallet(amount: number): Promise<FnoWallet> {
+    const { data } = await apiClient.put<FnoWallet>('/derivatives/wallet', { amount });
+    return data;
+  },
+
+  /** Wipes the F&O sandbox ALONE back to an empty book — never the cash paper account. */
+  async reset(startingCapital?: number): Promise<FnoWallet> {
+    const { data } = await apiClient.post<FnoWallet>(
+      '/derivatives/reset',
+      startingCapital != null ? { startingCapital } : {},
+    );
+    return data;
+  },
+
+  /** Every order this pool ever placed, replayed — charges, win rate, P&L slices, cash check. */
+  async analytics(signal?: AbortSignal): Promise<FnoAnalytics> {
+    const { data } = await apiClient.get<FnoAnalytics>('/derivatives/analytics', { signal });
     return data;
   },
 

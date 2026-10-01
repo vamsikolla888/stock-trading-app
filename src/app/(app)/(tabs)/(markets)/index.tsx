@@ -20,6 +20,7 @@ import {
   useMstockPortfolioOverview,
   usePortfolioOverview,
 } from '@/features/portfolio/hooks';
+import { useLiveOverview } from '@/features/portfolio/useLiveHoldings';
 import { strongPickKeys } from '@/features/strong-picks/hooks';
 import { tradingKeys } from '@/features/trading/hooks';
 import { watchlistKeys } from '@/features/watchlists/hooks';
@@ -32,9 +33,10 @@ import { watchlistKeys } from '@/features/watchlists/hooks';
  */
 export default function HomeScreen() {
   const queryClient = useQueryClient();
-  const overview = usePortfolioOverview();
-  const mstockOverview = useMstockPortfolioOverview();
-  const growwOverview = useGrowwPortfolioOverview();
+  // Each card's holdings, totals and day move follow the live feed.
+  const overview = useLiveOverview(usePortfolioOverview());
+  const mstockOverview = useLiveOverview(useMstockPortfolioOverview());
+  const growwOverview = useLiveOverview(useGrowwPortfolioOverview());
   const indices = useLiveIndices();
 
   const onRefresh = useCallback(

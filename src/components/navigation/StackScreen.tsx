@@ -1,9 +1,10 @@
-import { useRouter } from 'expo-router';
+import { useIsFocused, useRouter } from 'expo-router';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LiveScope } from '@/features/market/live';
 import { useTheme } from '@/theme/ThemeProvider';
 
 interface StackScreenProps {
@@ -15,9 +16,17 @@ interface StackScreenProps {
   footer?: React.ReactNode;
   /** Render children without the built-in ScrollView (for FlatList screens). */
   scroll?: boolean;
+  /**
+   * Full screen: no header bar, and only the side safe areas (where the notch sits in landscape)
+   * — the screen draws its own controls. Used by the advanced chart's full-screen mode.
+   */
+  immersive?: boolean;
 }
 
-/** Scaffold for pushed screens: back · title · action, pull-to-refresh, width-capped body. */
+/**
+ * Scaffold for pushed screens: back · title · action, pull-to-refresh, width-capped body. Live
+ * prices stream only while it is the focused screen (LiveScope).
+ */
 export function StackScreen({
   title,
   subtitle,
@@ -26,9 +35,11 @@ export function StackScreen({
   children,
   footer,
   scroll = true,
+  immersive = false,
 }: StackScreenProps) {
   const router = useRouter();
   const { colors } = useTheme();
+  const focused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
@@ -42,58 +53,65 @@ export function StackScreen({
   }, [onRefresh]);
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.background }}>
-      <View className="min-h-[56px] flex-row items-center gap-2 border-b border-line px-2 dark:border-line-dark">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          hitSlop={8}
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-          className="h-10 w-10 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
-        >
-          <ArrowLeft size={22} color={colors.text} />
-        </Pressable>
-        <View className="flex-1">
-          <Text
-            accessibilityRole="header"
-            className="text-[17px] font-bold text-ink dark:text-ink-dark"
-            numberOfLines={1}
-          >
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
-        {right ? <View className="pr-2">{right}</View> : null}
-      </View>
+    <LiveScope active={focused}>
+      <SafeAreaView
+        edges={immersive ? ['left', 'right'] : ['top', 'bottom']}
+        style={{ flex: 1, backgroundColor: colors.background }}
+      >
+        {immersive ? null : (
+          <View className="min-h-[56px] flex-row items-center gap-2 border-b border-line px-2 dark:border-line-dark">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              hitSlop={8}
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+              className="h-10 w-10 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+            >
+              <ArrowLeft size={22} color={colors.text} />
+            </Pressable>
+            <View className="flex-1">
+              <Text
+                accessibilityRole="header"
+                className="text-[17px] font-bold text-ink dark:text-ink-dark"
+                numberOfLines={1}
+              >
+                {title}
+              </Text>
+              {subtitle ? (
+                <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+            {right ? <View className="pr-2">{right}</View> : null}
+          </View>
+        )}
 
-      {scroll ? (
-        <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            onRefresh ? (
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
-              />
-            ) : undefined
-          }
-        >
-          <View className="w-full max-w-[640px] self-center">{children}</View>
-        </ScrollView>
-      ) : (
-        <View className="flex-1">{children}</View>
-      )}
-      {footer}
-    </SafeAreaView>
+        {scroll ? (
+          <ScrollView
+            className="flex-1"
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              onRefresh ? (
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor={colors.accent}
+                  colors={[colors.accent]}
+                />
+              ) : undefined
+            }
+          >
+            <View className="w-full max-w-[640px] self-center">{children}</View>
+          </ScrollView>
+        ) : (
+          <View className="flex-1">{children}</View>
+        )}
+        {footer}
+      </SafeAreaView>
+    </LiveScope>
   );
 }
 

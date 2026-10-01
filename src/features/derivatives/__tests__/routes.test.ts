@@ -38,11 +38,12 @@ describe('parseExpiry', () => {
 });
 
 describe('parsePaperView', () => {
-  it('falls back to Explore for anything unknown', () => {
-    expect(parsePaperView('positions')).toBe('positions');
+  it('falls back to the book (Positions) for anything unknown', () => {
+    expect(parsePaperView('explore')).toBe('explore');
     expect(parsePaperView(['orders'])).toBe('orders');
-    expect(parsePaperView('chain')).toBe('explore');
-    expect(parsePaperView(undefined)).toBe('explore');
+    expect(parsePaperView('analytics')).toBe('analytics');
+    expect(parsePaperView('chain')).toBe('positions');
+    expect(parsePaperView(undefined)).toBe('positions');
   });
 });
 

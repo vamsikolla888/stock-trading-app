@@ -1,14 +1,22 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { cn } from '@/lib/utils/cn';
+import { useTheme } from '@/theme/ThemeProvider';
 
-import { startingRules, validateStrategyForm, withOptional } from '../lib/rules';
-import type { StrategyRules, StrategyTemplate, UniverseExchange } from '../types';
+import { useRulesPreview } from '../hooks';
+import { settingsIssues, startingRules, validateStrategyForm, withOptional } from '../lib/rules';
+import {
+  DEFAULT_BACKTEST_SETTINGS,
+  type BacktestSettings,
+  type StrategyRules,
+  type StrategyTemplate,
+  type UniverseExchange,
+} from '../types';
 
 import { ConditionListEditor } from './ConditionListEditor';
 import { IndexPickerField } from './IndexPickerField';
@@ -24,8 +32,7 @@ const HOW_TESTED: readonly [string, string][] = [
   ['Bars', 'Daily'],
   ['Signal', 'Read on the close'],
   ['Fill', 'Next day’s open'],
-  ['Costs', '15 bps per side'],
-  ['Positions', 'Max 8 at once'],
+  ['Sizing', 'Equal weight per slot'],
   ['Direction', 'Long only'],
 ];
 
@@ -33,6 +40,8 @@ export interface StrategyFormValues {
   name: string;
   description: string;
   rules: StrategyRules;
+  /** Omitted = the server's defaults (15 bps, 8 positions). */
+  settings?: BacktestSettings;
 }
 
 /** Form state for building or editing a strategy; the screen owns the save button. */
@@ -40,17 +49,27 @@ export function useStrategyForm(initial?: StrategyFormValues) {
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [rules, setRules] = useState<StrategyRules>(() => initial?.rules ?? startingRules());
+  const [settings, setSettings] = useState<BacktestSettings>(
+    () => initial?.settings ?? DEFAULT_BACKTEST_SETTINGS,
+  );
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
   const [baseline, setBaseline] = useState(() =>
-    JSON.stringify(initial ?? { name: '', description: '', rules: startingRules() }),
+    JSON.stringify({
+      name: initial?.name ?? '',
+      description: initial?.description ?? '',
+      rules: initial?.rules ?? startingRules(),
+      settings: initial?.settings ?? DEFAULT_BACKTEST_SETTINGS,
+    }),
   );
 
-  const validation = useMemo(
-    () => validateStrategyForm({ name, description, rules }),
-    [name, description, rules],
-  );
-  const dirty = JSON.stringify({ name, description, rules }) !== baseline;
+  const validation = useMemo(() => {
+    const base = validateStrategyForm({ name, description, rules });
+    const settingIssues = settingsIssues(settings);
+    const valid = base.valid && Object.keys(settingIssues).length === 0;
+    return { ...base, valid, issues: { ...base.issues, ...settingIssues } };
+  }, [name, description, rules, settings]);
+  const dirty = JSON.stringify({ name, description, rules, settings }) !== baseline;
 
   const applyTemplate = useCallback((template: StrategyTemplate) => {
     setRules(template.rules);
@@ -61,22 +80,34 @@ export function useStrategyForm(initial?: StrategyFormValues) {
   }, []);
 
   const reset = useCallback((next?: StrategyFormValues) => {
-    const values = next ?? { name: '', description: '', rules: startingRules() };
+    const values = {
+      name: next?.name ?? '',
+      description: next?.description ?? '',
+      rules: next?.rules ?? startingRules(),
+      settings: next?.settings ?? DEFAULT_BACKTEST_SETTINGS,
+    };
     setName(values.name);
     setDescription(values.description);
     setRules(values.rules);
+    setSettings(values.settings);
     setTemplateId(null);
     setShowErrors(false);
     setBaseline(JSON.stringify(values));
   }, []);
 
   const body = useCallback(
-    (): { name: string; description: string | null; rules: StrategyRules } => ({
+    (): {
+      name: string;
+      description: string | null;
+      rules: StrategyRules;
+      settings: BacktestSettings;
+    } => ({
       name: name.trim(),
       description: description.trim() || null,
       rules,
+      settings,
     }),
-    [name, description, rules],
+    [name, description, rules, settings],
   );
 
   return {
@@ -86,6 +117,8 @@ export function useStrategyForm(initial?: StrategyFormValues) {
     setDescription,
     rules,
     setRules,
+    settings,
+    setSettings,
     templateId,
     applyTemplate,
     validation,
@@ -330,10 +363,46 @@ export function StrategyFormFields({
         The minimum price is checked at each entry, not today — filtering on today would quietly
         drop everything that has since fallen, which flatters the result.
       </Text>
+      <Card className="mt-4 py-1">
+        <ToggleRow
+          title="F&O names only"
+          hint="NSE stocks with listed futures and options"
+          value={Boolean(rules.universe.fnoOnly)}
+          onChange={(on) => setUniverse('fnoOnly', on || undefined)}
+        />
+        <View className="h-px bg-line dark:bg-line-dark" />
+        <ToggleRow
+          title="Tradeable names only"
+          hint="Liquid enough that a next-open fill is plausible"
+          value={Boolean(rules.universe.tradeableOnly)}
+          onChange={(on) => setUniverse('tradeableOnly', on || undefined)}
+        />
+      </Card>
 
       <Text className="mb-3 mt-7 text-[17px] font-bold text-ink dark:text-ink-dark">
         How it will be tested
       </Text>
+      <View className="mb-3 flex-row flex-wrap" style={{ marginHorizontal: -5 }}>
+        <View style={{ width: '50%', paddingHorizontal: 5 }}>
+          <NumberField
+            label="Costs (bps per side)"
+            value={form.settings.costBps}
+            placeholder="15"
+            onChange={(v) => form.setSettings((s) => ({ ...s, costBps: v ?? 0 }))}
+            error={issues.costBps}
+          />
+        </View>
+        <View style={{ width: '50%', paddingHorizontal: 5 }}>
+          <NumberField
+            label="Max positions"
+            value={form.settings.maxOpenPositions}
+            placeholder="8"
+            integer
+            onChange={(v) => form.setSettings((s) => ({ ...s, maxOpenPositions: v ?? 1 }))}
+            error={issues.maxOpenPositions}
+          />
+        </View>
+      </View>
       <Card className="py-1.5">
         {HOW_TESTED.map(([label, value], index) => (
           <KeyValueRow key={label} label={label} value={value} divider={index > 0} />
@@ -344,5 +413,79 @@ export function StrategyFormFields({
         rule that relies on tight intraday stops.
       </Text>
     </View>
+  );
+}
+
+/** A universe switch (F&O names only, tradeable only) — shared with the screener form. */
+export function ToggleRow({
+  title,
+  hint,
+  value,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View className="flex-row items-center gap-3 px-3.5 py-2.5">
+      <View className="flex-1">
+        <Text className="text-sm font-semibold text-ink dark:text-ink-dark">{title}</Text>
+        <Text className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted">{hint}</Text>
+      </View>
+      <Switch
+        accessibilityLabel={title}
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ true: colors.primary, false: colors.borderStrong }}
+      />
+    </View>
+  );
+}
+
+/**
+ * The server's live check of the draft (web builder: the readback panel). Its words, not the
+ * form's: what the backtest will actually run, lint the client cannot know ("RSI > 0 is always
+ * true"), and how many bars of history each stock needs before the rule can fire.
+ */
+export function RulesPreviewCard({ rules }: { rules: StrategyRules }) {
+  const { colors } = useTheme();
+  const preview = useRulesPreview(rules);
+  const data = preview.data;
+  if (!data && !preview.isFetching) return null;
+  return (
+    <Card className="mt-6 bg-surface-sunk dark:bg-surface-sunk-dark">
+      <View className="flex-row items-center justify-between gap-2">
+        <Text className="text-[11px] font-bold uppercase tracking-wider text-ink-faint dark:text-ink-dark-faint">
+          What will be tested
+        </Text>
+        {preview.isFetching ? <ActivityIndicator size="small" color={colors.textMuted} /> : null}
+      </View>
+      {data?.readback ? (
+        <Text className="mt-1.5 text-[13px] leading-[19px] text-ink dark:text-ink-dark">
+          {data.readback}
+        </Text>
+      ) : data && !data.valid ? (
+        <Text className="mt-1.5 text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
+          Finish the highlighted fields to see the rule in words.
+        </Text>
+      ) : null}
+      {data && data.universe.length > 0 ? (
+        <Text className="mt-2 text-xs text-ink-muted dark:text-ink-dark-muted">
+          Looks at {data.universe.join(' · ')}
+          {data.warmupBars ? ` · needs ${data.warmupBars} bars of history` : ''}
+        </Text>
+      ) : null}
+      {data?.warnings.map((warning) => (
+        <Text
+          key={`${warning.path}:${warning.message}`}
+          className="mt-2 text-xs leading-[17px] text-warning-600 dark:text-warning-dark"
+        >
+          ⚠ {warning.message}
+        </Text>
+      ))}
+    </Card>
   );
 }

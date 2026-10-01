@@ -201,11 +201,11 @@ export function ProfileSheet({
           />
           {creating ? (
             <Input
-              label="Starting capital (optional)"
+              label="Wallet (optional)"
               value={capital}
               onChangeText={(text) => setCapital(text.replace(/[^\d]/g, ''))}
               keyboardType="number-pad"
-              placeholder="Default ₹5,00,000"
+              placeholder="Default ₹10,00,000"
               error={capitalError}
               helperText={
                 capitalAmount !== null && !capitalError ? formatINR(capitalAmount, 0) : undefined

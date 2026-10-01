@@ -1,13 +1,14 @@
 import { apiClient } from '@/services/api/client';
 
 import type {
-  AllScansStatus,
   CustomScreener,
   CustomScreenerInput,
-  EnqueueScanResult,
+  QueueCustomScanResult,
   RunAllScansResult,
-  ScanStatus,
   ScreenerDetail,
+  ScreenerPreview,
+  ScreenerPreviewMatches,
+  ScreenerScanStatus,
 } from './types';
 
 const customPath = (id: string) => `/screeners/custom/${encodeURIComponent(id)}`;
@@ -21,6 +22,7 @@ export const screenersApi = {
     });
     return data;
   },
+  /** The shared library, without matches. */
   async customList(): Promise<CustomScreener[]> {
     const { data } = await apiClient.get<{ screeners: CustomScreener[] }>('/screeners/custom');
     return data.screeners;
@@ -40,21 +42,49 @@ export const screenersApi = {
   async remove(id: string): Promise<void> {
     await apiClient.delete(customPath(id));
   },
-  async runCustomScan(id: string): Promise<EnqueueScanResult> {
-    const { data } = await apiClient.post<EnqueueScanResult>(`${customPath(id)}/scan`);
+  /** A copy with the rules and universe, no matches — named "<name> (copy)". */
+  async duplicate(id: string): Promise<CustomScreener> {
+    const { data } = await apiClient.post<CustomScreener>(`${customPath(id)}/duplicate`);
     return data;
   },
-  async customScanStatus(id: string): Promise<ScanStatus> {
-    const { data } = await apiClient.get<ScanStatus>(`${customPath(id)}/scan-status`);
+  /**
+   * Queues a scan. There is no per-screener status endpoint any more: the screener's own
+   * `runState` (read with the queue consulted) is the answer, polled while `active`.
+   */
+  async runCustomScan(id: string): Promise<QueueCustomScanResult> {
+    const { data } = await apiClient.post<QueueCustomScanResult>(`${customPath(id)}/scan`);
     return data;
   },
-  /** The built-in scan plus every screener the caller owns. */
+  /** "Run all": the built-in scan plus a sweep of the whole library. */
   async runAll(): Promise<RunAllScansResult> {
     const { data } = await apiClient.post<RunAllScansResult>('/screeners/custom/scan-all');
     return data;
   },
-  async allScansStatus(): Promise<AllScansStatus> {
-    const { data } = await apiClient.get<AllScansStatus>('/screeners/custom/scan-all-status');
+  /** The built-in scan's and the library sweep's state, from their own jobs. */
+  async status(): Promise<ScreenerScanStatus> {
+    const { data } = await apiClient.get<ScreenerScanStatus>('/screeners/status');
+    return data;
+  },
+  /** A live check of a draft — issues, lint, the rule in words. Never a 422. */
+  async preview(
+    draft: Omit<CustomScreenerInput, 'name' | 'description'>,
+    signal?: AbortSignal,
+  ): Promise<ScreenerPreview> {
+    const { data } = await apiClient.post<ScreenerPreview>('/screeners/custom/preview', draft, {
+      signal,
+    });
+    return data;
+  },
+  /** "Test now": the draft evaluated on the latest bar, inline (a few seconds). */
+  async previewMatches(
+    draft: Omit<CustomScreenerInput, 'name' | 'description'>,
+    limit = 25,
+  ): Promise<ScreenerPreviewMatches> {
+    const { data } = await apiClient.post<ScreenerPreviewMatches>(
+      '/screeners/custom/preview/matches',
+      { ...draft, limit },
+      { timeout: 45_000 },
+    );
     return data;
   },
 };

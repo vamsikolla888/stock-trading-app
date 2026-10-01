@@ -28,9 +28,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
             persistOptions={{
               persister: queryPersister,
               maxAge: appConfig.query.gcTimeMs,
-              // A new app version may read different response shapes — never paint it
-              // from a cache written by the previous one.
-              buster: appVersion,
+              // Never paint from a cache written in shapes this build doesn't read: a new
+              // app version, or new response shapes within one (dev reloads, OTA updates).
+              buster: `${appVersion}+${appConfig.query.cacheSchema}`,
             }}
           >
             <ThemeProvider>

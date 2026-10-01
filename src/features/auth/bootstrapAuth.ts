@@ -6,10 +6,32 @@ import { toast } from '@/lib/utils/toast';
 import { authApi } from '@/services/api/authApi';
 import { registerAuthHandlers } from '@/services/api/client';
 import { indicesSocket } from '@/services/realtime/indicesSocket';
+import { priceStream } from '@/services/realtime/priceStream';
 import { useAuthStore } from '@/store/authStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
+import type { LoginResponse } from '@/types/auth';
+
+import { useAuthFlowStore } from './authFlowStore';
 
 let registered = false;
+
+/**
+ * Makes a server-issued session this device's: tokens into the Keychain first, then the
+ * profile — flipping the store is what moves the user into the app, so nothing may be missing
+ * by then. One path for every way a session is born (password, second factor, email change).
+ */
+export async function startSession({
+  user,
+  accessToken,
+  refreshToken,
+}: LoginResponse): Promise<void> {
+  await secureTokens.setTokens(accessToken, refreshToken);
+  usePreferencesStore.getState().setLastSignedInEmail(user.email);
+  useAuthStore.getState().setUser(user);
+  // After the flip, not before: the code screen redirects to sign-in when its challenge
+  // disappears, and by now the signed-out stack is already gone.
+  useAuthFlowStore.getState().clearChallenge();
+}
 
 /**
  * Tears down everything tied to the signed-in user. Order matters: the socket closes
@@ -20,11 +42,27 @@ let registered = false;
  */
 export async function endSession(): Promise<void> {
   indicesSocket.reset();
+  priceStream.reset();
   await secureTokens.clearTokens();
   useAuthStore.getState().signOut();
   usePreferencesStore.getState().clearRecentSearches();
   queryClient.clear();
   await queryPersister.removeClient();
+}
+
+/**
+ * The Sign out button: revokes this device's session on the server (so a copied refresh token
+ * stops working and the device leaves Profile › Devices), then ends it locally. The server call
+ * is best-effort and time-boxed — offline, or already revoked, the local sign-out still happens.
+ */
+export async function signOut(): Promise<void> {
+  try {
+    const refreshToken = await secureTokens.getRefreshToken();
+    if (refreshToken) await authApi.logout(refreshToken);
+  } catch {
+    // Nothing to tell the user: they asked to leave this device, and they will.
+  }
+  await endSession();
 }
 
 /** Wires the axios client's refresh/401 hooks to the auth store — call once at app startup. */

@@ -1,4 +1,4 @@
-import { istDateOf, plural } from '@/features/portfolio/lib/dates';
+import { istDateOf, istToday, plural } from '@/features/portfolio/lib/dates';
 
 import type {
   AutoTradeConfig,
@@ -10,7 +10,7 @@ import type {
   PaperPosition,
   PaperProfile,
   QuoteRow,
-  SegmentSummary,
+  WalletSummary,
 } from '../types';
 
 /**
@@ -62,12 +62,13 @@ export interface RowMark {
 
 /**
  * One row's live figures: the price from a fresher quote when there is one, everything
- * else from the row's own quantity and cost-inclusive average. Falls back to the server's
- * snapshot-marked figures when no price exists at all.
+ * else from the row's own quantity and average (the trade price, charges excluded — so a
+ * stock bought and not yet moved reads ₹0.00). Falls back to the server's snapshot-marked
+ * figures when no price exists at all.
  */
 export function rowMark(position: PaperPosition, quote?: QuoteRow | null): RowMark {
   const ltp = quote?.ltp ?? position.ltp;
-  const prevClose = quote?.prevClose ?? null;
+  const prevClose = quote?.prevClose ?? position.prevClose ?? null;
   const changePct =
     ltp !== null && prevClose !== null && prevClose > 0
       ? ((ltp - prevClose) / prevClose) * 100
@@ -94,44 +95,227 @@ export function rowMark(position: PaperPosition, quote?: QuoteRow | null): RowMa
   };
 }
 
-/**
- * Today's move on the delivery holdings: null unless EVERY holding has a previous close —
- * a partial day change looks like the account's move and is an arbitrary subset's.
- */
-export function deliveryDayMove(
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/** Sums in whole paise, NULL if any value is — a partial total is refused, never shown. */
+export function paiseSumOrNull(values: readonly (number | null | undefined)[]): number | null {
+  const paise = sumOrNull(values.map((value) => (value == null ? null : Math.round(value * 100))));
+  return paise === null ? null : paise / 100;
+}
+
+export interface MarkedRow {
+  position: PaperPosition;
+  mark: RowMark;
+}
+
+export function markRows(
   positions: readonly PaperPosition[],
   quotes: Record<string, QuoteRow> | undefined,
-): { abs: number; pct: number | null } | null {
-  let abs = 0;
-  let previous = 0;
-  for (const position of positions) {
-    const mark = rowMark(position, quotes?.[quoteKey(position.exchange, position.symbol)]);
-    if (mark.ltp === null || mark.prevClose === null || !(mark.prevClose > 0)) return null;
-    abs += (mark.ltp - mark.prevClose) * position.quantity;
-    previous += mark.prevClose * position.quantity;
-  }
-  return { abs, pct: previous > 0 ? (abs / previous) * 100 : null };
+): MarkedRow[] {
+  return positions.map((position) => ({
+    position,
+    mark: rowMark(position, quotes?.[quoteKey(position.exchange, position.symbol)]),
+  }));
 }
 
 /**
- * Realised plus unrealised across both pools, against both pools' capital (every wallet
- * change included, so a deposit never reads as profit). Null while either pool is unknown.
+ * Today's move on open rows, before charges. Shares carried in move from the previous close;
+ * shares bought TODAY move from the price paid (they have no yesterday), so a buy after the
+ * close reads ₹0.00. NULL unless every row can be measured — a partial day change looks like
+ * the book's and is really an arbitrary subset's. `base` is what the move is measured against.
  */
-export function totalReturns(
-  delivery: PaperPortfolio | undefined,
-  intraday: PaperPortfolio | undefined,
+export function dayMove(
+  rows: readonly MarkedRow[],
+  today: string,
+): { move: number; base: number } | null {
+  let move = 0;
+  let base = 0;
+  for (const { position, mark } of rows) {
+    if (mark.ltp === null) return null;
+    // An older server sends no split: a row opened today is then all today's.
+    const openedToday = istDateOf(position.openedAt ?? null) === today;
+    const boughtQty = position.todayBoughtQty ?? (openedToday ? position.quantity : 0);
+    const boughtValue =
+      position.todayBuyValue ?? (openedToday ? position.avgPrice * position.quantity : 0);
+    const carried = Math.max(0, position.quantity - boughtQty);
+    if (carried > 0) {
+      if (mark.prevClose === null || !(mark.prevClose > 0)) return null;
+      move += (mark.ltp - mark.prevClose) * carried;
+      base += mark.prevClose * carried;
+    }
+    move += mark.ltp * boughtQty - boughtValue;
+    base += boughtValue;
+  }
+  return { move: round2(move), base };
+}
+
+/** One product's book re-marked live: open value and P&L, today's move, net of charges. */
+export interface ProductLive {
+  rows: MarkedRow[];
+  /** Open positions at the live price, before charges. Null if any row has no price. */
+  unrealised: number | null;
+  value: number | null;
+  /** realised + unrealised − every charge this product paid. */
+  net: number | null;
+  day: { move: number; base: number } | null;
+}
+
+export function productLive(
+  portfolio: PaperPortfolio,
   quotes: Record<string, QuoteRow> | undefined,
-): { abs: number; pct: number | null; capital: number } | null {
-  if (!delivery || !intraday) return null;
-  const unrealised = sumOrNull(
-    [...delivery.positions, ...intraday.positions].map(
-      (position) => rowMark(position, quotes?.[quoteKey(position.exchange, position.symbol)]).pnl,
-    ),
-  );
-  if (unrealised === null) return null;
-  const abs = delivery.realisedPnl + intraday.realisedPnl + unrealised;
-  const capital = delivery.startingCapital + intraday.startingCapital;
-  return { abs, pct: capital > 0 ? (abs / capital) * 100 : null, capital };
+  today: string,
+): ProductLive {
+  const rows = markRows(portfolio.positions, quotes);
+  const unrealised = paiseSumOrNull(rows.map(({ mark }) => mark.pnl));
+  const value = paiseSumOrNull(rows.map(({ mark }) => mark.value));
+  const net =
+    unrealised === null
+      ? null
+      : round2(portfolio.book.realisedPnl + unrealised - portfolio.book.charges);
+  return { rows, unrealised, value, net, day: dayMove(rows, today) };
+}
+
+export type KpiScope = CashSegment | 'account';
+
+/** What a figure is as a share of `base`; null when either side is unknown or the base is 0. */
+export function pctOf(
+  value: number | null | undefined,
+  base: number | null | undefined,
+): number | null {
+  return value != null && base != null && base > 0 ? (value / base) * 100 : null;
+}
+
+/**
+ * The summary card's figures for one scope, all before charges (the charges and the P&L once
+ * they are out are their own line). Holdings read DELIVERY only, Positions INTRADAY only, and
+ * everything else the whole WALLET — a figure from the other product on a product's tab is the
+ * confusion this layout exists to avoid. `available` is always the wallet's, because every
+ * order draws on the one wallet.
+ */
+export interface PaperKpis {
+  scope: KpiScope;
+  /** Current value (delivery) · margin in use (intraday) · wallet value (account). */
+  headline: number | null;
+  today: number | null;
+  todayPct: number | null;
+  total: number | null;
+  totalPct: number | null;
+  /** Closed trades booked today (delivery sells / intraday), before charges. */
+  bookedToday: number | null;
+  /** Charges this scope has paid, and its P&L once they are taken out. */
+  charges: number | null;
+  openBuyCharges: number | null;
+  net: number | null;
+  netPct: number | null;
+  available: number | null;
+}
+
+export function paperKpis(
+  scope: KpiScope,
+  input: {
+    delivery?: PaperPortfolio;
+    intraday?: PaperPortfolio;
+    wallet: WalletSummary | null;
+    quotes: Record<string, QuoteRow> | undefined;
+    now?: number;
+  },
+): PaperKpis {
+  const today = istToday(0, input.now ?? Date.now());
+  const { wallet } = input;
+  const capital = wallet?.capital ?? null;
+  const available = wallet?.availableCash ?? null;
+
+  if (scope === 'equity' || scope === 'intraday') {
+    const portfolio = scope === 'equity' ? input.delivery : input.intraday;
+    const live = portfolio ? productLive(portfolio, input.quotes, today) : null;
+    const booked = portfolio?.book.todayRealisedPnl ?? null;
+    const charges = portfolio?.book.charges ?? null;
+    const net = live?.net ?? null;
+
+    if (scope === 'equity') {
+      const invested = portfolio?.book.investedValue ?? null;
+      return {
+        scope,
+        headline: live?.value ?? null,
+        today: live?.day?.move ?? null,
+        todayPct: pctOf(live?.day?.move, live?.day?.base),
+        total: live?.unrealised ?? null,
+        totalPct: pctOf(live?.unrealised, invested),
+        bookedToday: booked,
+        charges,
+        openBuyCharges: portfolio?.book.openBuyCharges ?? null,
+        net,
+        netPct: pctOf(net, capital),
+        available,
+      };
+    }
+
+    const todayPnl = booked !== null && live?.day ? round2(booked + live.day.move) : null;
+    const total =
+      portfolio && live?.unrealised != null
+        ? round2(portfolio.book.realisedPnl + live.unrealised)
+        : null;
+    return {
+      scope,
+      headline: portfolio?.book.ownFunds ?? null,
+      today: todayPnl,
+      todayPct: pctOf(todayPnl, capital),
+      total,
+      totalPct: pctOf(total, capital),
+      bookedToday: booked,
+      charges,
+      openBuyCharges: portfolio?.book.openBuyCharges ?? null,
+      net,
+      netPct: pctOf(net, capital),
+      available,
+    };
+  }
+
+  // The whole wallet: both products' positions re-marked live.
+  const delivery = input.delivery ? productLive(input.delivery, input.quotes, today) : null;
+  const intraday = input.intraday ? productLive(input.intraday, input.quotes, today) : null;
+  const holdings = delivery && intraday ? paiseSumOrNull([delivery.value, intraday.value]) : null;
+  const headline =
+    wallet && holdings !== null
+      ? round2(wallet.cash + holdings - wallet.borrowed)
+      : (wallet?.value ?? null);
+  const intradayBooked = input.intraday?.book.todayRealisedPnl ?? null;
+  const todayPnl =
+    delivery?.day && intraday?.day && intradayBooked !== null
+      ? round2(delivery.day.move + intraday.day.move + intradayBooked)
+      : null;
+  const deliveryTotal =
+    input.delivery && delivery?.unrealised != null
+      ? round2(input.delivery.book.realisedPnl + delivery.unrealised)
+      : null;
+  const intradayTotal =
+    input.intraday && intraday?.unrealised != null
+      ? round2(input.intraday.book.realisedPnl + intraday.unrealised)
+      : null;
+  const total =
+    deliveryTotal !== null && intradayTotal !== null
+      ? round2(deliveryTotal + intradayTotal)
+      : wallet
+        ? round2(wallet.realisedPnl + wallet.unrealisedPnl)
+        : null;
+  const net =
+    delivery?.net != null && intraday?.net != null
+      ? round2(delivery.net + intraday.net)
+      : (wallet?.netPnl ?? null);
+  return {
+    scope,
+    headline,
+    today: todayPnl,
+    todayPct: pctOf(todayPnl, capital),
+    total,
+    totalPct: pctOf(total, capital),
+    bookedToday: intradayBooked,
+    charges: wallet?.charges ?? null,
+    openBuyCharges: null,
+    net,
+    netPct: pctOf(net, capital),
+    available,
+  };
 }
 
 // ── Orders ───────────────────────────────────────────────────────────────────────────────
@@ -229,16 +413,6 @@ export function squareOffText(minutes: number | null | undefined): string {
   return `Square-off in ${minutes} min`;
 }
 
-/**
- * The pool's OWN money in use, as a share of its wallet. Intraday's `deployed` includes
- * the borrowed part, so a 5× pool would read far over 100% on the server's figure.
- */
-export function ownMoneyInUse(summary: SegmentSummary): { amount: number; pct: number } {
-  const amount = Math.max(0, (summary.deployed ?? 0) - (summary.borrowed ?? 0));
-  const pct = summary.startingCapital > 0 ? (amount / summary.startingCapital) * 100 : 0;
-  return { amount, pct };
-}
-
 export function parsePositive(text: string): number | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -312,7 +486,7 @@ export function paperOrdersCsv(orders: readonly PaperOrder[]): string {
     ['Order ID', (o) => o.id],
     ['Placed at', (o) => o.createdAt],
     ['Filled at', (o) => o.filledAt],
-    ['Segment', (o) => POOL_LABEL[o.segment]],
+    ['Product', (o) => POOL_LABEL[o.segment]],
     ['Exchange', (o) => o.exchange],
     ['Symbol', (o) => o.symbol],
     ['Company', (o) => o.companyName],

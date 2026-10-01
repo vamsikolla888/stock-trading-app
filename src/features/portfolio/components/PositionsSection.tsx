@@ -10,13 +10,15 @@ import { Button } from '@/components/ui/Button';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import { stockLogoUrl } from '@/features/market/api';
+import { liveKey } from '@/features/market/lib/liveQuote';
+import { useLiveQuotes } from '@/features/market/live';
 import { afterSheetClose, Sheet } from '@/features/trading/components/Sheet';
 import { ticketHref } from '@/features/trading/lib/ticket';
 import type { LiveBroker } from '@/features/trading/types';
 import { stockHref } from '@/lib/navigation';
 import { formatINR, formatQuantity, formatSignedINR } from '@/lib/utils/formatters';
 
-import { POSITION_KIND_LABEL, positionsSummary } from '../lib/book';
+import { POSITION_KIND_LABEL, positionsSummary, repricePosition } from '../lib/book';
 import type { PositionRow } from '../types';
 
 import { useMask } from './BookSummaryCard';
@@ -34,10 +36,32 @@ interface PositionsSectionProps {
 }
 
 /** Today's positions: open first, closed ones dimmed, with the day's P&L on top. */
-export function PositionsSection({ rows, broker, brokerLabel, tradable }: PositionsSectionProps) {
+export function PositionsSection({
+  rows: restRows,
+  broker,
+  brokerLabel,
+  tradable,
+}: PositionsSectionProps) {
   const router = useRouter();
   const mask = useMask();
   const [openKey, setOpenKey] = useState<string | null>(null);
+  // Open positions re-priced at the live feed's ticks: LTP, unrealised and the day's P&L move.
+  const openTargets = useMemo(
+    () =>
+      restRows
+        .filter((row) => row.qty !== 0)
+        .map((row) => ({ exchange: row.exch, symbol: row.sym })),
+    [restRows],
+  );
+  const quotes = useLiveQuotes(openTargets);
+  const rows = useMemo(
+    () =>
+      restRows.map((row) => {
+        const quote = quotes.get(liveKey(row.exch, row.sym));
+        return quote ? repricePosition(row, quote.ltp) : row;
+      }),
+    [restRows, quotes],
+  );
   const summary = useMemo(() => positionsSummary(rows), [rows]);
   const ordered = useMemo(() => [...summary.open, ...summary.closed], [summary]);
   const open = rows.find((row) => keyOf(row) === openKey) ?? null;

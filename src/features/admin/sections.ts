@@ -2,6 +2,7 @@ import Bot from 'lucide-react-native/icons/bot';
 import CalendarClock from 'lucide-react-native/icons/calendar-clock';
 import ChartColumn from 'lucide-react-native/icons/chart-column';
 import Database from 'lucide-react-native/icons/database';
+import Gauge from 'lucide-react-native/icons/gauge';
 import Globe from 'lucide-react-native/icons/globe';
 import HeartPulse from 'lucide-react-native/icons/heart-pulse';
 import Power from 'lucide-react-native/icons/power';
@@ -20,6 +21,7 @@ export type AdminSectionId =
   | 'browser-research'
   | 'ai'
   | 'broker-usage'
+  | 'fundamentals'
   | 'data'
   | 'users'
   | 'trading';
@@ -91,6 +93,13 @@ export const ADMIN_SECTION_GROUPS: readonly { title: string; sections: readonly 
           subtitle: 'Broker calls, sockets and throttling',
           Icon: RadioTower,
           tone: 'teal',
+        },
+        {
+          id: 'fundamentals',
+          title: 'Fundamental analysis',
+          subtitle: 'Weekly batch, queues and failed jobs',
+          Icon: Gauge,
+          tone: 'green',
         },
         {
           id: 'data',

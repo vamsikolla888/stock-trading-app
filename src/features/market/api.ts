@@ -90,8 +90,9 @@ export const marketApi = {
     return data;
   },
 
+  /** `to` (unix seconds): bars ending before it — how a chart scrolls back into history. */
   async candles(
-    params: { exchange: string; symbol: string; minutesPerBar: number; count: number },
+    params: { exchange: string; symbol: string; minutesPerBar: number; count: number; to?: number },
     signal?: AbortSignal,
   ) {
     const { data } = await apiClient.get<CandlesResponse>('/market/candles', { params, signal });

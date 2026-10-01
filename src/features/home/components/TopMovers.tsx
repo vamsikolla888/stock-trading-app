@@ -66,6 +66,7 @@ function TileGrid({ movers, onOpen }: { movers: Mover[]; onOpen: (mover: Mover) 
             <StockTile
               key={`${mover.exchange}:${mover.symbol}`}
               symbol={mover.symbol}
+              exchange={mover.exchange}
               name={mover.companyName}
               price={mover.ltp}
               changeAbs={mover.changeAbs}

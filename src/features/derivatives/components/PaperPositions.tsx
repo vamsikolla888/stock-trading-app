@@ -44,13 +44,6 @@ import { PayoffSheet } from './PayoffSheet';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
 
-const pnlTone = (n: number | null) =>
-  n == null || n === 0
-    ? 'text-ink dark:text-ink-dark'
-    : n > 0
-      ? 'text-brand-text dark:text-brand-text-dark'
-      : 'text-danger-600 dark:text-danger-dark';
-
 /**
  * The paper F&O book — the web's /fno/paper/positions: what is held, what it is worth and what
  * it is exposed to. Net greeks lead, above the rows: a multi-leg book is not described by its
@@ -178,15 +171,14 @@ export function PaperPositions() {
 
   return (
     <View>
-      <BookSummary book={data} />
       {book.isError ? (
-        <Text className="mt-2 text-[11px] text-warning-600 dark:text-warning-dark">
+        <Text className="mb-2 text-[11px] text-warning-600 dark:text-warning-dark">
           Couldn’t refresh — showing the last marks.
         </Text>
       ) : null}
 
       {expired > 0 ? (
-        <View className="mt-4 gap-2.5">
+        <View className="mb-4 gap-2.5">
           <Banner
             tone="warning"
             title={`${expired} position${expired === 1 ? ' has' : 's have'} passed expiry`}
@@ -203,14 +195,14 @@ export function PaperPositions() {
       ) : null}
       {settled ? (
         <Banner
-          className="mt-4"
+          className="mb-4"
           tone={settled.tone}
           title={settled.title}
           message={settled.message}
         />
       ) : null}
       {settle.isError ? (
-        <Banner className="mt-4" tone="error" message={getErrorMessage(settle.error)} />
+        <Banner className="mb-4" tone="error" message={getErrorMessage(settle.error)} />
       ) : null}
 
       {positions.length > 0 ? <NetExposure book={data} /> : null}
@@ -225,7 +217,7 @@ export function PaperPositions() {
       ) : null}
 
       {positions.length === 0 ? (
-        <View className="mt-5 items-center gap-3 rounded-card border border-line bg-surface px-5 py-8 dark:border-line-dark dark:bg-surface-dark">
+        <View className="items-center gap-3 rounded-card border border-line bg-surface px-5 py-8 dark:border-line-dark dark:bg-surface-dark">
           <IconTile Icon={FlaskConical} tone="violet" size="lg" />
           <Text className="text-center text-base font-bold text-ink dark:text-ink-dark">
             Nothing held in your paper book
@@ -301,77 +293,6 @@ export function PaperPositions() {
 }
 
 /* ── Summary and net exposure ────────────────────────────────────────────────────────── */
-
-function BookSummary({ book }: { book: FnoBook }) {
-  const t = book.totals;
-  const open = book.positions.length;
-  return (
-    <View
-      accessible
-      accessibilityLabel={`Unrealised P&L ${formatSignedINR(t.unrealisedPnl)}. Realised ${formatSignedINR(t.realisedPnl)}. Margin blocked ${formatINR(t.marginBlocked)}. Charges paid ${formatINR(t.totalCharges)}.`}
-      className="rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark"
-    >
-      <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">Unrealised P&amp;L</Text>
-      <Text
-        className={cn('mt-1 text-[26px] font-bold', pnlTone(t.unrealisedPnl))}
-        style={[NUM, { letterSpacing: -0.6 }]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-      >
-        {formatSignedINR(t.unrealisedPnl)}
-      </Text>
-      <Text className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-        {open} open position{open === 1 ? '' : 's'} · a leg with no live price is left out
-      </Text>
-      <View className="mt-3 flex-row border-t border-line pt-3 dark:border-line-dark">
-        <Stat
-          label="Realised"
-          value={formatSignedINR(t.realisedPnl)}
-          tone={pnlTone(t.realisedPnl)}
-        />
-        <Stat
-          label="Margin blocked"
-          value={formatINR(t.marginBlocked, 0)}
-          hint="approx., not SPAN"
-        />
-        <Stat label="Charges paid" value={formatINR(t.totalCharges)} />
-      </View>
-    </View>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: string;
-}) {
-  return (
-    <View className="flex-1">
-      <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint" numberOfLines={1}>
-        {label}
-      </Text>
-      <Text
-        className={cn('mt-0.5 text-sm font-semibold', tone ?? 'text-ink dark:text-ink-dark')}
-        style={NUM}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-      >
-        {value}
-      </Text>
-      {hint ? (
-        <Text className="text-[10px] text-ink-faint dark:text-ink-dark-faint" numberOfLines={1}>
-          {hint}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
 
 function NetExposure({ book }: { book: FnoBook }) {
   const t = book.totals;

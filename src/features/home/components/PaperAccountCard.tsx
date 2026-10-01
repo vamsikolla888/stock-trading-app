@@ -20,8 +20,8 @@ import { useTheme } from '@/theme/ThemeProvider';
 const numbers = { fontVariant: ['tabular-nums' as const] };
 
 /**
- * The simulated book in one row (the web Dashboard's "Paper account"): equity and total
- * P&L across segments. Supplementary — hidden while loading or when it can't load.
+ * The simulated book in one row (the web Dashboard's "Paper account"): the one wallet's value
+ * and its net P&L (after charges). Supplementary — hidden while loading or when it can't load.
  */
 export function PaperAccountCard() {
   const router = useRouter();
@@ -31,10 +31,10 @@ export function PaperAccountCard() {
   const overview = segments.data;
   if (!overview) return null;
 
-  const { combined } = overview;
-  const positions = overview.segments.reduce((sum, segment) => sum + segment.positionCount, 0);
+  const { wallet } = overview;
+  const positions = wallet.positionCount;
   const pnlPct =
-    combined.startingCapital > 0 ? (combined.totalPnl / combined.startingCapital) * 100 : null;
+    wallet.netPnlPct ?? (wallet.capital > 0 ? (wallet.netPnl / wallet.capital) * 100 : null);
   const mask = (text: string) => (hideValues ? MASKED_VALUE : text);
 
   return (
@@ -47,7 +47,7 @@ export function PaperAccountCard() {
         accessibilityLabel={
           hideValues
             ? 'Paper account, values hidden'
-            : `Paper account, equity ${formatINR(combined.equity)}, total P&L ${formatSignedINR(combined.totalPnl)}`
+            : `Paper account, wallet value ${formatINR(wallet.value)}, net P&L ${formatSignedINR(wallet.netPnl)}`
         }
         accessibilityHint="Opens paper trading"
         onPress={() => router.navigate('/trade/paper')}
@@ -55,28 +55,30 @@ export function PaperAccountCard() {
       >
         <IconTile Icon={FlaskConical} tone="violet" />
         <View className="min-w-0 flex-1">
-          <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">Simulated equity</Text>
+          <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
+            Paper wallet value
+          </Text>
           <Text
             className="mt-0.5 text-[16px] font-bold text-ink dark:text-ink-dark"
             style={numbers}
             numberOfLines={1}
           >
-            {mask(formatINR(combined.equity))}
+            {mask(formatINR(wallet.value))}
           </Text>
           <Text
             className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint"
             numberOfLines={1}
           >
-            {positions} open position{positions === 1 ? '' : 's'} · cash{' '}
-            {mask(formatINR(combined.cash, 0))}
+            {positions} open position{positions === 1 ? '' : 's'} · balance{' '}
+            {mask(formatINR(wallet.availableCash, 0))}
           </Text>
         </View>
         <View className="items-end">
-          <ChangeText value={combined.totalPnl} className="text-[13px]" style={numbers}>
-            {mask(formatSignedINR(combined.totalPnl))}
+          <ChangeText value={wallet.netPnl} className="text-[13px]" style={numbers}>
+            {mask(formatSignedINR(wallet.netPnl))}
           </ChangeText>
           {pnlPct !== null ? (
-            <ChangeText value={combined.totalPnl} className="mt-0.5 text-[11px]" style={numbers}>
+            <ChangeText value={wallet.netPnl} className="mt-0.5 text-[11px]" style={numbers}>
               {mask(formatSignedPercent(pnlPct))}
             </ChangeText>
           ) : null}

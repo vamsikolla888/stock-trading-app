@@ -25,7 +25,8 @@ import {
 } from '@/features/portfolio/components/TradesFundsSections';
 import { portfolioKeys, useMstockPortfolio } from '@/features/portfolio/hooks';
 import { formatAsOf } from '@/features/portfolio/lib/dates';
-import { dayMove, fromBrokerHolding } from '@/features/portfolio/lib/portfolio';
+import { dayMove, fromBrokerHolding, liveTotals } from '@/features/portfolio/lib/portfolio';
+import { useLiveHoldings } from '@/features/portfolio/useLiveHoldings';
 import { formatINR } from '@/lib/utils/formatters';
 
 type SectionKey = 'holdings' | 'positions' | 'orders' | 'trades' | 'funds' | 'analytics';
@@ -45,7 +46,13 @@ export default function MstockPortfolioScreen() {
   const snapshot = query.data;
   const [section, setSection] = useState<SectionKey>('holdings');
 
-  const holdings = useMemo(() => snapshot?.holdings.map(fromBrokerHolding) ?? [], [snapshot]);
+  const restHoldings = useMemo(() => snapshot?.holdings.map(fromBrokerHolding) ?? [], [snapshot]);
+  // Re-priced at the live feed's ticks: rows, totals and the day's move follow the market.
+  const holdings = useLiveHoldings(restHoldings);
+  const totals = useMemo(
+    () => (snapshot ? liveTotals(snapshot.totals, restHoldings, holdings) : null),
+    [snapshot, restHoldings, holdings],
+  );
   const extras = useMemo(() => {
     const map: Record<string, HoldingExtras> = {};
     for (const holding of snapshot?.holdings ?? []) {
@@ -121,10 +128,10 @@ export default function MstockPortfolioScreen() {
             />
           ) : null}
           <BookSummaryCard
-            value={holdings.length > 0 ? snapshot.totals.value : null}
-            invested={holdings.length > 0 ? snapshot.totals.invested : null}
-            pnl={holdings.length > 0 ? snapshot.totals.pnl : null}
-            pnlPct={holdings.length > 0 ? snapshot.totals.pnlPct : null}
+            value={holdings.length > 0 && totals ? totals.value : null}
+            invested={holdings.length > 0 && totals ? totals.invested : null}
+            pnl={holdings.length > 0 && totals ? totals.pnl : null}
+            pnlPct={holdings.length > 0 && totals ? totals.pnlPct : null}
             day={holdings.length > 0 ? day : null}
             dayUnavailable={holdings.length === 0 ? 'No holdings yet' : undefined}
             extras={[
@@ -168,7 +175,7 @@ export default function MstockPortfolioScreen() {
           ) : section === 'funds' ? (
             <MstockFundsSection funds={snapshot.funds} />
           ) : (
-            <PerformanceSection holdings={holdings} scope="mstock" />
+            <PerformanceSection holdings={restHoldings} scope="mstock" />
           )}
         </>
       ) : null}

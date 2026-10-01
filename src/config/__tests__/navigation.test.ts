@@ -3,6 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { appConfig } from '@/config/app';
 import { NAV_GROUPS, navGroup } from '@/config/navigation';
 
 import { getHeaderTitle } from '@/lib/navigation/headerTitle';
@@ -30,6 +31,7 @@ describe('NAV_GROUPS', () => {
       'F&O': ['Explore', 'Positions', 'Orders', 'Paper trading'],
       Intelligence: [
         'Recommendations',
+        'Stock analysis',
         'Strategies',
         'Screeners',
         'Signals',
@@ -67,17 +69,17 @@ describe('NAV_GROUPS', () => {
 
 describe('getHeaderTitle', () => {
   it('maps groups and segments to the expected header titles', () => {
-    expect(getHeaderTitle('(markets)')).toBe('Stocks');
-    expect(getHeaderTitle('markets')).toBe('Stocks');
+    expect(getHeaderTitle('(markets)')).toBe(appConfig.name);
+    expect(getHeaderTitle('markets')).toBe(appConfig.name);
     expect(getHeaderTitle('trade')).toBe('Trade');
     expect(getHeaderTitle('fno')).toBe('F&O');
-    expect(getHeaderTitle('intel')).toBe('Stocks');
-    expect(getHeaderTitle('settings')).toBe('Stocks');
+    expect(getHeaderTitle('intel')).toBe(appConfig.name);
+    expect(getHeaderTitle('settings')).toBe(appConfig.name);
 
-    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', '(markets)'])).toBe('Stocks');
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', '(markets)'])).toBe(appConfig.name);
     expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'trade'])).toBe('Trade');
     expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'fno'])).toBe('F&O');
-    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'intel'])).toBe('Stocks');
-    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'settings'])).toBe('Stocks');
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'intel'])).toBe(appConfig.name);
+    expect(getHeaderTitle(undefined, ['(app)', '(tabs)', 'settings'])).toBe(appConfig.name);
   });
 });

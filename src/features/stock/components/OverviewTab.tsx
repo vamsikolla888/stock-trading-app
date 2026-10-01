@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { Section } from '@/components/ui/Section';
 import { StatGrid } from '@/components/ui/StatGrid';
+import { FundamentalRatingCard } from '@/features/fundamentals/components/FundamentalRatingCard';
 import { formatMarketCapCrore } from '@/features/home/lib/capBands';
 import { formatSessionDay } from '@/features/home/lib/istTime';
 import type { Recommendation } from '@/features/insights/types';
@@ -202,6 +203,8 @@ interface OverviewTabProps {
   batchDate: string | undefined;
   picksLoading: boolean;
   onReadCase: () => void;
+  /** Switches to the Fundamentals tab. */
+  onOpenFundamentals: () => void;
 }
 
 /** Performance, key stats, shareholding pattern, today's view, company facts and price alerts. */
@@ -213,6 +216,7 @@ export function OverviewTab({
   batchDate,
   picksLoading,
   onReadCase,
+  onOpenFundamentals,
 }: OverviewTabProps) {
   const displaySymbol =
     detail.listings?.find((listing) => listing.exchange === detail.exchange)?.displaySymbol ??
@@ -230,6 +234,11 @@ export function OverviewTab({
 
   return (
     <View>
+      <FundamentalRatingCard
+        symbol={detail.symbol}
+        exchange={detail.exchange === 'BSE' ? 'BSE' : 'NSE'}
+        onOpen={onOpenFundamentals}
+      />
       {/* ── Price performance ── */}
       <Section title="Performance" note={marketOpen ? undefined : 'Last session'} className="mt-6">
         <View className="gap-5 rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">

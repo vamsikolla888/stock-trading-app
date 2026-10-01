@@ -1,6 +1,8 @@
 import React, { memo } from 'react';
 import { Pressable, Text } from 'react-native';
 
+import { overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
 import { formatINR, formatNumber, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -19,7 +21,11 @@ interface HeatmapTileProps {
 
 const SYMBOL_SIZE: Record<TileDetail, number> = { none: 0, symbol: 10, compact: 11, full: 13 };
 
-/** One constituent: colour = move over the timeframe, and as much text as the tile can hold. */
+/**
+ * One constituent: colour = move over the timeframe, and as much text as the tile can hold.
+ * Live: the streamed price measured against the timeframe's own baseline (the previous close on
+ * 1D, the window's opening close otherwise), so the colour stays right on every timeframe.
+ */
 export const HeatmapTile = memo(function HeatmapTile({
   stock,
   width,
@@ -29,9 +35,14 @@ export const HeatmapTile = memo(function HeatmapTile({
   top,
 }: HeatmapTileProps) {
   const { isDark } = useTheme();
-  const swatch = heatSwatch(stock.changePct, isDark);
+  const quote = useLiveQuote(stock.exchange, stock.symbol);
+  const view = overlayQuote(
+    { price: stock.ltp, prevClose: stock.baseline, changePct: stock.changePct },
+    quote,
+  );
+  const swatch = heatSwatch(view.changePct, isDark);
   const detail = tileDetail(width, height);
-  const pct = formatSignedPercent(stock.changePct);
+  const pct = formatSignedPercent(view.changePct);
   const positioned = left !== undefined && top !== undefined;
 
   return (
@@ -79,9 +90,9 @@ export const HeatmapTile = memo(function HeatmapTile({
             marginTop: 1,
           }}
         >
-          {stock.ltp !== null && stock.ltp >= 10_000
-            ? `₹${formatNumber(stock.ltp, 0)}`
-            : formatINR(stock.ltp)}
+          {view.price !== null && view.price >= 10_000
+            ? `₹${formatNumber(view.price, 0)}`
+            : formatINR(view.price)}
         </Text>
       ) : null}
     </Pressable>

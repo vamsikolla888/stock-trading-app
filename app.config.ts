@@ -26,9 +26,16 @@ function assertReleaseApiUrl(): void {
 
 assertReleaseApiUrl();
 
+/**
+ * The launcher label — "Stocks" in every profile, no environment suffix. The profiles still
+ * install side by side (each has its own bundle id below); only the label is shared. Keep it in
+ * step with appConfig.name (src/config/app.ts), the name shown inside the app.
+ */
+const APP_NAME = 'Stocks';
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: isProd ? 'Stocks' : `Stocks (${APP_ENV})`,
+  name: APP_NAME,
   slug: 'stock-trading-app',
   version: '1.0.0',
   orientation: 'default',
@@ -69,8 +76,30 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     ['expo-router', { root: './src/app' }],
+    [
+      'expo-font',
+      {
+        // The brand typeface (src/theme/fonts.ts), embedded in the binary: nothing to load at
+        // launch. File name = PostScript name = the fontFamily on both platforms.
+        fonts: [
+          './src/assets/fonts/InterDisplay-SemiBold.ttf',
+          './src/assets/fonts/Inter-Regular.ttf',
+        ],
+      },
+    ],
     'expo-secure-store',
     'expo-local-authentication',
+    [
+      'expo-image-picker',
+      {
+        // Library only — a profile photo is chosen, never shot in-app, so no camera or
+        // microphone permission is requested (and false blocks any package adding them).
+        photosPermission:
+          'Allow $(PRODUCT_NAME) to use a photo you choose as your profile picture.',
+        cameraPermission: false,
+        microphonePermission: false,
+      },
+    ],
     [
       'expo-splash-screen',
       {

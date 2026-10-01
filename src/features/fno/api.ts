@@ -1,11 +1,14 @@
 import { apiClient } from '@/services/api/client';
 
 import type {
+  ChartTarget,
   ExitPositionInput,
   ExpiryCalendar,
   ExploreFuture,
   ExploreSection,
   ExploreUnderlying,
+  FnoCandleInterval,
+  FnoCandles,
   FnoChain,
   FnoContractDetail,
   FnoExchange,
@@ -134,6 +137,24 @@ export const fnoApi = {
     const { data } = await apiClient.get<FnoContractDetail>(
       `/fno/contracts/${exchange}/${enc(tradingSymbol)}`,
       { signal },
+    );
+    return data;
+  },
+
+  /**
+   * Bars for a contract, or (`target: 'underlying'`) for its cash/index underlying — the
+   * contract only names which underlying. `from`/`to` are epoch seconds, and the server caps
+   * the span per interval (30 days for ≤5m, 90 for 15m, 180 above).
+   */
+  async candles(
+    exchange: FnoExchange,
+    tradingSymbol: string,
+    query: { target: ChartTarget; interval: FnoCandleInterval; from: number; to: number },
+    signal?: AbortSignal,
+  ): Promise<FnoCandles> {
+    const { data } = await apiClient.get<FnoCandles>(
+      `/fno/contracts/${exchange}/${enc(tradingSymbol)}/candles`,
+      { params: query, signal },
     );
     return data;
   },

@@ -54,6 +54,65 @@ export function Tabs<K extends string>({ items, value, onChange, className }: Se
 }
 
 /**
+ * Underlined tabs that scroll sideways — for a broker-style book with more tabs than fit
+ * (Holdings · Positions · Orders · Funds · Analytics). Bleeds to the screen edge like Chips.
+ */
+export function ScrollTabs<K extends string>({
+  items,
+  value,
+  onChange,
+  className,
+  badges,
+}: SelectorProps<K> & { badges?: Partial<Record<K, number>> }) {
+  return (
+    <View className={cn('-mx-5 border-b border-line dark:border-line-dark', className)}>
+      <ScrollView
+        horizontal
+        accessibilityRole="tablist"
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 12 }}
+      >
+        {items.map((item) => {
+          const selected = item.key === value;
+          const badge = badges?.[item.key] ?? 0;
+          return (
+            <Pressable
+              key={item.key}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              accessibilityLabel={badge > 0 ? `${item.label}, ${badge}` : item.label}
+              onPress={() => onChange(item.key)}
+              className={cn(
+                '-mb-px flex-row items-center gap-1.5 border-b-2 px-3 pb-2.5 pt-3',
+                selected ? 'border-brand dark:border-brand' : 'border-transparent',
+              )}
+            >
+              <Text
+                className={cn(
+                  'text-[13px] font-semibold',
+                  selected
+                    ? 'text-brand-text dark:text-brand-text-dark'
+                    : 'text-ink-muted dark:text-ink-dark-muted',
+                )}
+              >
+                {item.label}
+              </Text>
+              {badge > 0 ? (
+                <View className="min-w-[18px] items-center rounded-full bg-warning-wash px-1.5 dark:bg-warning-wash-dark">
+                  <Text className="text-[10px] font-bold text-warning-600 dark:text-warning-dark">
+                    {badge}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+/**
  * Pill segmented control (Delivery / Intraday, chart ranges, the Appearance picker).
  *
  * The selected pill's shadow is a style, never a `shadow-*` class: NativeWind compiles

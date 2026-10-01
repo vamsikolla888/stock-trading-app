@@ -1,6 +1,8 @@
+import { useIsFocused } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
 
+import { LiveScope } from '@/features/market/live';
 import { useTheme } from '@/theme/ThemeProvider';
 
 interface GroupScreenProps {
@@ -20,7 +22,8 @@ interface GroupScreenProps {
 /**
  * Body scaffold for a sub-screen of a main-menu tab. The group's header and sub-tabs sit
  * above it (GroupTabBar), so this owns only the scroll area: pull-to-refresh, the page
- * gutter, and a width cap for tablets.
+ * gutter, and a width cap for tablets. Its tree streams live prices only while the screen is
+ * focused (LiveScope) — a visited tab left mounted behind another holds no subscriptions.
  */
 export function GroupScreen({
   onRefresh,
@@ -31,6 +34,7 @@ export function GroupScreen({
   scroll = true,
 }: GroupScreenProps) {
   const { colors } = useTheme();
+  const focused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
@@ -54,37 +58,39 @@ export function GroupScreen({
     ) : null;
 
   return (
-    <View className="flex-1 bg-canvas dark:bg-canvas-dark">
-      {scroll ? (
-        <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            onRefresh ? (
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
-                progressBackgroundColor={colors.surface}
-              />
-            ) : undefined
-          }
-        >
-          <View className="w-full max-w-[640px] self-center">
-            {introText}
+    <LiveScope active={focused}>
+      <View className="flex-1 bg-canvas dark:bg-canvas-dark">
+        {scroll ? (
+          <ScrollView
+            className="flex-1"
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              onRefresh ? (
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor={colors.accent}
+                  colors={[colors.accent]}
+                  progressBackgroundColor={colors.surface}
+                />
+              ) : undefined
+            }
+          >
+            <View className="w-full max-w-[640px] self-center">
+              {introText}
+              {children}
+            </View>
+          </ScrollView>
+        ) : (
+          <View className="flex-1">
+            {introText ? <View className="px-5 pt-5">{introText}</View> : null}
             {children}
           </View>
-        </ScrollView>
-      ) : (
-        <View className="flex-1">
-          {introText ? <View className="px-5 pt-5">{introText}</View> : null}
-          {children}
-        </View>
-      )}
-      {footer}
-    </View>
+        )}
+        {footer}
+      </View>
+    </LiveScope>
   );
 }

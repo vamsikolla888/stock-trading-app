@@ -17,13 +17,15 @@ import type {
 /**
  * React Query bindings for the paper F&O book.
  *
- * POLLING IS PINNED TO THE SERVER'S OWN CACHE: the chain fans out to ~100 quote lookups behind
- * a 20 s cache, so 25 s is always a fresh read and never hammers the 60/min bucket. Polling
- * stops outside market hours and while the screen is covered.
+ * POLLING CANNOT OUTRUN THE SERVER'S 20 s QUOTE CACHE, but it should not undershoot it either:
+ * at 25 s a cell that changed just after a poll could sit stale for ~45 s. Every 10 s keeps the
+ * screen within one cache refresh of the server while using a sixth of the chain's 60/min
+ * bucket — a phone's battery and data are why this is not the web's 5 s. Polling stops outside
+ * market hours and while the screen is covered.
  */
 
-const CHAIN_POLL_MS = 25_000;
-const BOOK_POLL_MS = 25_000;
+const CHAIN_POLL_MS = 10_000;
+const BOOK_POLL_MS = 10_000;
 const HOUR = 60 * 60_000;
 
 export const derivativesKeys = {
@@ -40,6 +42,8 @@ export const derivativesKeys = {
       query.exchange ?? null,
     ] as const,
   book: () => [...derivativesKeys.all, 'book'] as const,
+  wallet: () => [...derivativesKeys.all, 'wallet'] as const,
+  analytics: () => [...derivativesKeys.all, 'analytics'] as const,
   orders: (limit: number) => [...derivativesKeys.all, 'orders', limit] as const,
   movers: (kind: string, limit: number) => [...derivativesKeys.all, 'movers', kind, limit] as const,
   strategies: () => [...derivativesKeys.all, 'strategies'] as const,
@@ -118,9 +122,31 @@ export function useFnoMovers(kind: 'gainers' | 'losers' | 'volume', limit: numbe
   });
 }
 
+/** The F&O sandbox's own wallet — what an order can draw on, and what it is set to. */
+export function usePaperFnoWallet(enabled = true) {
+  return useQuery({
+    queryKey: derivativesKeys.wallet(),
+    queryFn: ({ signal }) => derivativesApi.wallet(signal),
+    enabled,
+    staleTime: 10_000,
+    retry: retryTransient,
+  });
+}
+
+/** Replayed from the order log (no live quotes), so it is cheap and needs no fast polling. */
+export function usePaperFnoAnalytics(enabled = true) {
+  return useQuery({
+    queryKey: derivativesKeys.analytics(),
+    queryFn: ({ signal }) => derivativesApi.analytics(signal),
+    enabled,
+    staleTime: 30_000,
+    retry: retryTransient,
+  });
+}
+
 /**
- * An order moves margin, positions, net greeks and the order log in one write, so every
- * mutation refreshes the book and the log. Deliberately NOT:
+ * An order moves margin, positions, net greeks, the wallet and the order log in one write, so
+ * every mutation refreshes all of them. Deliberately NOT:
  *   - the chain — a paper fill does not move the market, and a chain refetch is ~100 quote
  *     lookups against the chain's own rate bucket;
  *   - `paper` — the F&O pool is its own capital, and no /paper-trading endpoint reads it.
@@ -131,6 +157,8 @@ function useInvalidatePaper() {
   return useCallback(() => {
     void qc.invalidateQueries({ queryKey: derivativesKeys.book() });
     void qc.invalidateQueries({ queryKey: [...derivativesKeys.all, 'orders'] });
+    void qc.invalidateQueries({ queryKey: derivativesKeys.wallet() });
+    void qc.invalidateQueries({ queryKey: derivativesKeys.analytics() });
   }, [qc]);
 }
 
@@ -138,6 +166,33 @@ export function usePlacePaperOrder() {
   const invalidate = useInvalidatePaper();
   return useMutation({
     mutationFn: (body: PlacePaperFnoOrderInput) => derivativesApi.placeOrder(body),
+    onSettled: invalidate,
+  });
+}
+
+/** Withdraws a resting LIMIT order; its reservation goes back to the wallet's free cash. */
+export function useCancelPaperFnoOrder() {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: (orderId: string) => derivativesApi.cancelOrder(orderId),
+    onSettled: invalidate,
+  });
+}
+
+/** Sets the F&O wallet — a deposit or a withdrawal of free cash. */
+export function useSetPaperFnoWallet() {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: (amount: number) => derivativesApi.setWallet(amount),
+    onSettled: invalidate,
+  });
+}
+
+/** Wipes the F&O sandbox alone — never the cash paper account. */
+export function useResetPaperFno() {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: () => derivativesApi.reset(),
     onSettled: invalidate,
   });
 }

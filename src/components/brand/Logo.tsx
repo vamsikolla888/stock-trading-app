@@ -4,6 +4,7 @@ import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
 import { appConfig } from '@/config/app';
 import { cn } from '@/lib/utils/cn';
+import { brandFont } from '@/theme/fonts';
 import { palette } from '@/theme/tokens';
 
 // The brand mark: a bold rising arrow over three soft volume bars on a mint-to-emerald
@@ -60,10 +61,12 @@ export const LogoMark = memo(function LogoMark({ size = 32 }: LogoMarkProps) {
 
 type LogoSize = 'sm' | 'md' | 'lg';
 
-const sizes: Record<LogoSize, { mark: number; text: string; gap: string }> = {
-  sm: { mark: 28, text: 'text-base', gap: 'gap-2' },
-  md: { mark: 32, text: 'text-lg', gap: 'gap-2.5' },
-  lg: { mark: 56, text: 'text-3xl', gap: 'gap-3' },
+// The wordmark is set in the brand face (Inter Display, as on the launch screen), tracked
+// tight at about −2 % of its size.
+const sizes: Record<LogoSize, { mark: number; text: string; tracking: number; gap: string }> = {
+  sm: { mark: 28, text: 'text-base', tracking: -0.3, gap: 'gap-2' },
+  md: { mark: 32, text: 'text-lg', tracking: -0.4, gap: 'gap-2.5' },
+  lg: { mark: 56, text: 'text-3xl', tracking: -0.7, gap: 'gap-3' },
 };
 
 interface LogoProps {
@@ -80,7 +83,7 @@ export const Logo = memo(function Logo({
   showText = true,
   className,
 }: LogoProps) {
-  const { mark, text, gap } = sizes[size];
+  const { mark, text, tracking, gap } = sizes[size];
 
   return (
     <View
@@ -96,8 +99,9 @@ export const Logo = memo(function Logo({
       <LogoMark size={mark} />
       {showText ? (
         <Text
-          className={cn('font-bold tracking-tight text-ink dark:text-ink-dark', text)}
-          style={{ letterSpacing: -0.5 }}
+          allowFontScaling={false}
+          className={cn('text-ink dark:text-ink-dark', text)}
+          style={[brandFont('display'), { letterSpacing: tracking }]}
         >
           {appConfig.name}
         </Text>

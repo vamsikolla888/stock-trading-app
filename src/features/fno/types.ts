@@ -81,6 +81,8 @@ export interface FnoChainLeg {
   tradingSymbol: string;
   contract: FnoContract | null;
   ltp: number | null;
+  /** Today's change in percent. Optional: an older server omits it. */
+  dayChangePct?: number | null;
   openInterest: number | null;
   volume: number | null;
   greeks: FnoGreeks | null;
@@ -176,6 +178,34 @@ export interface FnoFutures {
   source: MarketDataSource;
   sourceNote: string | null;
   asOf: string;
+}
+
+/* ── Candles (GET /fno/contracts/{exchange}/{tradingSymbol}/candles) ─────────────────── */
+
+/** What a candles request charts: the contract itself, or its cash/index underlying. */
+export type ChartTarget = 'contract' | 'underlying';
+
+/** The subset of Groww's historical intervals the chain chart offers. */
+export type FnoCandleInterval =
+  '1minute' | '3minute' | '5minute' | '15minute' | '30minute' | '1hour' | '1day' | '1week';
+
+export interface FnoCandle {
+  /** Bar start, epoch seconds; the series is ascending. */
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+  openInterest: number | null;
+}
+
+export interface FnoCandles {
+  candles: FnoCandle[];
+  /** Null only when `candles` is empty. */
+  source: MarketDataSource | null;
+  /** Why `candles` is empty (neither Groww nor the platform feed had bars). */
+  unavailableReason: string | null;
 }
 
 export interface FnoPositionRow {

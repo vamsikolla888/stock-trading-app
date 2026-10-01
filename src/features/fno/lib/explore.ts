@@ -122,6 +122,41 @@ export function chainHref(
   return { pathname: '/option-chain' as const, params };
 }
 
+/** An underlying's own screen (index or F&O stock): price, chart, full screen, chain, futures. */
+export function underlyingHref(exchange: FnoExchange, underlying: string) {
+  return { pathname: '/fno-underlying' as const, params: { exchange, underlying } };
+}
+
+/**
+ * The advanced chart for an F&O underlying (charted through `anchor`, any listed contract of it)
+ * or for one contract. `spotSymbol` streams the underlying's price; `prevClose` draws the day's
+ * baseline and measures the header's move.
+ */
+export function fnoChartHref(options: {
+  exchange: FnoExchange;
+  target: 'underlying' | 'contract';
+  /** The underlying (target underlying) or the contract's trading symbol (target contract). */
+  subject: string;
+  anchor: string;
+  label?: string;
+  spotSymbol?: string | null;
+  prevClose?: number | null;
+  fullscreen?: boolean;
+}) {
+  const params: Record<string, string> = {
+    symbol: options.subject,
+    exchange: options.exchange,
+    src: 'fno',
+    target: options.target,
+    anchor: options.anchor,
+  };
+  if (options.label) params.label = options.label;
+  if (options.spotSymbol) params.spot = options.spotSymbol;
+  if (options.prevClose != null && options.prevClose > 0) params.pc = String(options.prevClose);
+  if (options.fullscreen) params.full = '1';
+  return { pathname: '/chart/[symbol]' as const, params };
+}
+
 /** Only NSE/BSE F&O has a chain screen; MCX is priced here but not traded through Groww. */
 export function isChainExchange(exchange: ExploreExchange | string): exchange is FnoExchange {
   return exchange === 'NFO' || exchange === 'BFO';

@@ -14,6 +14,7 @@ import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { useStockDetail } from '@/features/market/hooks';
+import { useLiveQuote } from '@/features/market/live';
 import { portfolioKeys } from '@/features/portfolio/keys';
 import { previewCharges, liveTradingApi, paperApi } from '@/features/trading/api';
 import {
@@ -139,7 +140,10 @@ export default function OrderScreen() {
   // screen opens the ticket in paper mode — it never silently becomes live.
   const mode: Mode = chosenMode ?? (liveAvailable ? 'live' : 'paper');
   const isLive = mode === 'live' && liveAvailable;
-  const ltp = detail.data?.ltp ?? null;
+  // Every tick (stream mode): the reference price, the estimate and the LTP line follow the
+  // market while the ticket is open, not the last 10-second poll.
+  const liveQuote = useLiveQuote(exchange, symbol, { mode: 'stream' });
+  const ltp = liveQuote?.ltp ?? detail.data?.ltp ?? null;
   const displaySymbol =
     detail.data?.listings?.find((listing) => listing.exchange === exchange)?.displaySymbol ??
     symbol;
@@ -235,7 +239,12 @@ export default function OrderScreen() {
   const fundsShown = isLive ? available : (paperPreview.data?.availableCash ?? null);
   const blockedReason = !isLive && paperInput ? (paperPreview.data?.blockedReason ?? null) : null;
   const paperNotices = !isLive && paperInput ? (paperPreview.data?.notices ?? []) : [];
-  const shortOfFunds = isBuy && estimate !== null && fundsShown !== null && estimate > fundsShown;
+  // Paper: the server's own margin figure — an intraday buy is leveraged, so it commits only a
+  // fraction of its value. Live: the order value against the broker's funds.
+  const paperMargin = !isLive && paperInput ? (paperPreview.data?.marginRequired ?? null) : null;
+  const shortOfFunds = isLive
+    ? isBuy && estimate !== null && fundsShown !== null && estimate > fundsShown
+    : isBuy && paperMargin !== null && fundsShown !== null && paperMargin > fundsShown;
 
   const refreshAfterOrder = (placedAt: LiveBroker | null) =>
     Promise.all([
@@ -486,8 +495,11 @@ export default function OrderScreen() {
                   label="Estimated charges"
                   value={chargesTotal !== null ? formatINR(chargesTotal) : '—'}
                 />
+                {!isLive && product === 'intraday' && isBuy && paperMargin !== null ? (
+                  <SummaryRow label="Margin required" value={formatINR(paperMargin)} />
+                ) : null}
                 <SummaryRow
-                  label={isLive ? 'Available funds' : 'Paper cash available'}
+                  label={isLive ? 'Available funds' : 'Paper wallet balance'}
                   value={
                     fundsShown !== null
                       ? formatINR(fundsShown)
@@ -514,7 +526,11 @@ export default function OrderScreen() {
               {shortOfFunds && !blockedReason ? (
                 <Banner
                   tone="warning"
-                  message="The estimated value is more than your available funds."
+                  message={
+                    isLive
+                      ? 'The estimated value is more than your available funds.'
+                      : 'This needs more than your paper wallet balance.'
+                  }
                 />
               ) : null}
               {held !== null && orderQuantity !== null && orderQuantity > held ? (

@@ -2,9 +2,12 @@ import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { ChangeText } from '@/components/market/ChangeText';
+import { LiveFlash } from '@/components/market/LiveFlash';
 import { Sparkline } from '@/components/market/Sparkline';
 import { StockLogo } from '@/components/market/StockLogo';
 import { stockLogoUrl } from '@/features/market/api';
+import { changePctFrom, overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
 import { cn } from '@/lib/utils/cn';
 import { formatINR, formatSignedPercent } from '@/lib/utils/formatters';
 
@@ -65,6 +68,8 @@ interface WatchlistRowProps {
  * A watchlist stock: price and today's move on the right, and under the name the figure the
  * list exists for — the move since it was added (unmeasurable rows say why instead of
  * showing a flat 0%). AI rows carry the review verdict and repeat count beside the symbol.
+ * Both moves follow the live price: today's against the previous close, since-added against
+ * the price it was added at.
  */
 export const WatchlistRow = memo(function WatchlistRow({
   item,
@@ -73,12 +78,18 @@ export const WatchlistRow = memo(function WatchlistRow({
 }: WatchlistRowProps) {
   const ai = item.ai ?? null;
   const detail = ai?.sector ?? item.companyName ?? item.note ?? item.exchange;
-  const since = item.changeSinceAddPct;
+  const quote = useLiveQuote(item.exchange, item.symbol);
+  const view = overlayQuote(
+    { price: item.ltp, prevClose: item.prevClose, changePct: item.changeTodayPct },
+    quote,
+  );
+  const since =
+    (quote ? changePctFrom(view.price, item.addedPrice) : null) ?? item.changeSinceAddPct;
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.symbol}, ${formatINR(item.ltp)}, ${formatSignedPercent(item.changeTodayPct)} today, ${
+      accessibilityLabel={`${item.symbol}, ${formatINR(view.price)}, ${formatSignedPercent(view.changePct)} today, ${
         since === null ? unpricedText(item) : `${formatSignedPercent(since)} since added`
       }`}
       accessibilityHint={onLongPress ? 'Long press to remove it from the list' : undefined}
@@ -126,11 +137,13 @@ export const WatchlistRow = memo(function WatchlistRow({
       </View>
       {item.sparkline.length > 1 ? <Sparkline data={item.sparkline} /> : null}
       <View className="min-w-[74px] items-end">
-        <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={NUMBERS}>
-          {formatINR(item.ltp)}
-        </Text>
-        <ChangeText value={item.changeTodayPct} className="mt-0.5 text-xs" style={NUMBERS}>
-          {formatSignedPercent(item.changeTodayPct)}
+        <LiveFlash seq={quote?.seq} dir={quote?.dir}>
+          <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={NUMBERS}>
+            {formatINR(view.price)}
+          </Text>
+        </LiveFlash>
+        <ChangeText value={view.changePct} className="mt-0.5 text-xs" style={NUMBERS}>
+          {formatSignedPercent(view.changePct)}
         </ChangeText>
       </View>
     </Pressable>

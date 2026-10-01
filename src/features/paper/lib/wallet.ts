@@ -1,6 +1,12 @@
 import { formatINR } from '@/lib/utils/formatters';
 
-import type { WalletPool } from '../types';
+/** The bounds and balances a wallet draft is checked against — the cash wallet's or F&O's. */
+export interface WalletLimits {
+  capital: number;
+  cash: number;
+  minCapital: number;
+  maxCapital: number;
+}
 
 /** One-tap wallet sizes, as on the web's Settings → Paper wallet. */
 export const WALLET_PRESETS = [100_000, 500_000, 1_000_000, 2_500_000] as const;
@@ -23,14 +29,12 @@ export function rupeesOnly(text: string): number | null {
 }
 
 /**
- * What a new wallet figure would do to a pool. Raising it deposits the difference and
- * lowering it withdraws it, from free cash only; positions, orders and booked P&L stay as they
- * are. The bounds are the server's (`minCapital` knows what's invested or blocked).
+ * What a new wallet figure would do. Raising it deposits the difference and lowering it
+ * withdraws it, from free cash only; positions, orders and booked P&L stay as they are. The
+ * bounds are the server's (`minCapital` knows what's invested or blocked). Shared by the cash
+ * paper wallet and the F&O sandbox's, which follow the same rule.
  */
-export function walletDraft(
-  pool: Pick<WalletPool, 'capital' | 'cash' | 'minCapital' | 'maxCapital'>,
-  text: string,
-): WalletDraft {
+export function walletDraft(pool: WalletLimits, text: string): WalletDraft {
   const amount = rupeesOnly(text);
   const delta = amount !== null ? amount - pool.capital : 0;
   const tooLow = amount !== null && amount < pool.minCapital;
@@ -38,7 +42,7 @@ export function walletDraft(
   let message: string;
   if (amount === null) message = 'Enter an amount in rupees.';
   else if (tooLow)
-    message = `The lowest it can be right now is ${formatINR(pool.minCapital, 0)} — only free cash can be withdrawn. Sell positions or cancel buy orders to go lower.`;
+    message = `The lowest it can be right now is ${formatINR(pool.minCapital, 0)} — only free cash can be withdrawn. Close positions or cancel buy orders to go lower.`;
   else if (tooHigh) message = `A paper wallet holds at most ${formatINR(pool.maxCapital, 0)}.`;
   else if (delta > 0)
     message = `Deposits ${formatINR(delta, 0)}: cash rises to ${formatINR(pool.cash + delta)}. Positions and history stay as they are.`;

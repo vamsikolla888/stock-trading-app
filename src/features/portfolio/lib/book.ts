@@ -95,6 +95,25 @@ export const POSITION_KIND_LABEL: Record<PositionRow['kind'], string> = {
 };
 
 /** Open positions first, then the ones closed today; with the day's P&L when every row has one. */
+/**
+ * An OPEN position re-priced at a live price, as a delta from the row's own figures (so the
+ * broker's realised P&L and its value convention stay its own). A short position carries a
+ * negative quantity, so (new − old) × qty is right for both sides. Closed rows, rows without a
+ * REST price to move from, and an unchanged price come back as the same object.
+ */
+export function repricePosition(row: PositionRow, ltp: number): PositionRow {
+  if (row.qty === 0 || row.ltp === null || !(ltp > 0) || ltp === row.ltp) return row;
+  const delta = (ltp - row.ltp) * row.qty;
+  const unrealised = (row.unrealised ?? (row.ltp - row.avg) * row.qty) + delta;
+  return {
+    ...row,
+    ltp,
+    unrealised,
+    pnl: (row.pnl ?? row.realised + (row.unrealised ?? 0)) + delta,
+    value: row.value + Math.abs(row.qty) * (ltp - row.ltp),
+  };
+}
+
 export function positionsSummary(rows: readonly PositionRow[]): {
   open: PositionRow[];
   closed: PositionRow[];

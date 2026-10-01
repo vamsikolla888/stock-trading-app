@@ -1,0 +1,164 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { useAuthFlowStore } from '@/features/auth/authFlowStore';
+import { endSession, startSession } from '@/features/auth/bootstrapAuth';
+import { useAuthStore } from '@/store/authStore';
+
+import { accountApi } from './api';
+import type { AccountProfile, ProfileFields } from './types';
+
+/** Keyed by user, so a different account signing in on this device never sees a cached profile. */
+export const accountKeys = {
+  all: ['account'] as const,
+  profile: (userId: string | undefined) => ['account', 'profile', userId ?? ''] as const,
+  security: (userId: string | undefined) => ['account', 'security', userId ?? ''] as const,
+};
+
+function useUserId() {
+  return useAuthStore((state) => state.user?.id);
+}
+
+/** The profile — also behind every avatar in the app, so it is cached for a while. */
+export function useAccountProfile() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: accountKeys.profile(userId),
+    queryFn: accountApi.profile,
+    enabled: Boolean(userId),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Two-factor state and the device sessions. Fresh on every visit — it is a security screen. */
+export function useAccountSecurity(enabled = true) {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: accountKeys.security(userId),
+    queryFn: accountApi.security,
+    enabled: enabled && Boolean(userId),
+    staleTime: 0,
+  });
+}
+
+/** Every profile write answers with the new profile; it replaces the cache in place. */
+function useProfileWrite<TInput>(write: (input: TInput) => Promise<AccountProfile>) {
+  const queryClient = useQueryClient();
+  const userId = useUserId();
+  return useMutation({
+    mutationFn: write,
+    onSuccess: (profile) => queryClient.setQueryData(accountKeys.profile(userId), profile),
+  });
+}
+
+export function useUpdateProfile() {
+  return useProfileWrite((input: ProfileFields) => accountApi.updateProfile(input));
+}
+
+export function useUploadAvatar() {
+  return useProfileWrite((image: Blob) => accountApi.uploadAvatar(image));
+}
+
+export function useRemoveAvatar() {
+  return useProfileWrite(() => accountApi.removeAvatar());
+}
+
+export function useRequestEmailChange() {
+  return useMutation({
+    mutationFn: ({ email, currentPassword }: { email: string; currentPassword: string }) =>
+      accountApi.requestEmailChange(email, currentPassword),
+  });
+}
+
+/**
+ * Applies a confirmed email change. The server revokes the older sessions and hands this one a
+ * replacement token pair, which becomes the session — with the new email on the stored user.
+ */
+export function useConfirmEmailChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => accountApi.confirmEmailChange(token),
+    onSuccess: async ({ profile, accessToken, refreshToken }) => {
+      await startSession({
+        accessToken,
+        refreshToken,
+        user: { id: profile.id, email: profile.email, role: profile.role },
+      });
+      queryClient.setQueryData(accountKeys.profile(profile.id), profile);
+    },
+  });
+}
+
+/**
+ * A password change revokes every session on the server, this one included — so it ends here
+ * too, with a note for the sign-in screen saying why the user is back there.
+ */
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: ({
+      currentPassword,
+      newPassword,
+    }: {
+      currentPassword: string;
+      newPassword: string;
+    }) => accountApi.changePassword(currentPassword, newPassword),
+    onSuccess: async () => {
+      useAuthFlowStore.getState().setNotice({
+        tone: 'success',
+        title: 'Password changed',
+        message: 'Every device was signed out. Sign in with your new password.',
+      });
+      await endSession();
+    },
+  });
+}
+
+/** Signs out one device. Signing out THIS one ends the local session as well. */
+export function useRevokeSession() {
+  const queryClient = useQueryClient();
+  const userId = useUserId();
+  return useMutation({
+    mutationFn: (sessionId: string) => accountApi.revokeSession(sessionId),
+    onSuccess: async (result) => {
+      if (result.current) {
+        await endSession();
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: accountKeys.security(userId) });
+    },
+  });
+}
+
+/** Two-factor writes change what the security query reports — refresh it after each. */
+function useSecurityWrite<TInput, TResult>(write: (input: TInput) => Promise<TResult>) {
+  const queryClient = useQueryClient();
+  const userId = useUserId();
+  return useMutation({
+    mutationFn: write,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: accountKeys.security(userId) }),
+  });
+}
+
+export function useBeginMfaSetup() {
+  // Starting a setup changes nothing server-side that the security screen shows.
+  return useMutation({
+    mutationFn: (currentPassword: string) => accountApi.beginMfaSetup(currentPassword),
+  });
+}
+
+export function useConfirmMfaSetup() {
+  return useSecurityWrite(({ setupToken, code }: { setupToken: string; code: string }) =>
+    accountApi.confirmMfaSetup(setupToken, code),
+  );
+}
+
+export function useDisableMfa() {
+  return useSecurityWrite(({ currentPassword, code }: { currentPassword: string; code: string }) =>
+    accountApi.disableMfa(currentPassword, code),
+  );
+}
+
+export function useRegenerateRecoveryCodes() {
+  return useSecurityWrite(({ currentPassword, code }: { currentPassword: string; code: string }) =>
+    accountApi.regenerateRecoveryCodes(currentPassword, code),
+  );
+}

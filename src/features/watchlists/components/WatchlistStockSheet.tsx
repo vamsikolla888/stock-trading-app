@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { ChangeText } from '@/components/market/ChangeText';
+import { LiveFlash } from '@/components/market/LiveFlash';
 import { Sparkline } from '@/components/market/Sparkline';
 import { Button } from '@/components/ui/Button';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { Meter } from '@/components/ui/Meter';
+import { changePctFrom, overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
 import { formatDay, istDateOf } from '@/features/portfolio/lib/dates';
 import { Note, Sheet } from '@/features/trading/components/Sheet';
 import { formatINR, formatSignedPercent } from '@/lib/utils/formatters';
@@ -72,6 +75,14 @@ export function WatchlistStockSheet({
 }: WatchlistStockSheetProps) {
   const [showRationale, setShowRationale] = useState(false);
   const ai = item.ai ?? null;
+  // The same live figures as the row behind the sheet.
+  const quote = useLiveQuote(item.exchange, item.symbol);
+  const view = overlayQuote(
+    { price: item.ltp, prevClose: item.prevClose, changePct: item.changeTodayPct },
+    quote,
+  );
+  const since =
+    (quote ? changePctFrom(view.price, item.addedPrice) : null) ?? item.changeSinceAddPct;
   const subtitle = [item.companyName, ai?.sector, ai?.riskLevel ? `${ai.riskLevel} risk` : null]
     .filter(Boolean)
     .join(' · ');
@@ -104,19 +115,21 @@ export function WatchlistStockSheet({
       <View className="flex-row items-end gap-3 rounded-xl bg-surface-sunk px-3.5 py-3 dark:bg-surface-sunk-dark">
         <View className="min-w-0 flex-1">
           <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">Price</Text>
-          <Text
-            className="mt-0.5 text-[22px] font-bold text-ink dark:text-ink-dark"
-            style={NUMBERS}
-          >
-            {formatINR(item.ltp)}
-          </Text>
+          <LiveFlash seq={quote?.seq} dir={quote?.dir} style={{ alignSelf: 'flex-start' }}>
+            <Text
+              className="mt-0.5 text-[22px] font-bold text-ink dark:text-ink-dark"
+              style={NUMBERS}
+            >
+              {formatINR(view.price)}
+            </Text>
+          </LiveFlash>
           <View className="mt-1 flex-row gap-3">
-            <ChangeText value={item.changeTodayPct} className="text-xs" style={NUMBERS}>
-              {formatSignedPercent(item.changeTodayPct)} today
+            <ChangeText value={view.changePct} className="text-xs" style={NUMBERS}>
+              {formatSignedPercent(view.changePct)} today
             </ChangeText>
-            {item.changeSinceAddPct !== null ? (
-              <ChangeText value={item.changeSinceAddPct} className="text-xs" style={NUMBERS}>
-                {formatSignedPercent(item.changeSinceAddPct)} since added
+            {since !== null ? (
+              <ChangeText value={since} className="text-xs" style={NUMBERS}>
+                {formatSignedPercent(since)} since added
               </ChangeText>
             ) : (
               <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">

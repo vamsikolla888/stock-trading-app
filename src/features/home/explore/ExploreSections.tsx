@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
+import { LiveFlash } from '@/components/market/LiveFlash';
 import { StockLogo } from '@/components/market/StockLogo';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Badge } from '@/components/ui/Badge';
@@ -19,7 +20,9 @@ import {
   useRecentlyViewed,
   useScreeners,
 } from '@/features/market/hooks';
-import type { Mover, MoverKind } from '@/features/market/types';
+import { overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
+import type { Mover, MoverKind, RecentlyViewedItem } from '@/features/market/types';
 import { stockHref } from '@/lib/navigation';
 import {
   formatCompactNumber,
@@ -71,27 +74,39 @@ export function RecentlyViewedStrip() {
     >
       <View className="flex-row items-center gap-1.5">
         {items.map((item) => (
-          <Pressable
+          <RecentChip
             key={`${item.exchange}:${item.symbol}`}
-            accessibilityRole="button"
-            accessibilityLabel={`${item.companyName ?? item.symbol}, ${formatSignedPercent(item.changePct)}`}
+            item={item}
             onPress={() => router.push(stockHref(item.symbol, item.exchange))}
-            className="flex-1 items-center rounded-card bg-surface px-1 py-2.5 active:bg-surface-sunk dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
-          >
-            <StockLogo symbol={item.symbol} uri={stockLogoUrl(item.symbol)} />
-            <Text
-              className="mt-1.5 text-[11px] font-semibold text-ink dark:text-ink-dark"
-              numberOfLines={1}
-            >
-              {item.symbol}
-            </Text>
-            <ChangeText value={item.changePct} className="mt-0.5 text-[10px]" style={numbers}>
-              {formatSignedPercent(item.changePct)}
-            </ChangeText>
-          </Pressable>
+          />
         ))}
       </View>
     </Section>
+  );
+}
+
+/** One recently viewed stock: logo, symbol and today's move — live. */
+function RecentChip({ item, onPress }: { item: RecentlyViewedItem; onPress: () => void }) {
+  const quote = useLiveQuote(item.exchange, item.symbol);
+  const view = overlayQuote({ price: item.ltp, changePct: item.changePct }, quote);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${item.companyName ?? item.symbol}, ${formatSignedPercent(view.changePct)}`}
+      onPress={onPress}
+      className="flex-1 items-center rounded-card bg-surface px-1 py-2.5 active:bg-surface-sunk dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
+    >
+      <StockLogo symbol={item.symbol} uri={stockLogoUrl(item.symbol)} />
+      <Text
+        className="mt-1.5 text-[11px] font-semibold text-ink dark:text-ink-dark"
+        numberOfLines={1}
+      >
+        {item.symbol}
+      </Text>
+      <ChangeText value={view.changePct} className="mt-0.5 text-[10px]" style={numbers}>
+        {formatSignedPercent(view.changePct)}
+      </ChangeText>
+    </Pressable>
   );
 }
 
@@ -165,11 +180,16 @@ export function MoversPreview() {
 
 function TradedCard({ mover, onPress }: { mover: Mover; onPress: () => void }) {
   const title = mover.companyName || mover.symbol;
+  const quote = useLiveQuote(mover.exchange, mover.symbol);
+  const view = overlayQuote(
+    { price: mover.ltp, changeAbs: mover.changeAbs, changePct: mover.changePct },
+    quote,
+  );
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${title}, ${formatINR(mover.ltp)}, ${formatSignedPercent(mover.changePct)}${
+      accessibilityLabel={`${title}, ${formatINR(view.price)}, ${formatSignedPercent(view.changePct)}${
         mover.volume != null ? `, ${formatCompactNumber(mover.volume)} shares traded` : ''
       }`}
       onPress={onPress}
@@ -182,11 +202,17 @@ function TradedCard({ mover, onPress }: { mover: Mover; onPress: () => void }) {
       >
         {title}
       </Text>
-      <Text className="mt-2 text-sm font-semibold text-ink dark:text-ink-dark" style={numbers}>
-        {formatINR(mover.ltp)}
-      </Text>
-      <ChangeText value={mover.changePct} className="mt-0.5 text-xs" style={numbers}>
-        {formatSignedPercent(mover.changePct)}
+      <LiveFlash
+        seq={quote?.seq}
+        dir={quote?.dir}
+        style={{ alignSelf: 'flex-start', marginTop: 8 }}
+      >
+        <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={numbers}>
+          {formatINR(view.price)}
+        </Text>
+      </LiveFlash>
+      <ChangeText value={view.changePct} className="mt-0.5 text-xs" style={numbers}>
+        {formatSignedPercent(view.changePct)}
       </ChangeText>
       {mover.volume != null ? (
         <Text

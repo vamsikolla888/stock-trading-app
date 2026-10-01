@@ -13,7 +13,8 @@ import { Chips } from '@/components/ui/Tabs';
 import { useAutoTradeConfig } from '@/features/live/api';
 import { GenerateSheet } from '@/features/strategies/components/GenerateSheet';
 import { StrategyCard } from '@/features/strategies/components/StrategyCard';
-import { useStrategiesList } from '@/features/strategies/hooks';
+import { useRunStaleBacktests, useStrategiesList } from '@/features/strategies/hooks';
+import { isRunActive } from '@/features/strategies/lib/backtest';
 import {
   duplicateNames,
   SORTS,
@@ -21,7 +22,9 @@ import {
   type SortKey,
 } from '@/features/strategies/lib/ranking';
 import type { StrategySummary } from '@/features/strategies/types';
+import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
+import { getErrorMessage } from '@/types/api';
 
 const EMPTY: StrategySummary[] = [];
 
@@ -33,6 +36,7 @@ export default function StrategiesScreen() {
   const autoTrade = useAutoTradeConfig();
   const [sort, setSort] = useState<SortKey>('expectancy');
   const [generating, setGenerating] = useState(false);
+  const runStale = useRunStaleBacktests();
 
   const strategies = list.data ?? EMPTY;
   const duplicates = useMemo(() => duplicateNames(strategies), [strategies]);
@@ -41,6 +45,25 @@ export default function StrategiesScreen() {
   const config = autoTrade.data?.configured ? autoTrade.data.config : null;
   const deployedId = config?.candidateSource === 'strategy' ? (config.strategyId ?? null) : null;
   const engineOn = config?.enabled === true;
+  // Never run, failed or out of date — and not already running.
+  const needsRun = strategies.filter(
+    (s) => !isRunActive(s) && (s.status !== 'complete' || s.resultsStale),
+  ).length;
+  const runningNow = strategies.filter((s) => isRunActive(s)).length;
+
+  const rerunStale = () =>
+    runStale.mutate(undefined, {
+      onSuccess: (result) =>
+        toast.info(
+          result.queued > 0
+            ? `${result.queued} backtest${result.queued === 1 ? '' : 's'} queued`
+            : 'Nothing new to run',
+          result.deferred > 0
+            ? `${result.deferred} more wait — press again once these finish.`
+            : 'Results appear on each card as they finish.',
+        ),
+      onError: (error) => toast.error("Couldn't queue the backtests", getErrorMessage(error)),
+    });
 
   const refresh = useCallback(
     () => Promise.all([list.refetch(), autoTrade.refetch()]),
@@ -104,6 +127,24 @@ export default function StrategiesScreen() {
           }
           className="mt-6"
         >
+          {needsRun > 0 || runningNow > 0 ? (
+            <View className="mb-3 flex-row items-center gap-3 rounded-field bg-surface-sunk px-3.5 py-2.5 dark:bg-surface-sunk-dark">
+              <Text className="flex-1 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
+                {runningNow > 0
+                  ? `${runningNow} backtest${runningNow === 1 ? '' : 's'} running`
+                  : `${needsRun} strateg${needsRun === 1 ? 'y needs' : 'ies need'} a fresh backtest`}
+              </Text>
+              {needsRun > 0 ? (
+                <Button
+                  label="Run all"
+                  size="sm"
+                  variant="secondary"
+                  loading={runStale.isPending}
+                  onPress={rerunStale}
+                />
+              ) : null}
+            </View>
+          ) : null}
           {strategies.length > 1 ? (
             <Chips items={SORTS} value={sort} onChange={setSort} className="mb-3" />
           ) : null}

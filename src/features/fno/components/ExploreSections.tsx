@@ -20,7 +20,14 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import { useFnoPositions, useFnoStatus } from '../hooks';
 import { summarisePositions } from '../lib/chain';
-import { chainHref, isChainExchange, liveMove, periodBase, PERIODS } from '../lib/explore';
+import {
+  chainHref,
+  isChainExchange,
+  liveMove,
+  periodBase,
+  PERIODS,
+  underlyingHref,
+} from '../lib/explore';
 import { daysUntil, dteLabel, expiryLabel, futureTitle } from '../lib/format';
 import type { CommodityReturns, ExploreFuture, ExplorePeriod, FnoExploreSummary } from '../types';
 
@@ -238,7 +245,7 @@ export function FnoStocksShelf({
                   change={m.change}
                   changePct={m.changePct}
                   trailing={r.volume != null ? `Vol ${formatCompactNumber(r.volume)}` : null}
-                  onPress={() => router.push(chainHref(r.exchange, r.underlying))}
+                  onPress={() => router.push(underlyingHref(r.exchange, r.underlying))}
                 />
               </React.Fragment>
             );

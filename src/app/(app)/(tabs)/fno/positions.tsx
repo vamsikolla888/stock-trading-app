@@ -15,10 +15,12 @@ import { ConnectGroww, Freshness, GrowwAccessBanner } from '@/features/fno/compo
 import { PositionCard } from '@/features/fno/components/PositionCard';
 import { useFnoFunds, useFnoPositions, useFnoStatus } from '@/features/fno/hooks';
 import { accessProblemFromError } from '@/features/fno/lib/access';
-import { summarisePositions } from '@/features/fno/lib/chain';
+import { livePnl, summarisePositions } from '@/features/fno/lib/chain';
 import { chainHref } from '@/features/fno/lib/explore';
 import { timeIst } from '@/features/fno/lib/format';
 import type { FnoPositionRow } from '@/features/fno/types';
+import { liveKey } from '@/features/market/lib/liveQuote';
+import { useLiveQuotes } from '@/features/market/live';
 import { cn } from '@/lib/utils/cn';
 import { formatINR, formatSignedINR } from '@/lib/utils/formatters';
 
@@ -45,7 +47,24 @@ export default function FnoPositionsScreen() {
   const [exiting, setExiting] = useState<FnoPositionRow | null>(null);
 
   const problem = accessProblemFromError(positions.error);
-  const data = positions.data;
+  const restData = positions.data;
+  // Open lines re-priced at the F&O feed's ticks: each card's LTP and P&L, and the totals.
+  const quotes = useLiveQuotes(
+    (restData?.positions ?? [])
+      .filter((p) => p.netQuantity !== 0)
+      .map((p) => ({ exchange: p.exchange, symbol: p.tradingSymbol })),
+    { mode: 'fno' },
+  );
+  const data = useMemo(() => {
+    if (!restData || quotes.size === 0) return restData;
+    return {
+      ...restData,
+      positions: restData.positions.map((p) => {
+        const quote = p.netQuantity !== 0 ? quotes.get(liveKey(p.exchange, p.tradingSymbol)) : null;
+        return quote ? { ...p, ltp: quote.ltp, unrealisedPnl: livePnl(p, quote.ltp) } : p;
+      }),
+    };
+  }, [restData, quotes]);
   const summary = useMemo(
     () => (data ? summarisePositions(data.positions, data.totals.realisedPnl) : null),
     [data],

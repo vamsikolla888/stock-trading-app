@@ -1,28 +1,48 @@
 import { useMutation } from '@tanstack/react-query';
 
-import { endSession } from '@/features/auth/bootstrapAuth';
-import { secureTokens } from '@/lib/storage/secureTokens';
+import { useAuthFlowStore } from '@/features/auth/authFlowStore';
+import { signOut, startSession } from '@/features/auth/bootstrapAuth';
 import { authApi } from '@/services/api/authApi';
 import { useAuthStore } from '@/store/authStore';
-import { usePreferencesStore } from '@/store/preferencesStore';
-import type { LoginRequest, RegisterRequest, ResetPasswordRequest } from '@/types/auth';
+import {
+  isMfaChallenge,
+  type LoginRequest,
+  type LoginResult,
+  type RegisterRequest,
+  type ResetPasswordRequest,
+} from '@/types/auth';
 
 /**
- * Signs in and persists the session. No manual navigation: flipping `isAuthenticated`
- * is what moves the user into the app (the root layout's Stack.Protected guards), so
- * there is exactly one place that decides where a signed-in user belongs.
+ * Signs in. No manual navigation for a finished sign-in: flipping `isAuthenticated` is what
+ * moves the user into the app (the root layout's Stack.Protected guards), so there is exactly
+ * one place that decides where a signed-in user belongs. With two-factor on, the password step
+ * only yields a challenge — it is parked in memory and the caller opens the code screen.
  */
 export function useLogin() {
-  const setUser = useAuthStore((state) => state.setUser);
-  const setLastSignedInEmail = usePreferencesStore((state) => state.setLastSignedInEmail);
+  const setChallenge = useAuthFlowStore((state) => state.setChallenge);
 
   return useMutation({
     mutationFn: (payload: LoginRequest) => authApi.login(payload),
-    onSuccess: async ({ user, accessToken, refreshToken }) => {
-      await secureTokens.setTokens(accessToken, refreshToken);
-      setLastSignedInEmail(user.email);
-      setUser(user);
+    onSuccess: async (result: LoginResult, payload) => {
+      if (isMfaChallenge(result)) {
+        setChallenge({
+          challengeToken: result.challengeToken,
+          expiresAt: result.expiresAt,
+          email: payload.email.trim(),
+        });
+        return;
+      }
+      await startSession(result);
     },
+  });
+}
+
+/** Completes a two-factor sign-in with an authenticator or recovery code. */
+export function useVerifyMfa() {
+  return useMutation({
+    mutationFn: ({ challengeToken, code }: { challengeToken: string; code: string }) =>
+      authApi.verifyMfa(challengeToken, code),
+    onSuccess: startSession,
   });
 }
 
@@ -44,9 +64,9 @@ export function useResetPassword() {
   });
 }
 
-/** Local sign-out — the server has no logout endpoint; refresh tokens simply expire unused. */
+/** Revokes this device's session on the server (best-effort), then signs out locally. */
 export function useLogout() {
-  return useMutation({ mutationFn: endSession });
+  return useMutation({ mutationFn: signOut });
 }
 
 export function useAuth() {

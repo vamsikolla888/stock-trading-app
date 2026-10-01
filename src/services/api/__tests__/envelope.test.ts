@@ -112,4 +112,30 @@ describe('toApiError', () => {
     expect(error.message).not.toContain('Mongo');
     expect(error.isServerError).toBe(true);
   });
+
+  it('reads a path the server has no route for as an outdated server, not a missing record', () => {
+    const error = toApiError(
+      404,
+      envelope({
+        success: false,
+        message: 'No route matches GET /api/v1/account/profile',
+        errors: [{ code: 'NOT_FOUND', message: 'No route matches GET /api/v1/account/profile' }],
+      }),
+    );
+    expect(error).toMatchObject({ status: 426, code: 'SERVER_OUTDATED', requestId: 'req-123' });
+    expect(error.message).toMatch(/needs a newer server version/);
+    expect(error.message).not.toContain('/api/v1');
+  });
+
+  it('keeps an ordinary 404 as the server worded it', () => {
+    const error = toApiError(
+      404,
+      envelope({
+        success: false,
+        errors: [{ code: 'NOT_FOUND', message: 'NIFTYX is not a listed NFO contract' }],
+      }),
+    );
+    expect(error).toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    expect(error.message).toBe('NIFTYX is not a listed NFO contract');
+  });
 });

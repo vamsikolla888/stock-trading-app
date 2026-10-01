@@ -1,11 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { ConditionListEditor } from '@/features/strategies/components/ConditionListEditor';
 import { IndexPickerField } from '@/features/strategies/components/IndexPickerField';
 import { NumberField } from '@/features/strategies/components/NumberField';
+import { ToggleRow } from '@/features/strategies/components/StrategyForm';
 import { startingScreenerCondition, validateScreenerForm } from '@/features/strategies/lib/rules';
 import type { Condition, UniverseExchange } from '@/features/strategies/types';
 
@@ -26,6 +28,8 @@ export interface CustomScreenerValues {
   minPrice: number | null;
   /** null = the whole exchange. */
   indexKey: string | null;
+  fnoOnly: boolean;
+  tradeableOnly: boolean;
 }
 
 /** What a new screener opens on — a real, valid condition, so the first save always works. */
@@ -37,6 +41,8 @@ function blankValues(): CustomScreenerValues {
     exchange: 'NSE',
     minPrice: 20,
     indexKey: null,
+    fnoOnly: false,
+    tradeableOnly: false,
   };
 }
 
@@ -48,6 +54,8 @@ export function valuesFromScreener(screener: CustomScreener): CustomScreenerValu
     exchange: screener.exchange,
     minPrice: screener.minPrice,
     indexKey: screener.indexKey,
+    fnoOnly: Boolean(screener.fnoOnly),
+    tradeableOnly: Boolean(screener.tradeableOnly),
   };
 }
 
@@ -97,6 +105,9 @@ export function useCustomScreenerForm() {
       exchange: values.exchange,
       minPrice: values.minPrice,
       indexKey: values.indexKey,
+      // Real booleans — the server refuses a string where a boolean belongs.
+      fnoOnly: values.fnoOnly,
+      tradeableOnly: values.tradeableOnly,
     }),
     [values],
   );
@@ -191,10 +202,25 @@ export function CustomScreenerFormFields({
         error={issues.minPrice}
         containerClassName="mt-4"
       />
+      <Card className="mt-4 py-1">
+        <ToggleRow
+          title="F&O names only"
+          hint="NSE stocks with listed futures and options"
+          value={values.fnoOnly}
+          onChange={(on) => set('fnoOnly', on)}
+        />
+        <View className="h-px bg-line dark:bg-line-dark" />
+        <ToggleRow
+          title="Tradeable names only"
+          hint="Liquid enough to act on"
+          value={values.tradeableOnly}
+          onChange={(on) => set('tradeableOnly', on)}
+        />
+      </Card>
 
       <Text className="mt-4 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
         {editing
-          ? 'Changing the conditions clears the current matches — they described the old rule.'
+          ? 'Changing the conditions or the universe clears the current matches — they described the old rule.'
           : 'Saving does not scan. Run a scan once it exists.'}
       </Text>
     </View>

@@ -1,6 +1,8 @@
 // Mirrored from the web client: features/strategies/services/strategies.service.ts (and
 // features/indices/services/indices.service.ts for the universe picker). Field names are
-// identical to the server's strategy rule DSL (server/src/modules/strategies/strategy-rules.ts).
+// identical to the server's strategy rule DSL (server/src/modules/strategies/rules/rules.types.ts).
+//
+// UNITS: every number from the API is a whole PERCENT, trade returns included (3.1 = +3.1%).
 
 import type { StockIndexTags } from '@/features/market/types';
 
@@ -86,10 +88,46 @@ export interface StrategyRules {
     indexKey?: string;
     /** Same absence-means-unset rule as `indexKey`. */
     fnoOnly?: boolean;
+    /** Names liquid enough that next-open fills are plausible. */
+    tradeableOnly?: boolean;
   };
 }
 
+/** How a backtest is simulated. Changing it marks results stale, exactly as editing rules does. */
+export interface BacktestSettings {
+  /** Cost per side, basis points (0–100). */
+  costBps: number;
+  /** Equal-weight portfolio slots (1–50); a signal with every slot full is skipped. */
+  maxOpenPositions: number;
+}
+
+export const DEFAULT_BACKTEST_SETTINGS: BacktestSettings = { costBps: 15, maxOpenPositions: 8 };
+
 export type BacktestStatus = 'never-run' | 'queued' | 'running' | 'complete' | 'failed';
+export type RunPhase = BacktestStatus | 'stalled';
+
+/** A run's state, answered with the queue consulted — `stalled` is a job that vanished. */
+export interface RunState {
+  phase: RunPhase;
+  /** Set for failures and for runs that look stuck. */
+  message: string | null;
+  /** Keep polling while true. */
+  active: boolean;
+}
+
+export type VerdictTone = 'good' | 'warn' | 'bad' | 'unknown';
+
+/** The out-of-sample check in one sentence. */
+export interface SplitVerdict {
+  tone: VerdictTone;
+  text: string;
+}
+
+/** A lint finding on a rule ("RSI > 0 is always true"), with its dotted path. */
+export interface RuleWarning {
+  path: string;
+  message: string;
+}
 
 export interface StrategyMetrics {
   totalTrades: number;
@@ -101,6 +139,7 @@ export interface StrategyMetrics {
   cagrPct: number | null;
   totalReturnPct: number;
   expectancyPct: number;
+  symbolsWithTrades?: number;
 }
 
 export interface StrategySummary {
@@ -108,15 +147,23 @@ export interface StrategySummary {
   name: string;
   description: string | null;
   chips: string[];
+  /** The universe as short phrases ("NSE", "Nifty 50 members"). Optional for an older server. */
+  universe?: string[];
   status: BacktestStatus;
+  /** Optional for an older server — fall back to `status`. */
+  runState?: RunState;
   lastError: string | null;
   ranAt: string | null;
-  /** The rules have been edited since these numbers were produced. */
+  /** The rules or the backtest settings changed since these numbers were produced. */
   resultsStale: boolean;
+  staleReason?: 'rules' | 'settings' | null;
   templateId: string | null;
   /** null until a backtest has produced numbers. */
   metrics: StrategyMetrics | null;
+  verdict?: SplitVerdict | null;
   equitySpark: number[];
+  settings?: BacktestSettings;
+  createdAt?: string;
   updatedAt: string;
 }
 
@@ -131,6 +178,7 @@ export interface BacktestTrade {
   entryPrice: number;
   exitPrice: number;
   barsHeld: number;
+  /** PERCENT (3.1 = +3.1%) — the response converts the stored fraction. */
   returnPct: number;
   exitReason: ExitReason;
 }
@@ -179,6 +227,8 @@ export interface BacktestAnalysis {
   } | null;
   monthly: { period: string; trades: number; returnPct: number }[];
   splits: SplitStat[];
+  /** Optional for an older run. */
+  verdict?: SplitVerdict;
   bestTrades: BacktestTrade[];
   worstTrades: BacktestTrade[];
   topSymbolProfitSharePct: number | null;
@@ -213,12 +263,19 @@ export interface StrategyRun {
   durationMs: number;
   costBps: number;
   maxOpenPositions: number;
+  /** Narrowings that were unavailable, so a wider universe was scanned. */
+  fellBack?: string[];
 }
 
 export interface StrategyDetail extends StrategySummary {
   rules: StrategyRules;
   /** The stored rules in English, rendered server-side. */
   readback: string;
+  /** Each entry condition in words. Optional for an older server. */
+  entry?: string[];
+  exits?: string[];
+  /** Lint on the stored rules. */
+  warnings?: RuleWarning[];
   run: StrategyRun | null;
   /** Engine-level caveats, rendered verbatim. */
   caveats: string[];
@@ -271,12 +328,29 @@ export interface EnqueueBacktestResult {
   enqueued: boolean;
   alreadyRunning: boolean;
   jobId: string;
+  /** The strategy's new state (queued) — optional for an older server. */
+  strategy?: StrategySummary;
 }
 
-export interface BacktestJobStatus {
-  running: boolean;
-  state: string | null;
-  lastError: string | null;
+export interface RunStaleResult {
+  queued: number;
+  alreadyRunning: number;
+  /** Beyond the 30-per-call cap — press again. */
+  deferred: number;
+}
+
+/** POST /strategies/preview — never a 422: an invalid draft is the normal state of a form. */
+export interface RulesPreview {
+  valid: boolean;
+  issues: { path: string; message: string }[];
+  warnings: RuleWarning[];
+  readback: string | null;
+  chips: string[];
+  entry: string[];
+  exits: string[];
+  universe: string[];
+  warmupBars: number | null;
+  rules: StrategyRules | null;
 }
 
 export interface CreateStrategyBody {
@@ -284,12 +358,14 @@ export interface CreateStrategyBody {
   description?: string | null;
   rules?: StrategyRules;
   templateId?: string;
+  settings?: Partial<BacktestSettings>;
 }
 
 export interface UpdateStrategyBody {
   name?: string;
   description?: string | null;
   rules?: StrategyRules;
+  settings?: Partial<BacktestSettings>;
 }
 
 // ── AI generation ──────────────────────────────────────────────────────────────────────
@@ -311,9 +387,24 @@ export interface GeneratedCandidate {
   reason: string | null;
   conditionText: string[];
   sample: CandidateSample | null;
+  /** Lint on a kept rule. */
+  warnings?: string[];
+  /** Saved as this strategy / screener; null = not saved (a kept candidate can still be). */
+  savedId?: string | null;
 }
 
-export type GenerationStatus = 'queued' | 'generating' | 'validating' | 'complete' | 'failed';
+/** `waiting` = parked behind an open AI breaker; `error` says why. */
+export type GenerationStatus =
+  'queued' | 'waiting' | 'generating' | 'validating' | 'complete' | 'failed';
+
+export function isGenerationActive(status: GenerationStatus | undefined): boolean {
+  return (
+    status === 'queued' ||
+    status === 'waiting' ||
+    status === 'generating' ||
+    status === 'validating'
+  );
+}
 
 export interface GenerationView {
   id: string;
@@ -321,12 +412,18 @@ export interface GenerationView {
   error: string | null;
   input: {
     kind: 'strategy' | 'screener';
+    packId?: string | null;
     count: number;
     theme: string | null;
     exchange: string;
     minPrice: number | null;
+    fnoOnly?: boolean;
+    indexKey?: string | null;
+    tradeableOnly?: boolean;
   };
   proposed: number;
+  /** How many passed every gate. Optional for an older server. */
+  kept?: number;
   candidates: GeneratedCandidate[];
   savedCount: number;
   savedIds: string[];
@@ -343,6 +440,8 @@ export interface StartGenerationInput {
   exchange: UniverseExchange;
   minPrice?: number | null;
   fnoOnly?: boolean;
+  indexKey?: string | null;
+  tradeableOnly?: boolean;
 }
 
 export interface StrategyPack {
@@ -375,9 +474,13 @@ export interface StrategyMatch {
 
 export interface StrategyMatchesResult {
   matches: StrategyMatch[];
+  /** Every match, before `limit`. */
+  total?: number;
   universeSize: number;
   skippedForInsufficientBars: number;
   asOfBarTime: number | null;
+  /** Narrowings that were unavailable, so a wider universe was scanned. */
+  fellBack?: string[];
 }
 
 export interface ScreenerCandidate {
@@ -405,6 +508,7 @@ export interface PairedStock {
   metrics: Record<string, number>;
   recentCloses: number[];
   alsoFlaggedBy: string[];
+  indices?: StockIndexTags;
 }
 
 export interface PairingResult {
@@ -415,6 +519,8 @@ export interface PairingResult {
   bestStocks: PairedStock[];
   universeSize: number;
   asOfBarTime: number | null;
+  /** Whether the AI sentences were asked for and delivered. */
+  explained?: boolean;
 }
 
 // ── Index catalogue (universe narrowing) ───────────────────────────────────────────────

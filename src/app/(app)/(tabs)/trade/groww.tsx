@@ -28,7 +28,12 @@ import {
 } from '@/features/portfolio/components/TradesFundsSections';
 import { portfolioKeys, useLinkedPortfolio } from '@/features/portfolio/hooks';
 import { formatAsOf } from '@/features/portfolio/lib/dates';
-import { fromLinkedHolding, fromLinkedPosition } from '@/features/portfolio/lib/portfolio';
+import {
+  fromLinkedHolding,
+  fromLinkedPosition,
+  liveTotals,
+} from '@/features/portfolio/lib/portfolio';
+import { useLiveHoldings } from '@/features/portfolio/useLiveHoldings';
 import { Caveats } from '@/features/trading/components/Sheet';
 import { useBrokerCatalog } from '@/features/trading/hooks';
 import { formatINR } from '@/lib/utils/formatters';
@@ -54,7 +59,9 @@ export default function GrowwPortfolioScreen() {
   const [section, setSection] = useState<SectionKey>('holdings');
 
   // Linked holdings report `dayChange` as the ROW's rupee move (see fromLinkedHolding).
-  const holdings = useMemo(() => snapshot?.holdings.map(fromLinkedHolding) ?? [], [snapshot]);
+  const restHoldings = useMemo(() => snapshot?.holdings.map(fromLinkedHolding) ?? [], [snapshot]);
+  // Re-priced at the live feed's ticks; the totals move by exactly that delta.
+  const holdings = useLiveHoldings(restHoldings);
   const positions = useMemo(() => snapshot?.positions.map(fromLinkedPosition) ?? [], [snapshot]);
   const extras = useMemo(
     () =>
@@ -89,7 +96,37 @@ export default function GrowwPortfolioScreen() {
     { key: 'statement', label: 'Statement' },
   ];
 
-  const totals = snapshot?.totals;
+  const restTotals = snapshot?.totals;
+  const totals = useMemo(() => {
+    // Nothing to move from when the snapshot itself has no value yet.
+    if (
+      !restTotals ||
+      restTotals.value === null ||
+      restTotals.invested === null ||
+      restTotals.unrealised === null
+    ) {
+      return restTotals;
+    }
+    const moved = liveTotals(
+      {
+        value: restTotals.value,
+        invested: restTotals.invested,
+        pnl: restTotals.unrealised,
+        pnlPct: restTotals.unrealisedPct,
+      },
+      restHoldings,
+      holdings,
+    );
+    const delta = moved.value - restTotals.value;
+    if (delta === 0) return restTotals;
+    return {
+      ...restTotals,
+      value: moved.value,
+      unrealised: moved.pnl,
+      unrealisedPct: moved.pnlPct,
+      dayChange: restTotals.dayChange === null ? null : restTotals.dayChange + delta,
+    };
+  }, [restTotals, restHoldings, holdings]);
   const chargesSource = totals?.chargesTodaySource;
 
   return (
@@ -186,7 +223,7 @@ export default function GrowwPortfolioScreen() {
             <PnlStatementSection broker={BROKER} label={label} />
           ) : section === 'analytics' ? (
             <View>
-              <PerformanceSection holdings={holdings} scope="groww" />
+              <PerformanceSection holdings={restHoldings} scope="groww" />
               <LinkedOverviewSection snapshot={snapshot} holdings={holdings} />
               <View className="mt-7">
                 <LinkedAnalyticsSection broker={BROKER} label={label} />

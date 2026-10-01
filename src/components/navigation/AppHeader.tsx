@@ -5,9 +5,11 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Logo } from '@/components/brand/Logo';
+import { ProfileAvatar } from '@/features/account/components/ProfileAvatar';
+import { useAccountProfile } from '@/features/account/hooks';
+import { profileName } from '@/features/account/lib/account';
 import { useNotifications } from '@/features/alerts/hooks';
 import { getHeaderTitle } from '@/lib/navigation/headerTitle';
-import { initialsFromEmail } from '@/lib/utils/user';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -17,6 +19,7 @@ export function AppHeader({ group }: { group?: string }) {
   const segments = useSegments();
   const { colors } = useTheme();
   const email = useAuthStore((state) => state.user?.email);
+  const profile = useAccountProfile();
   const { unreadCount } = useNotifications();
   const hasUnread = unreadCount > 0;
   const title = getHeaderTitle(group, segments);
@@ -66,13 +69,16 @@ export function AppHeader({ group }: { group?: string }) {
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Account"
-        onPress={() => router.navigate('/settings')}
-        className="ml-1 h-9 w-9 items-center justify-center rounded-full bg-brand-wash active:opacity-80 dark:bg-brand-wash-dark"
+        accessibilityLabel="Profile and security"
+        hitSlop={4}
+        onPress={() => router.push('/profile')}
+        className="ml-1 rounded-full active:opacity-80"
       >
-        <Text className="text-xs font-bold text-brand-text dark:text-brand-text-dark">
-          {initialsFromEmail(email)}
-        </Text>
+        <ProfileAvatar
+          name={profileName(profile.data, email)}
+          avatarUrl={profile.data?.avatarUrl}
+          size="sm"
+        />
       </Pressable>
     </View>
   );

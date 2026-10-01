@@ -428,28 +428,64 @@ export function basketOutcome(orders: readonly Pick<FnoOrderView, 'status'>[]): 
 /** The order log's page size — the web's, and well inside the server's cap of 200. */
 export const PAPER_ORDERS_LIMIT = 100;
 
-export type PaperOrderFilter = 'all' | 'filled' | 'rejected';
+export type PaperOrderFilter = 'all' | 'open' | 'filled' | 'closed';
 
 export const PAPER_ORDER_FILTERS: readonly { key: PaperOrderFilter; label: string }[] = [
   { key: 'all', label: 'All' },
+  { key: 'open', label: 'Open' },
   { key: 'filled', label: 'Filled' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'closed', label: 'Rejected / cancelled' },
 ];
+
+function matchesFilter(status: FnoOrderView['status'], filter: PaperOrderFilter): boolean {
+  if (filter === 'open') return status === 'PENDING';
+  if (filter === 'filled') return status === 'FILLED';
+  if (filter === 'closed') return status === 'REJECTED' || status === 'CANCELLED';
+  return true;
+}
 
 export function filterPaperOrders<T extends Pick<FnoOrderView, 'status'>>(
   orders: readonly T[],
   filter: PaperOrderFilter,
 ): T[] {
-  if (filter === 'filled') return orders.filter((o) => o.status === 'FILLED');
-  if (filter === 'rejected') return orders.filter((o) => o.status === 'REJECTED');
-  return [...orders];
+  return orders.filter((o) => matchesFilter(o.status, filter));
 }
 
 export function countPaperOrders(
   orders: readonly Pick<FnoOrderView, 'status'>[],
 ): Record<PaperOrderFilter, number> {
-  const filled = orders.filter((o) => o.status === 'FILLED').length;
-  return { all: orders.length, filled, rejected: orders.length - filled };
+  const count = (filter: PaperOrderFilter) =>
+    orders.filter((o) => matchesFilter(o.status, filter)).length;
+  return {
+    all: orders.length,
+    open: count('open'),
+    filled: count('filled'),
+    closed: count('closed'),
+  };
+}
+
+export const ORDER_STATUS_LABEL: Record<FnoOrderView['status'], string> = {
+  PENDING: 'Open',
+  FILLED: 'Filled',
+  REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
+};
+
+export const ORDER_STATUS_TONE: Record<
+  FnoOrderView['status'],
+  'success' | 'warning' | 'danger' | 'neutral'
+> = { PENDING: 'warning', FILLED: 'success', REJECTED: 'danger', CANCELLED: 'neutral' };
+
+/**
+ * A LIMIT price as the ticket parses it: positive, finite, and on the exchange's 5-paisa tick
+ * is NOT enforced here (the server fills at the market price that reaches it, never at the
+ * limit itself). Null when empty or not a price.
+ */
+export function parseLimitPrice(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value > 0 && value <= 1_000_000 ? value : null;
 }
 
 /** A contract note's lines, in the order a broker prints them. */

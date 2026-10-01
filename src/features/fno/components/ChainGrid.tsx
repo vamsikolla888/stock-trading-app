@@ -46,6 +46,8 @@ interface ChainGridProps<L> {
   atmStrike: number | null;
   spot: number | null;
   ltp: (leg: L) => number | null;
+  /** The leg's day change in percent, when the feed carries one (live chain only). */
+  change?: (leg: L) => number | null;
   outer: ChainOuterColumn<L>;
   itm: (leg: L) => boolean;
   /** False for a leg with no tradable contract (rendered, not pressable). */
@@ -55,6 +57,9 @@ interface ChainGridProps<L> {
 
 interface HalfProps {
   ltp: string;
+  /** Formatted day change ("+4.2%"), or null. */
+  change: string | null;
+  up: boolean;
   outer: string;
   sub: string | null;
   bar: number;
@@ -72,6 +77,11 @@ interface RowProps {
 }
 
 const priceCell = (value: number | null) => (value == null ? DASH : formatNumber(value));
+
+function changeCell(pct: number | null): { change: string | null; up: boolean } {
+  if (pct == null || !Number.isFinite(pct)) return { change: null, up: false };
+  return { change: `${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`, up: pct >= 0 };
+}
 
 function Half({
   half,
@@ -127,6 +137,20 @@ function Half({
       >
         {half.present ? half.ltp : DASH}
       </Text>
+      {half.present && half.change ? (
+        <Text
+          className={cn(
+            'text-[10px] font-semibold',
+            half.up
+              ? 'text-brand-text dark:text-brand-text-dark'
+              : 'text-danger-600 dark:text-danger-dark',
+          )}
+          style={NUM}
+          numberOfLines={1}
+        >
+          {half.change}
+        </Text>
+      ) : null}
     </View>
   );
   const label = `${formatStrike(strike)} ${isCall ? 'call' : 'put'}, last ${
@@ -207,6 +231,7 @@ const ChainRow = memo(
 function sameHalf(a: HalfProps, b: HalfProps): boolean {
   return (
     a.ltp === b.ltp &&
+    a.change === b.change &&
     a.outer === b.outer &&
     a.sub === b.sub &&
     a.bar === b.bar &&
@@ -240,6 +265,7 @@ export function ChainGrid<L>({
   atmStrike,
   spot,
   ltp,
+  change,
   outer,
   itm,
   canPick,
@@ -259,9 +285,20 @@ export function ChainGrid<L>({
 
   const half = (leg: L | null): HalfProps =>
     leg == null
-      ? { ltp: DASH, outer: DASH, sub: null, bar: 0, itm: false, pickable: false, present: false }
+      ? {
+          ltp: DASH,
+          change: null,
+          up: false,
+          outer: DASH,
+          sub: null,
+          bar: 0,
+          itm: false,
+          pickable: false,
+          present: false,
+        }
       : {
           ltp: priceCell(ltp(leg)),
+          ...changeCell(change?.(leg) ?? null),
           outer: outer.main(leg),
           sub: outer.sub?.(leg) ?? null,
           bar: outer.bar ? Math.round(outer.bar(leg) * 100) / 100 : 0,

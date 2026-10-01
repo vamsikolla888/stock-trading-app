@@ -16,13 +16,14 @@ import {
 import { MatchList } from '@/features/screeners/components/MatchList';
 import {
   useBuiltInScreener,
-  useCustomScanStatus,
   useCustomScreener,
   useDeleteCustomScreener,
   useRunCustomScan,
+  useDuplicateCustomScreener,
   useUpdateCustomScreener,
 } from '@/features/screeners/hooks';
 import { lastRunLabel, pluralize } from '@/features/screeners/lib/metrics';
+import { isScanActive } from '@/features/screeners/lib/scans';
 import type { CustomScreener, ScreenerDetail } from '@/features/screeners/types';
 import { useIndexCatalog } from '@/features/strategies/hooks';
 import { formatNumber } from '@/lib/utils/formatters';
@@ -150,18 +151,25 @@ function CustomScreenerScreen({ id }: { id: string }) {
   const screener = query.data;
   const notFound = isNotFound(id, query.error);
   const remove = useDeleteCustomScreener();
+  const duplicate = useDuplicateCustomScreener();
 
-  // Status polling starts once the server has accepted a scan (or the screener says one is in
-  // flight), and stops by itself when the job settles.
-  const [queuedHere, setQueuedHere] = useState(false);
-  const run = useRunCustomScan(id, { onQueued: () => setQueuedHere(true) });
-  const inFlight = screener?.status === 'queued' || screener?.status === 'running';
-  const status = useCustomScanStatus(id, queuedHere || inFlight);
-  // The queue decides once it has answered, so a scan the worker lost (screener left
-  // "queued") never locks the button; until then the screener's status and the click stand in.
-  const queueAnswered = status.data !== undefined && !status.isFetching;
-  const running =
-    run.isPending || (queueAnswered ? status.data?.running === true : inFlight || queuedHere);
+  // The screener's own `runState` is the authority (read with the queue consulted, so a scan
+  // the worker lost is `stalled`, never locking the button); while it is active the detail
+  // query polls itself.
+  const run = useRunCustomScan(id);
+  const running = run.isPending || isScanActive(screener);
+  const stalled = !running && screener?.runState?.phase === 'stalled';
+
+  const makeCopy = () => {
+    if (!screener) return;
+    duplicate.mutate(screener.id, {
+      onSuccess: (copy) => {
+        toast.success('Copy created', copy.name);
+        router.replace({ pathname: '/screeners/[id]', params: { id: copy.id, kind: 'custom' } });
+      },
+      onError: (error) => toast.error("Couldn't copy the screener", getErrorMessage(error)),
+    });
+  };
 
   const startScan = () =>
     run.mutate(undefined, {
@@ -346,10 +354,20 @@ function CustomScreenerScreen({ id }: { id: string }) {
           runError={
             run.error
               ? getErrorMessage(run.error)
-              : (status.data?.lastError ?? screener.lastError ?? null)
+              : screener.status === 'failed'
+                ? (screener.runState?.message ?? screener.lastError ?? null)
+                : null
+          }
+          stalledMessage={
+            stalled
+              ? (screener.runState?.message ??
+                'This scan is marked as queued, but its job is gone — the worker may have restarted. Run it again.')
+              : null
           }
           onDelete={confirmDelete}
           deleting={remove.isPending}
+          onDuplicate={makeCopy}
+          duplicating={duplicate.isPending}
         />
       ) : null}
     </StackScreen>
@@ -360,14 +378,20 @@ function CustomBody({
   screener,
   running,
   runError,
+  stalledMessage,
   onDelete,
   deleting,
+  onDuplicate,
+  duplicating,
 }: {
   screener: CustomScreener;
   running: boolean;
   runError: string | null;
+  stalledMessage: string | null;
   onDelete: () => void;
   deleting: boolean;
+  onDuplicate: () => void;
+  duplicating: boolean;
 }) {
   // A stored indexKey is a slug ("niftymidcap150"); the label reads better, with the key as
   // the fallback so the narrowing is never invisible.
@@ -393,15 +417,27 @@ function CustomBody({
         {screener.minPrice != null ? (
           <Badge label={`Min ₹${formatNumber(screener.minPrice, 0)}`} />
         ) : null}
+        {screener.fnoOnly ? <Badge label="F&O names" /> : null}
+        {screener.tradeableOnly ? <Badge label="Tradeable only" /> : null}
         <Badge label={lastRunLabel(screener.runAt)} />
         {screener.status === 'failed' ? <Badge label="Last scan failed" variant="danger" /> : null}
       </View>
 
       {running ? (
         <Banner
-          tone="info"
+          tone={screener.runState?.message ? 'warning' : 'info'}
           className="mb-4"
-          message="Checking these conditions against every stock with enough history — this takes a little while. You can leave this screen."
+          message={
+            screener.runState?.message ??
+            'Checking these conditions against every stock with enough history — this takes a little while. You can leave this screen.'
+          }
+        />
+      ) : stalledMessage ? (
+        <Banner
+          tone="warning"
+          className="mb-4"
+          title="The last scan didn't finish"
+          message={stalledMessage}
         />
       ) : runError ? (
         <Banner tone="error" className="mb-4" title="Scan failed" message={runError} />
@@ -448,18 +484,50 @@ function CustomBody({
         )}
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: deleting }}
-        disabled={deleting}
-        onPress={onDelete}
-        hitSlop={8}
-        className="mt-8 self-center px-4 py-2 active:opacity-60"
-      >
-        <Text className="text-[13px] font-semibold text-danger-600 dark:text-danger-dark">
-          {deleting ? 'Deleting…' : 'Delete screener'}
+      {screener.warnings && screener.warnings.length > 0 ? (
+        <View className="mt-5 gap-1.5">
+          {screener.warnings.map((warning) => (
+            <Text
+              key={`${warning.path}:${warning.message}`}
+              className="text-xs leading-[17px] text-warning-600 dark:text-warning-dark"
+            >
+              ⚠ {warning.message}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      {screener.fellBack && screener.fellBack.length > 0 ? (
+        <Text className="mt-3 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
+          Scanned wider than asked: {screener.fellBack.join('; ')}.
         </Text>
-      </Pressable>
+      ) : null}
+
+      <View className="mt-8 flex-row justify-center gap-6">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: duplicating }}
+          disabled={duplicating}
+          onPress={onDuplicate}
+          hitSlop={8}
+          className="px-2 py-2 active:opacity-60"
+        >
+          <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">
+            {duplicating ? 'Copying…' : 'Duplicate'}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: deleting }}
+          disabled={deleting}
+          onPress={onDelete}
+          hitSlop={8}
+          className="px-2 py-2 active:opacity-60"
+        >
+          <Text className="text-[13px] font-semibold text-danger-600 dark:text-danger-dark">
+            {deleting ? 'Deleting…' : 'Delete screener'}
+          </Text>
+        </Pressable>
+      </View>
       <Text className="mt-3 text-center text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
         Custom screeners are a shared library — changes here are seen by everyone. {DISCLAIMER}
       </Text>

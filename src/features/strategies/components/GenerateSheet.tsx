@@ -9,12 +9,13 @@ import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { cn } from '@/lib/utils/cn';
 import { formatNumber, formatPercent, formatSignedPercent } from '@/lib/utils/formatters';
+import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
-import { useGeneration, useStartGeneration, useStrategyPacks } from '../hooks';
+import { useGeneration, useSaveCandidate, useStartGeneration, useStrategyPacks } from '../hooks';
 import { formatProfitFactor } from '../lib/ranking';
-import type { GenerationView, UniverseExchange } from '../types';
+import { isGenerationActive, type GenerationView, type UniverseExchange } from '../types';
 
 import { NumberField } from './NumberField';
 import { SheetModal } from './SheetModal';
@@ -28,6 +29,7 @@ const EXCHANGES: readonly { key: UniverseExchange; label: string }[] = [
 /** Each status spelled out — "working…" for 40 seconds with no detail reads as hung. */
 const STATUS_TEXT: Record<string, string> = {
   queued: 'Queued on the worker…',
+  waiting: 'Waiting for the AI provider to come back…',
   generating: 'Asking the AI model for candidates…',
   validating: 'Validating and sample-backtesting each candidate…',
 };
@@ -59,7 +61,7 @@ export function GenerateSheet({ visible, kind, onClose }: GenerateSheetProps) {
   const start = useStartGeneration();
   const run = useGeneration(generationId);
   const generation = run.data ?? null;
-  const settled = generation?.status === 'complete' || generation?.status === 'failed';
+  const settled = generation != null && !isGenerationActive(generation.status);
   const busy = start.isPending || (generationId !== null && !settled);
   const label = kind === 'strategy' ? 'strategies' : 'screeners';
   const minPriceInvalid =
@@ -101,7 +103,7 @@ export function GenerateSheet({ visible, kind, onClose }: GenerateSheetProps) {
         generationId === null
           ? 'Validated and sample-backtested before anything is saved'
           : generation?.status === 'complete'
-            ? `${generation.savedCount} of ${generation.proposed} saved`
+            ? `${generation.savedCount} saved · ${generation.kept ?? generation.savedCount} kept of ${generation.proposed}`
             : undefined
       }
       onClose={close}
@@ -365,17 +367,46 @@ function GenerationResult({
       <Progress
         text={STATUS_TEXT[generation.status] ?? 'Working…'}
         detail={
-          generation.proposed > 0
-            ? `${generation.proposed} candidates returned — each is being backtested on a sample.`
-            : 'You can close this — the run continues and its survivors are saved.'
+          generation.status === 'waiting'
+            ? (generation.error ??
+              'The AI provider is unavailable right now. The run is parked and resumes by itself — you can close this.')
+            : generation.proposed > 0
+              ? `${generation.proposed} candidates returned — each is being backtested on a sample.`
+              : 'You can close this — the run continues and its survivors are saved.'
         }
       />
     );
   }
 
-  const kept = generation.candidates.filter((c) => c.verdict === 'kept');
-  const rejected = generation.candidates.filter((c) => c.verdict === 'rejected');
+  return <CompletedGeneration generation={generation} kind={kind} />;
+}
+
+function CompletedGeneration({
+  generation,
+  kind,
+}: {
+  generation: GenerationView;
+  kind: 'strategy' | 'screener';
+}) {
+  const save = useSaveCandidate(generation.id);
+  // Original indexes — the save endpoint addresses a candidate by its place in the run.
+  const indexed = generation.candidates.map((candidate, index) => ({ candidate, index }));
+  const kept = indexed.filter(({ candidate }) => candidate.verdict === 'kept');
+  const rejected = indexed
+    .filter(({ candidate }) => candidate.verdict === 'rejected')
+    .map(({ candidate }) => candidate);
   const unit = kind === 'screener' ? 'matches' : 'trades';
+  const savingIndex = save.isPending ? (save.variables ?? null) : null;
+
+  const saveOne = (index: number) =>
+    save.mutate(index, {
+      onSuccess: () =>
+        toast.success(
+          'Saved',
+          kind === 'screener' ? 'Added to your screeners.' : 'Added to your strategies.',
+        ),
+      onError: (error) => toast.error("Couldn't save it", getErrorMessage(error)),
+    });
 
   return (
     <View>
@@ -387,19 +418,32 @@ function GenerationResult({
       ) : (
         <>
           <Text className="mb-2 text-[13px] font-semibold text-ink dark:text-ink-dark">
-            Saved ({kept.length}) — already in your{' '}
-            {kind === 'screener' ? 'screeners' : 'strategies'}
+            Passed every check ({kept.length})
           </Text>
           <View className="gap-2.5">
-            {kept.map((candidate, index) => (
+            {kept.map(({ candidate, index }) => (
               // Names come from the model and can repeat — the index keeps keys unique.
               <View
                 key={`${index}-${candidate.name}`}
                 className="rounded-card border border-line p-3 dark:border-line-dark"
               >
-                <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
-                  {candidate.name}
-                </Text>
+                <View className="flex-row items-start justify-between gap-2">
+                  <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
+                    {candidate.name}
+                  </Text>
+                  {candidate.savedId !== null && candidate.savedId !== undefined ? (
+                    <Badge label="Saved" variant="success" />
+                  ) : candidate.savedId === null ? (
+                    <Button
+                      label="Save"
+                      size="sm"
+                      variant="secondary"
+                      loading={savingIndex === index}
+                      disabled={save.isPending}
+                      onPress={() => saveOne(index)}
+                    />
+                  ) : null}
+                </View>
                 {candidate.sample ? (
                   <View className="mt-1.5">
                     <Badge
@@ -425,13 +469,21 @@ function GenerationResult({
                 <Text className="mt-1.5 text-xs leading-[17px] text-warning-600 dark:text-warning-dark">
                   Weakness: {candidate.weakness}
                 </Text>
+                {(candidate.warnings ?? []).map((warning) => (
+                  <Text
+                    key={warning}
+                    className="mt-1 text-xs leading-[17px] text-warning-600 dark:text-warning-dark"
+                  >
+                    ⚠ {warning}
+                  </Text>
+                ))}
               </View>
             ))}
           </View>
           <Text className="mt-3 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-            Sample figures come from {kept[0]?.sample?.symbolsTested ?? 150} symbols, not the whole
-            market, and candidates are deliberately not filtered by profitability. Run a full
-            backtest before trusting any of it.
+            Sample figures come from {kept[0]?.candidate.sample?.symbolsTested ?? 150} symbols, not
+            the whole market, and candidates are deliberately not filtered by profitability. Run a
+            full backtest before trusting any of it.
           </Text>
         </>
       )}

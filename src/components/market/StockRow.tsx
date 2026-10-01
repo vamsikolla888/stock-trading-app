@@ -2,9 +2,14 @@ import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { ChangeText } from '@/components/market/ChangeText';
+import { LiveFlash } from '@/components/market/LiveFlash';
 import { Sparkline } from '@/components/market/Sparkline';
 import { StockLogo } from '@/components/market/StockLogo';
+import { overlayQuote } from '@/features/market/lib/liveQuote';
+import { useLiveQuote } from '@/features/market/live';
 import { formatINR, formatSignedPercent } from '@/lib/utils/formatters';
+
+const NUM = { fontVariant: ['tabular-nums' as const] };
 
 interface StockRowProps {
   symbol: string;
@@ -12,6 +17,10 @@ interface StockRowProps {
   exchange?: string | null;
   price?: number | null;
   changePercent?: number | null;
+  /** The REST row's previous close, when it has one — the live move is measured against it. */
+  prevClose?: number | null;
+  /** Stream the price live (default). Off for rows that aren't a tradable listing. */
+  live?: boolean;
   logoUri?: string | null;
   /** Replaces the "SYMBOL · NSE" line, e.g. "10 shares · Avg ₹1,210". */
   subtitle?: string;
@@ -23,13 +32,19 @@ interface StockRowProps {
   onLongPress?: () => void;
 }
 
-/** Name · meta on the left, price · change on the right — the design's stock-row. */
+/**
+ * Name · meta on the left, price · change on the right — the design's stock-row. The price
+ * streams live while the row is on a focused screen (useLiveQuote), measured against the REST
+ * row's previous close; until the first tick it shows the REST figures it was given.
+ */
 export const StockRow = memo(function StockRow({
   symbol,
   name,
   exchange,
   price,
   changePercent,
+  prevClose,
+  live = true,
   logoUri,
   subtitle,
   right,
@@ -39,11 +54,14 @@ export const StockRow = memo(function StockRow({
 }: StockRowProps) {
   const title = name || symbol;
   const meta = subtitle ?? `${symbol}${exchange ? ` · ${exchange}` : ''}`;
+  // A row whose price column is replaced shows no price to stream.
+  const quote = useLiveQuote(exchange, symbol, { enabled: live && !right });
+  const view = overlayQuote({ price, changePct: changePercent, prevClose }, quote);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${title}, ${formatINR(price)}, ${formatSignedPercent(changePercent)}`}
+      accessibilityLabel={`${title}, ${formatINR(view.price)}, ${formatSignedPercent(view.changePct)}`}
       disabled={!onPress && !onLongPress}
       onPress={onPress}
       onLongPress={onLongPress}
@@ -62,11 +80,13 @@ export const StockRow = memo(function StockRow({
       {trend && trend.length > 1 ? <Sparkline data={trend} /> : null}
       {right ?? (
         <View className="items-end">
-          <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
-            {formatINR(price)}
-          </Text>
-          <ChangeText value={changePercent} className="mt-0.5 text-xs">
-            {formatSignedPercent(changePercent)}
+          <LiveFlash seq={quote?.seq} dir={quote?.dir}>
+            <Text className="text-sm font-semibold text-ink dark:text-ink-dark" style={NUM}>
+              {formatINR(view.price)}
+            </Text>
+          </LiveFlash>
+          <ChangeText value={view.changePct} className="mt-0.5 text-xs" style={NUM}>
+            {formatSignedPercent(view.changePct)}
           </ChangeText>
         </View>
       )}

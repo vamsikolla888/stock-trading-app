@@ -1,4 +1,5 @@
 import { apiClient } from '@/services/api/client';
+import { requireFields } from '@/services/api/contract';
 
 import type {
   AutoTradeActivity,
@@ -27,9 +28,8 @@ const withProfile = (profileId?: string) => (profileId ? { profileId } : {});
 type RawProfile = Omit<PaperProfile, 'id'> & { id?: string; _id?: string };
 
 /**
- * The profile routes return Mongo documents as stored (`.lean()` / toObject), so the id
- * arrives as `_id` and there is no `id` — whatever the OpenAPI spec says. Normalised here,
- * once, so every screen can key, select and delete by `id`.
+ * The profile routes now send `id` (server toProfileView); an older server sent the stored
+ * document's `_id`. Normalised here, once, so every screen can key, select and delete by `id`.
  */
 export function toPaperProfile(raw: RawProfile): PaperProfile {
   return {
@@ -42,7 +42,15 @@ export function toPaperProfile(raw: RawProfile): PaperProfile {
   };
 }
 
-/** Paper trading — mirrors the web's paper.service.ts, same paths and field names. */
+const ACCOUNT = 'Paper trading';
+
+/**
+ * Paper trading — mirrors the web's paper.service.ts, same paths and field names.
+ *
+ * The account, portfolio, wallet and analytics reads are checked for the ONE-wallet shape
+ * (server 2026-09-30): an older server answers them per segment (`combined`, `pools`), which no
+ * screen here can read — refused as a typed error rather than crashing a render.
+ */
 export const paperApi = {
   async profiles(): Promise<PaperProfile[]> {
     const { data } = await apiClient.get<{ profiles: RawProfile[] }>('/paper/profiles');
@@ -74,13 +82,13 @@ export const paperApi = {
     const { data } = await apiClient.get<SegmentOverview>('/paper/segments', {
       params: withProfile(profileId),
     });
-    return data;
+    return requireFields(data, ['wallet', 'segments'], ACCOUNT);
   },
   async portfolio(segment: CashSegment, profileId?: string): Promise<PaperPortfolio> {
     const { data } = await apiClient.get<PaperPortfolio>('/paper/portfolio', {
       params: { segment, ...withProfile(profileId) },
     });
-    return data;
+    return requireFields(data, ['wallet', 'book', 'positions'], ACCOUNT);
   },
   /** Both pools unless a segment is given — the right default for an audit trail. */
   async orders(limit = 50, profileId?: string): Promise<PaperOrder[]> {
@@ -136,12 +144,20 @@ export const paperApi = {
       { ...body, profileId: body.profileId || undefined },
     );
   },
-  /** Wipes one pool back to its wallet. Irreversible — callers confirm first. */
-  async reset(segment: CashSegment, profileId?: string): Promise<PaperPortfolio> {
-    const { data } = await apiClient.post<PaperPortfolio>('/paper/reset', {
-      segment,
-      ...withProfile(profileId),
-    });
+  /**
+   * Wipes the WHOLE account — both products — back to its wallet. One wallet, so one reset:
+   * the server refuses a `segment` (422) rather than guess. Irreversible — callers confirm.
+   */
+  async reset(profileId?: string): Promise<PaperPortfolio> {
+    const { data } = await apiClient.post<PaperPortfolio>('/paper/reset', withProfile(profileId));
+    return data;
+  },
+  /** Wipes EVERY profile, default included, each back to its own wallet. Irreversible. */
+  async resetAll(): Promise<{ reset: { id: string; name: string }[] }> {
+    const { data } = await apiClient.post<{ reset: { id: string; name: string }[] }>(
+      '/paper/reset-all',
+      {},
+    );
     return data;
   },
   /** The cron's own sweep; it reads the clock, so it can never square off early. */
@@ -160,21 +176,17 @@ export const paperApi = {
     const { data } = await apiClient.get<PaperAnalytics>('/paper/analytics', {
       params: withProfile(profileId),
     });
-    return data;
+    return requireFields(data, ['wallet', 'bridge', 'categories', 'trades'], ACCOUNT);
   },
   async wallet(profileId?: string): Promise<PaperWallet> {
     const { data } = await apiClient.get<PaperWallet>('/paper/wallet', {
       params: withProfile(profileId),
     });
-    return data;
+    return requireFields(data, ['capital', 'availableCash', 'changes'], ACCOUNT);
   },
-  async setWallet(body: {
-    segment: CashSegment;
-    amount: number;
-    profileId?: string;
-  }): Promise<PaperWallet> {
+  /** A deposit or withdrawal of the difference; the book is untouched. No `segment` — one wallet. */
+  async setWallet(body: { amount: number; profileId?: string }): Promise<PaperWallet> {
     const { data } = await apiClient.put<PaperWallet>('/paper/wallet', {
-      segment: body.segment,
       amount: body.amount,
       ...withProfile(body.profileId),
     });

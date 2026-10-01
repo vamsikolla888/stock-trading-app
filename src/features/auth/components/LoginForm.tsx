@@ -1,23 +1,29 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Pressable, Text, View, type TextInput } from 'react-native';
 
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { useAuthFlowStore } from '@/features/auth/authFlowStore';
 import { useLogin } from '@/features/auth/hooks/useAuth';
 import { applyServerErrors, type ServerErrorBanner } from '@/features/auth/utils/serverErrors';
 import { loginSchema, type LoginFormInput, type LoginFormValues } from '@/lib/validators/auth';
 import { usePreferencesStore } from '@/store/preferencesStore';
+import { isMfaChallenge } from '@/types/auth';
 
 export function LoginForm() {
   const router = useRouter();
   const login = useLogin();
   const lastSignedInEmail = usePreferencesStore((state) => state.lastSignedInEmail);
   const passwordRef = useRef<TextInput>(null);
-  const [banner, setBanner] = useState<ServerErrorBanner | null>(null);
+  // A one-shot message left by whatever signed us out (e.g. a password change).
+  const [banner, setBanner] = useState<ServerErrorBanner | null>(
+    () => useAuthFlowStore.getState().notice,
+  );
+  useEffect(() => useAuthFlowStore.getState().clearNotice(), []);
 
   const {
     control,
@@ -35,6 +41,11 @@ export function LoginForm() {
   const onSubmit = handleSubmit((values) => {
     setBanner(null);
     login.mutate(values, {
+      // A finished sign-in needs nothing here (the guards move us into the app); a
+      // two-factor account continues on the code screen.
+      onSuccess: (result) => {
+        if (isMfaChallenge(result)) router.push('/auth/two-factor');
+      },
       onError: (error) => setBanner(applyServerErrors(error, setError, ['email', 'password'])),
     });
   });

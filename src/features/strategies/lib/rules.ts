@@ -534,3 +534,32 @@ export function withOptional<T extends object, K extends keyof T>(
   else next[key] = value;
   return next;
 }
+
+/** The server's bounds on backtest settings (strategy.routes.yaml BacktestSettings). */
+export const SETTINGS_BOUNDS = {
+  costBps: { min: 0, max: 100 },
+  maxOpenPositions: { min: 1, max: 50 },
+} as const;
+
+export function settingsIssues(settings: {
+  costBps: number;
+  maxOpenPositions: number;
+}): Partial<Record<'costBps' | 'maxOpenPositions', string>> {
+  const issues: Partial<Record<'costBps' | 'maxOpenPositions', string>> = {};
+  const { costBps, maxOpenPositions } = SETTINGS_BOUNDS;
+  if (
+    !Number.isFinite(settings.costBps) ||
+    settings.costBps < costBps.min ||
+    settings.costBps > costBps.max
+  ) {
+    issues.costBps = `Between ${costBps.min} and ${costBps.max}`;
+  }
+  if (
+    !Number.isInteger(settings.maxOpenPositions) ||
+    settings.maxOpenPositions < maxOpenPositions.min ||
+    settings.maxOpenPositions > maxOpenPositions.max
+  ) {
+    issues.maxOpenPositions = `A whole number, ${maxOpenPositions.min}–${maxOpenPositions.max}`;
+  }
+  return issues;
+}

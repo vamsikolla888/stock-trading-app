@@ -5,7 +5,11 @@
 export type PaperSide = 'BUY' | 'SELL';
 export type PaperOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
 
-/** The paper account's two separately-funded cash pools. Cash never moves between them. */
+/**
+ * The paper account's two PRODUCTS — delivery (CNC) and intraday (MIS). ONE wallet funds both
+ * (server paper-wallet.service.ts); each keeps its own P&L category. F&O is not part of the paper
+ * account — the F&O sandbox has its own pool (features/derivatives).
+ */
 export type CashSegment = 'equity' | 'intraday';
 export type PaperOrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'CANCELLED';
 
@@ -67,7 +71,10 @@ export interface PaperOrder {
   charges: number;
   chargesBreakdown?: PaperChargeBreakdown | null;
   borrowedDelta?: number;
+  /** SELL: net of both sides' charges. */
   realisedPnl: number | null;
+  /** SELL: at the trade price, before charges. Null on a sell booked before it was recorded. */
+  grossPnl?: number | null;
   note: string | null;
   source?: 'MANUAL' | 'STRATEGY' | 'AUTOTRADE';
   exitReason?: string | null;
@@ -88,16 +95,24 @@ export interface PaperOrderPreview {
   charges: number;
   chargesBreakdown: PaperChargeBreakdown;
   borrowed?: number;
+  /** Own money committed on a buy — THE figure the wallet's cash is checked against. */
   marginRequired: number;
   cashDelta?: number;
+  /** The WALLET's cash — one wallet funds both products. */
   cashBefore: number;
   cashAfter: number;
+  /** Cash not held by other open buy orders — what a new buy may spend. */
   availableCash: number;
   blockedCash?: number;
   leverage?: number;
+  /** availableCash × this product's leverage. Optional for an older server. */
+  buyingPower?: number;
   heldQuantity: number;
   sellableQuantity: number;
   maxQuantity: number;
+  /** SELL only: at the trade price, before charges. */
+  grossPnl?: number | null;
+  /** SELL only: net of this sell's charges and the buy charges of the shares it closes. */
   realisedPnl?: number | null;
   exitCharges?: PaperChargeBreakdown | null;
   roundTripCharges?: number | null;
@@ -113,13 +128,31 @@ export interface PaperPosition {
   symbol: string;
   companyName: string | null;
   quantity: number;
-  /** Cost-inclusive average — the break-even price. */
+  /**
+   * The price the shares were BOUGHT at — charges excluded, as a broker shows it, so a stock
+   * bought and not yet moved shows ₹0.00. On a legacy row (`basisTracked: false`) it still
+   * includes the buy charges.
+   */
   avgPrice: number;
+  /** Buy-side charges paid on the held shares. Optional for an older server. */
+  buyCharges?: number;
+  /** (cost + buy charges) / quantity — what recovers everything paid so far. */
+  breakEvenPrice?: number;
+  basisTracked?: boolean;
   ltp: number | null;
+  /** The snapshot's previous close — today's move works after hours too. */
+  prevClose?: number | null;
+  /** Shares of the row bought TODAY (IST) and their trade value — measured from the price paid. */
+  todayBoughtQty?: number;
+  todayBuyValue?: number;
+  /** Market value − cost at the trade price: BEFORE charges. */
   unrealisedPnl: number | null;
   /** Against own funds, not the notional. */
   unrealisedPct: number | null;
+  /** unrealisedPnl − buyCharges. */
+  netUnrealisedPnl?: number | null;
   currentValue: number | null;
+  /** quantity × avgPrice. */
   investedValue: number;
   borrowedAmount?: number;
   ownFunds?: number;
@@ -133,72 +166,117 @@ export interface PaperPosition {
   openedAt?: string;
 }
 
-export interface PaperPortfolio {
-  segment: CashSegment;
-  product?: 'CNC' | 'MIS';
-  segmentLabel: string;
-  leverage?: number;
-  startingCapital: number;
+/** The ONE wallet both products trade from. */
+export interface WalletSummary {
+  /** Every rupee put in: opening capital + wallet changes. */
+  capital: number;
   cash: number;
-  investedValue: number;
-  currentValue: number;
-  borrowed?: number;
-  equity?: number;
+  /** Held by resting BUY orders of either product — still inside `cash`. */
+  blockedCash: number;
+  /** cash − blockedCash: what a new order can draw on. */
+  availableCash: number;
+  holdingsValue: number;
+  borrowed: number;
+  /** cash + holdingsValue − borrowed. */
+  value: number;
   realisedPnl: number;
   unrealisedPnl: number;
-  totalPnl: number;
-  totalPnlPct: number;
-  totalCharges?: number;
-  tradeCount?: number;
-  closedTradeCount?: number;
-  positions: PaperPosition[];
-  openOrders: PaperOrder[];
-  marketOpen: boolean;
-  intradayEntryBlockedReason?: string | null;
-  minutesToSquareOff?: number | null;
-  marginShortfall?: number;
-  pricesAsOf: string | null;
-  resetAt?: string | null;
+  charges: number;
+  /** realisedPnl + unrealisedPnl − charges. */
+  netPnl: number;
+  netPnlPct: number | null;
+  /** availableCash × the MIS leverage. */
+  intradayBuyingPower: number;
+  /** Negative cash as a positive number — only ever after a forced intraday square-off. */
+  marginShortfall: number;
+  resetAt: string | null;
+  /** When two old separately-funded pools were merged into this wallet. */
+  mergedAt: string | null;
 }
 
-export interface SegmentSummary {
+/** One product's book and P&L category. */
+export interface ProductSummary {
   segment: CashSegment;
   label: string;
   product: 'CNC' | 'MIS';
-  leverage?: number;
-  startingCapital: number;
-  cash: number;
-  deployed?: number;
-  borrowed?: number;
-  currentValue: number;
-  unrealisedPnl: number;
-  realisedPnl: number;
-  totalCharges?: number;
-  equity: number;
-  totalPnl: number;
-  totalPnlPct: number | null;
+  leverage: number;
   positionCount: number;
   openOrderCount: number;
-  utilisationPct?: number;
-  marginShortfall?: number;
-  resetAt?: string | null;
+  /** Open positions at the price paid. */
+  investedValue: number;
+  /** investedValue − borrowed. */
+  ownFunds: number;
+  borrowed: number;
+  currentValue: number;
+  /** Before charges. */
+  unrealisedPnl: number;
+  /** Closed trades, before charges. */
+  realisedPnl: number;
+  /** Closed trades after both sides' charges, as booked. */
+  realisedNetPnl: number;
+  /** Closed trades booked TODAY (IST), before charges. Optional for an older server. */
+  todayRealisedPnl?: number;
+  charges: number;
+  openBuyCharges: number;
+  netPnl: number;
+  blockedCash: number;
+  /** EVERY fill, buys included. Never a denominator — see closedTradeCount. */
+  tradeCount: number;
+  closedTradeCount: number;
 }
 
-/** GET /paper/segments */
+/** GET /paper/portfolio — one product's book, with the shared wallet it draws on. */
+export interface PaperPortfolio {
+  segment: CashSegment;
+  product: 'CNC' | 'MIS';
+  segmentLabel: string;
+  leverage: number;
+  /** The shared wallet — identical whichever product was asked for. */
+  wallet: WalletSummary;
+  /** THIS product's book. */
+  book: ProductSummary;
+  positions: PaperPosition[];
+  openOrders: PaperOrder[];
+  /** The WALLET's figures, flattened. */
+  startingCapital: number;
+  cash: number;
+  availableCash: number;
+  equity: number;
+  totalPnl: number;
+  totalPnlPct: number;
+  /** THIS product's figures, flattened from `book`. */
+  investedValue: number;
+  currentValue: number;
+  borrowed: number;
+  realisedPnl: number;
+  unrealisedPnl: number;
+  totalCharges: number;
+  tradeCount: number;
+  closedTradeCount: number;
+  marketOpen: boolean;
+  /** Non-null when a fresh MIS entry would be refused. Rendered verbatim. */
+  intradayEntryBlockedReason: string | null;
+  /** Minutes to the 15:15 square-off, only while the window is open. */
+  minutesToSquareOff: number | null;
+  /** The wallet's negative cash, if a forced intraday square-off left it in debit. */
+  marginShortfall: number;
+  pricesAsOf: string | null;
+  resetAt: string | null;
+}
+
+/** GET /paper/segments — the one wallet and both products, from one snapshot read. */
 export interface SegmentOverview {
-  segments: SegmentSummary[];
-  /** Display only — none of this total is spendable in one pool. */
-  combined: {
-    startingCapital: number;
-    cash: number;
-    equity: number;
-    realisedPnl: number;
-    unrealisedPnl: number;
-    totalCharges: number;
-    totalPnl: number;
+  wallet: WalletSummary & {
+    openingCapital: number;
+    capitalAdded: number;
+    positionCount: number;
+    openOrderCount: number;
   };
+  /** Delivery and intraday, each a P&L category. */
+  segments: ProductSummary[];
   marketOpen: boolean;
   pricesAsOf: string | null;
+  /** Positions with no snapshot price, carried at cost. */
   unpricedPositions?: number;
   caveats: string[];
 }
@@ -220,7 +298,9 @@ export interface EquityPointDay {
   t: number;
   cash: number;
   holdingsValue: number | null;
-  /** NULL = unknown. A gap, never cash and never 0. */
+  /** Intraday borrowing outstanding at the close. Optional for an older server. */
+  borrowed?: number;
+  /** cash + holdingsValue − borrowed. NULL = unknown. A gap, never cash and never 0. */
   equity: number | null;
   totalPnl: number | null;
   fillCount: number;
@@ -274,7 +354,8 @@ export interface ClosedTradeStats {
 }
 
 export interface PaperPerformance {
-  scope: 'equity-delivery';
+  /** The whole WALLET — delivery and intraday spend the same cash. */
+  scope: 'wallet' | 'equity-delivery';
   past: {
     windowDays: number;
     fromDate: string;
@@ -338,19 +419,9 @@ export const CHARGE_COMPONENTS = [
 ] as const;
 export type ChargeComponent = (typeof CHARGE_COMPONENTS)[number];
 
-export interface WalletIdentity {
-  netCapital: number;
-  realisedPnl: number;
-  unrealisedPnl: number;
-  expected: number;
-  walletValue: number;
-  residual: number;
-  status: ReconcileStatus;
-  roundingAllowance: number;
-}
-
 export interface ChargeTotals {
   byComponent: Record<ChargeComponent, number>;
+  /** Charges on fills booked before itemisation — the total is real, the split was never kept. */
   unitemised: number;
   lineRounding: number;
   buy: number;
@@ -358,59 +429,167 @@ export interface ChargeTotals {
   total: number;
 }
 
+/** Capital → every charge line → P&L by product → wallet value. */
+export type BridgeKind = 'start' | 'charge' | 'realised' | 'unrealised' | 'residual' | 'end';
+
+export interface BridgeStep {
+  key: string;
+  label: string;
+  kind: BridgeKind;
+  segment: CashSegment | null;
+  /** Signed movement (the start and end rows carry their level). */
+  amount: number;
+  /** Running level after this step. */
+  after: number;
+}
+
+export interface WalletBridge {
+  steps: BridgeStep[];
+  capital: number;
+  charges: number;
+  realisedPnl: number;
+  unrealisedPnl: number;
+  netPnl: number;
+  expected: number;
+  walletValue: number;
+  residual: number;
+  status: ReconcileStatus;
+  roundingAllowance: number;
+}
+
+/** Where the capital went — lines that add up to it. */
+export type AllocationKind = 'cash' | 'invested' | 'charge' | 'realised' | 'residual';
+
+export interface AllocationLine {
+  key: string;
+  label: string;
+  hint: string;
+  kind: AllocationKind;
+  segment: CashSegment | null;
+  /** Signed; realised PROFIT is negative (it came back into the cash above). */
+  amount: number;
+}
+
+export interface CapitalAllocation {
+  capital: number;
+  lines: AllocationLine[];
+  accountedFor: number;
+  residual: number;
+  status: ReconcileStatus;
+}
+
+/** One product as a P&L category. */
+export interface AnalyticsCategory {
+  segment: CashSegment;
+  label: string;
+  product: 'CNC' | 'MIS';
+  /** Closed trades at the trade price, before charges. */
+  realisedPnl: number;
+  /** After both sides' charges, as booked. */
+  realisedNetPnl: number;
+  unrealisedPnl: number;
+  charges: ChargeTotals;
+  netPnl: number;
+  openPositions: number;
+  investedValue: number;
+  ownFunds: number;
+  marketValue: number;
+  borrowed: number;
+  bought: number;
+  sold: number;
+  leverageDrawn: number;
+  leverageRepaid: number;
+  buys: number;
+  sells: number;
+  winners: number;
+  losers: number;
+  winRatePct: number | null;
+  unmatchedSells: number;
+}
+
 export type DistributionCategory =
-  'equity-holdings' | 'equity-cash' | 'intraday-positions' | 'intraday-cash';
+  'free-cash' | 'blocked-cash' | 'equity-holdings' | 'intraday-positions';
+
+export interface DistributionLine {
+  key: string;
+  label: string;
+  segment: CashSegment | null;
+  exchange: string | null;
+  symbol: string | null;
+  companyName: string | null;
+  quantity: number | null;
+  ltp: number | null;
+  /** False = no price; carried at cost so the wallet still adds up. */
+  priced: boolean;
+  marketValue: number;
+  costValue: number;
+  borrowed: number;
+  /** What this line contributes to the wallet. Can be negative (a shortfall). */
+  value: number;
+  unrealisedPnl: number;
+}
 
 export interface DistributionCategoryView {
   category: DistributionCategory;
-  segment: CashSegment;
   label: string;
   value: number;
-  /** Share of the wallet; null when negative. */
+  /** Share of the wallet; the shares sum to exactly 100.00. Null when negative. */
   pct: number | null;
-  lines: {
-    key: string;
-    label: string;
-    symbol: string | null;
-    exchange: string | null;
-    value: number;
-    priced: boolean;
-  }[];
-}
-
-export interface AnalyticsPool {
-  segment: CashSegment;
-  label: string;
-  openingCapital: number;
-  capitalAdded: number;
-  netCapital: number;
-  cash: number;
-  walletValue: number;
-  realisedPnl: number;
-  unrealisedPnl: number;
-  totals: { bought: number; sold: number };
-  reconciliation: { status: ReconcileStatus; difference: number };
+  lines: DistributionLine[];
 }
 
 export type LedgerKind = 'OPENING' | 'CAPITAL' | 'BUY' | 'SELL';
 
 export interface LedgerEntry {
   id: string;
-  segment: CashSegment;
+  /** The product of a fill; null on the opening and on wallet changes. */
+  segment: CashSegment | null;
   kind: LedgerKind;
   at: string | null;
   exchange: string | null;
   symbol: string | null;
+  companyName?: string | null;
   quantity: number | null;
   price: number | null;
   tradeValue: number;
   chargesTotal: number;
+  borrowed?: number;
+  repaid?: number;
   cashChange: number;
+  /** The WALLET's balance after this entry. */
   cashAfter: number;
+  /** SELL: before charges. */
+  grossPnl?: number | null;
+  /** SELL: net of both sides' charges. */
   realisedPnl: number | null;
   source: string | null;
   exitReason: string | null;
   note: string | null;
+}
+
+export interface TradeStats {
+  closingFills: number;
+  winners: number;
+  losers: number;
+  winRatePct: number | null;
+  grossProfit: number;
+  grossLoss: number;
+  /** NULL = no losing trade to divide by. Never render as infinity. */
+  profitFactor: number | null;
+  avgWin: number | null;
+  avgLoss: number | null;
+  expectancy: number | null;
+  chargesPctOfGrossProfit: number | null;
+}
+
+export interface WalletReconciliation {
+  replayedCash: number;
+  storedCash: number;
+  difference: number;
+  status: ReconcileStatus;
+  excludedBeforeReset: number;
+  positionMismatches: { key: string; storedQuantity: number; replayedQuantity: number }[];
+  legacyPositions: number;
 }
 
 export interface PaperAnalytics {
@@ -418,8 +597,28 @@ export interface PaperAnalytics {
   asOf: string;
   pricesAsOf: string | null;
   marketOpen: boolean;
-  wallet: WalletIdentity & { returnPct: number | null };
-  pools: AnalyticsPool[];
+  wallet: {
+    openingCapital: number;
+    capitalAdded: number;
+    capital: number;
+    cash: number;
+    blockedCash: number;
+    availableCash: number;
+    holdingsValue: number;
+    borrowed: number;
+    value: number;
+    realisedPnl: number;
+    unrealisedPnl: number;
+    charges: number;
+    netPnl: number;
+    returnPct: number | null;
+    mergedAt: string | null;
+    resetAt: string | null;
+  };
+  bridge: WalletBridge;
+  allocation: CapitalAllocation;
+  categories: AnalyticsCategory[];
+  /** `distribution.total === wallet.value`, to the paisa. */
   distribution: {
     total: number;
     categories: DistributionCategoryView[];
@@ -428,29 +627,30 @@ export interface PaperAnalytics {
     unpricedPositions: number;
   };
   charges: ChargeTotals;
-  trades: {
-    closingFills: number;
-    winners: number;
-    losers: number;
-    winRatePct: number | null;
-    grossProfit: number;
-    grossLoss: number;
-    profitFactor: number | null;
-    avgWin: number | null;
-    avgLoss: number | null;
-    expectancy: number | null;
-    chargesPctOfGrossProfit: number | null;
-  };
+  trades: TradeStats;
   /** Oldest first. */
   ledger: LedgerEntry[];
+  reconciliation: WalletReconciliation;
   methodology: string[];
 }
 
 // ── Wallet (Settings → Paper wallet) ─────────────────────────────────────────────────────
 
-export interface WalletPool {
-  segment: CashSegment;
-  label: string;
+export interface WalletChange {
+  id: string;
+  /** Signed — positive is a deposit, negative a withdrawal. */
+  amount: number;
+  capitalBefore: number;
+  capitalAfter: number;
+  at: string;
+  /** Set on a change made to one of the two old pools before they were merged. */
+  legacyPool?: CashSegment | null;
+}
+
+/** GET /paper/wallet — the ONE wallet of a profile. */
+export interface PaperWallet {
+  profileId: string;
+  /** The configured wallet — every rupee put in. */
   capital: number;
   openingCapital: number;
   capitalAdded: number;
@@ -461,20 +661,8 @@ export interface WalletPool {
   minCapital: number;
   maxCapital: number;
   resetAt: string | null;
-}
-
-export interface PaperWallet {
-  profileId: string;
-  pools: WalletPool[];
-  changes: {
-    id: string;
-    segment: CashSegment;
-    amount: number;
-    capitalBefore: number;
-    capitalAfter: number;
-    at: string;
-  }[];
-  total: number;
+  mergedAt: string | null;
+  changes: WalletChange[];
 }
 
 // ── Auto-trade ───────────────────────────────────────────────────────────────────────────

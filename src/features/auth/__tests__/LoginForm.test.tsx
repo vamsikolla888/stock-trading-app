@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 
+import { useAuthFlowStore } from '@/features/auth/authFlowStore';
 import { LoginForm } from '@/features/auth/components/LoginForm';
 import { secureTokens } from '@/lib/storage/secureTokens';
 import { authApi } from '@/services/api/authApi';
@@ -54,6 +55,7 @@ function fillAndSubmit(email: string, password: string) {
 beforeEach(async () => {
   jest.clearAllMocks();
   useAuthStore.getState().signOut();
+  useAuthFlowStore.setState({ challenge: null, notice: null });
   await secureTokens.clearTokens();
 });
 
@@ -109,6 +111,39 @@ describe('LoginForm', () => {
 
     expect(await screen.findByText('Account not active yet')).toBeTruthy();
     expect(screen.getByText('Your account is awaiting administrator approval')).toBeTruthy();
+  });
+
+  it('parks a two-factor challenge in memory and opens the code screen', async () => {
+    login.mockResolvedValue({
+      mfaRequired: true,
+      challengeToken: 'c'.repeat(43),
+      expiresAt: '2026-10-01T10:05:00.000Z',
+    });
+    renderForm();
+
+    fillAndSubmit('trader@example.com', 'correct-horse');
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/auth/two-factor'));
+    // The password alone is not a session.
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(await secureTokens.getRefreshToken()).toBeNull();
+    expect(useAuthFlowStore.getState().challenge).toEqual({
+      challengeToken: 'c'.repeat(43),
+      expiresAt: '2026-10-01T10:05:00.000Z',
+      email: 'trader@example.com',
+    });
+  });
+
+  it('shows a note left by whatever signed the user out, once', async () => {
+    useAuthFlowStore.getState().setNotice({
+      tone: 'success',
+      title: 'Password changed',
+      message: 'Sign in with your new password.',
+    });
+    renderForm();
+
+    expect(await screen.findByText('Password changed')).toBeTruthy();
+    expect(useAuthFlowStore.getState().notice).toBeNull();
   });
 
   it('carries the typed email into forgot-password', () => {

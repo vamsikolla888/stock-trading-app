@@ -76,6 +76,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: 'intel',
     items: [
       { name: 'index', label: 'Recommendations', href: '/intel' },
+      { name: 'stock-analysis', label: 'Stock analysis', href: '/intel/stock-analysis' },
       { name: 'strategies', label: 'Strategies', href: '/intel/strategies' },
       { name: 'screeners', label: 'Screeners', href: '/intel/screeners' },
       { name: 'signals', label: 'Signals', href: '/intel/signals' },

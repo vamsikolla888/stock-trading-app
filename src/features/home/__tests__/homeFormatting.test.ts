@@ -1,4 +1,4 @@
-import { formatPriceMove } from '@/components/market/StockTile';
+import { formatPriceMove } from '@/components/market/priceMove';
 import { indexChange } from '@/features/home/lib/indexChange';
 
 describe('indexChange', () => {

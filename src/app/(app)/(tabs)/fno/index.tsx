@@ -18,7 +18,7 @@ import { Freshness, GrowwAccessBanner } from '@/features/fno/components/FnoChrom
 import { Caveats, Disclosure } from '@/features/fno/components/primitives';
 import { SearchSheet } from '@/features/fno/components/SearchSheet';
 import { useFnoExplore, useFnoStatus } from '@/features/fno/hooks';
-import { chainHref, isChainExchange, liveMove } from '@/features/fno/lib/explore';
+import { chainHref, isChainExchange, liveMove, underlyingHref } from '@/features/fno/lib/explore';
 import { expiryLabel, futureTitle } from '@/features/fno/lib/format';
 import type { ExploreTile } from '@/features/fno/types';
 
@@ -153,7 +153,9 @@ export default function FnoExploreScreen() {
                         candles={tile.candles}
                         candleNote={tile.candleNote}
                         onPress={
-                          opens ? () => router.push(chainHref(exchange, tile.underlying)) : null
+                          opens
+                            ? () => router.push(underlyingHref(exchange, tile.underlying))
+                            : null
                         }
                       />
                     );
@@ -240,7 +242,7 @@ export default function FnoExploreScreen() {
       <SearchSheet
         visible={searching}
         onClose={() => setSearching(false)}
-        onPickUnderlying={(u) => router.push(chainHref(u.exchange, u.underlying))}
+        onPickUnderlying={(u) => router.push(underlyingHref(u.exchange, u.underlying))}
         onPickContract={(c) =>
           router.push(
             chainHref(

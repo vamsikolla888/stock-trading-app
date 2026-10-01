@@ -7,6 +7,7 @@ import type {
   ExitReason,
   IndexSummary,
   StrategyRules,
+  StrategySummary,
   SymbolStats,
 } from '../types';
 
@@ -53,14 +54,27 @@ export function recentTrades(trades: readonly BacktestTrade[], limit = 12): Back
 }
 
 /**
- * A trade's net return in PERCENT units. The server stores each trade's `returnPct` as a
- * FRACTION (0.031 = +3.1%, see backtest.service.ts makeTrade), unlike every aggregate on the
- * run (win rate, expectancy, totals), which are already percentages.
+ * A trade's net return in PERCENT units. Trades are stored as fractions, but the detail
+ * response converts them (strategy.routes.yaml: "every number is a whole PERCENT, trade returns
+ * included") — so this must NOT scale again, or every trade reads 100× too large.
  */
 export function tradeReturnPercent(trade: Pick<BacktestTrade, 'returnPct'>): number | null {
   return typeof trade.returnPct === 'number' && Number.isFinite(trade.returnPct)
-    ? trade.returnPct * 100
+    ? trade.returnPct
     : null;
+}
+
+/**
+ * Whether a backtest is in flight — the server's `runState.active` (read with the queue
+ * consulted, so a vanished job is `stalled`, not active). An older server sends only `status`.
+ */
+export function isRunActive(
+  strategy:
+    { status: StrategySummary['status']; runState?: StrategySummary['runState'] } | undefined,
+): boolean {
+  if (!strategy) return false;
+  if (strategy.runState) return strategy.runState.active;
+  return strategy.status === 'queued' || strategy.status === 'running';
 }
 
 export const EXIT_REASON_LABEL: Record<ExitReason, string> = {

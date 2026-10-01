@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
@@ -18,14 +18,19 @@ import {
   formatStrike,
   lotsLabel,
 } from '@/features/fno/lib/format';
+import { confirmAction } from '@/features/settings/lib/confirm';
 import { formatINR, formatQuantity, formatSignedINR } from '@/lib/utils/formatters';
+import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
+import { getErrorMessage } from '@/types/api';
 
-import { usePaperOrders } from '../hooks';
+import { useCancelPaperFnoOrder, usePaperOrders } from '../hooks';
 import {
   chargeLines,
   countPaperOrders,
   filterPaperOrders,
+  ORDER_STATUS_LABEL,
+  ORDER_STATUS_TONE,
   PAPER_ORDER_FILTERS,
   PAPER_ORDERS_LIMIT,
   premiumFlow,
@@ -38,9 +43,9 @@ const NUM = { fontVariant: ['tabular-nums' as const] };
 
 /**
  * The paper F&O order log — the web's /fno/paper/orders: every order this account placed
- * against the paper book, filled and rejected alike, newest first. A rejection is a normal
- * outcome (not enough margin, no live price) carrying its reason, so it is listed, not hidden.
- * Tap an order for its contract-note breakdown and what it did to the account.
+ * against the paper book, newest first. A rejection is a normal outcome (not enough margin, no
+ * live price) carrying its reason, so it is listed, not hidden; a resting LIMIT order can be
+ * cancelled here. Tap an order for its contract-note breakdown and what it did to the account.
  */
 export function PaperOrders() {
   const router = useRouter();
@@ -56,6 +61,27 @@ export function PaperOrders() {
     label: `${f.label} ${counts[f.key]}`,
   }));
   const toggle = useCallback((id: string) => setExpanded((open) => (open === id ? null : id)), []);
+  const {
+    mutate: cancelOrder,
+    isPending: cancelling,
+    variables: cancellingId,
+  } = useCancelPaperFnoOrder();
+  const cancel = useCallback(
+    (o: FnoOrderView) =>
+      confirmAction({
+        title: 'Cancel this limit order?',
+        message: `${o.side} ${lotsLabel(o.lots)} of ${o.tradingsymbol}${o.limitPrice != null ? ` at ${formatINR(o.limitPrice)}` : ''}. What it holds goes back to your F&O wallet.`,
+        confirmLabel: 'Cancel order',
+        cancelLabel: 'Keep it',
+        destructive: true,
+        onConfirm: () =>
+          cancelOrder(o.id, {
+            onSuccess: () => toast.success('Order cancelled'),
+            onError: (err) => toast.error('Couldn’t cancel', getErrorMessage(err)),
+          }),
+      }),
+    [cancelOrder],
+  );
 
   if (orders.isPending) return <ListSkeleton rows={5} />;
   if (orders.isError && !orders.data) {
@@ -71,7 +97,7 @@ export function PaperOrders() {
     return (
       <InlineEmpty
         title="No paper F&O orders yet"
-        message="Orders you place on the paper option chain — filled or rejected — show up here."
+        message="Orders you place on the paper option chain — filled, resting or rejected — show up here."
         action={{ label: 'Open option chain', onPress: () => router.push(paperChainHref()) }}
       />
     );
@@ -93,15 +119,21 @@ export function PaperOrders() {
             {shown.map((o, index) => (
               <React.Fragment key={o.id}>
                 {index > 0 ? <RowDivider /> : null}
-                <OrderRow order={o} open={expanded === o.id} onToggle={toggle} />
+                <OrderRow
+                  order={o}
+                  open={expanded === o.id}
+                  onToggle={toggle}
+                  onCancel={cancel}
+                  cancelling={cancelling && cancellingId === o.id}
+                />
               </React.Fragment>
             ))}
           </ListCard>
         )}
       </View>
       <Text className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        The last {PAPER_ORDERS_LIMIT} orders on your paper F&amp;O book. Simulated — nothing reached
-        a broker.
+        The last {PAPER_ORDERS_LIMIT} orders on your paper F&amp;O book. A resting limit order is
+        checked once a minute. Simulated — nothing reached a broker.
       </Text>
     </View>
   );
@@ -111,13 +143,24 @@ const OrderRow = memo(function OrderRow({
   order: o,
   open,
   onToggle,
+  onCancel,
+  cancelling,
 }: {
   order: FnoOrderView;
   open: boolean;
   onToggle: (id: string) => void;
+  onCancel: (order: FnoOrderView) => void;
+  cancelling: boolean;
 }) {
   const { colors } = useTheme();
   const filled = o.status === 'FILLED';
+  const pending = o.status === 'PENDING';
+  const limit =
+    o.type === 'LIMIT' && o.limitPrice != null
+      ? pending
+        ? `resting at ${formatINR(o.limitPrice)}`
+        : `limit ${formatINR(o.limitPrice)}`
+      : null;
   const title = contractTitle({ underlying: o.underlying, kind: o.kind, strike: o.strike });
   const flow = premiumFlow(o.premiumFlow);
   const Chevron = open ? ChevronUp : ChevronDown;
@@ -141,7 +184,7 @@ const OrderRow = memo(function OrderRow({
           >
             {title}
           </Text>
-          <Badge label={o.status} variant={filled ? 'success' : 'danger'} />
+          <Badge label={ORDER_STATUS_LABEL[o.status]} variant={ORDER_STATUS_TONE[o.status]} />
         </View>
         <View className="flex-row items-center gap-2">
           <Text
@@ -160,7 +203,7 @@ const OrderRow = memo(function OrderRow({
             style={NUM}
             numberOfLines={2}
           >
-            {lotsLabel(o.lots)} · {filled ? formatINR(o.price) : DASH}
+            {lotsLabel(o.lots)} · {filled ? formatINR(o.price) : (limit ?? DASH)}
             {filled && o.premiumFlow !== 0
               ? ` · premium ${flow.word} ${formatINR(flow.amount)}`
               : ''}
@@ -185,12 +228,17 @@ const OrderRow = memo(function OrderRow({
             Basket · {o.basketName}
           </Text>
         ) : null}
+        {filled && limit ? (
+          <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint" style={NUM}>
+            Placed as a {limit}
+          </Text>
+        ) : null}
         {o.note ? (
           <Text
             className={
-              filled
-                ? 'text-[11px] leading-4 text-ink-muted dark:text-ink-dark-muted'
-                : 'text-[11px] leading-4 text-danger-600 dark:text-danger-dark'
+              o.status === 'REJECTED'
+                ? 'text-[11px] leading-4 text-danger-600 dark:text-danger-dark'
+                : 'text-[11px] leading-4 text-ink-muted dark:text-ink-dark-muted'
             }
           >
             {o.note}
@@ -200,17 +248,48 @@ const OrderRow = memo(function OrderRow({
 
       {open ? (
         <View className="gap-3 px-3.5 pb-3.5">
-          <View>
-            <Text className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-faint dark:text-ink-dark-faint">
-              Charges on this order
-            </Text>
-            <SummaryBox>
-              {chargeLines(o.charges).map((line) => (
-                <SummaryLine key={line.label} label={line.label} value={formatINR(line.value)} />
-              ))}
-              <SummaryLine label="Total" value={formatINR(o.charges.total)} strong />
-            </SummaryBox>
-          </View>
+          {pending ? (
+            <View>
+              <Text className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-faint dark:text-ink-dark-faint">
+                Held while it waits
+              </Text>
+              <SummaryBox>
+                <SummaryLine
+                  label="Reserved (worst case)"
+                  value={formatINR(o.reservedAmount ?? 0)}
+                  strong
+                />
+                <SummaryLine
+                  label="Limit"
+                  value={`${o.side === 'BUY' ? 'At or below' : 'At or above'} ${formatINR(o.limitPrice ?? 0)}`}
+                />
+              </SummaryBox>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Cancel the limit order for ${o.tradingsymbol}`}
+                disabled={cancelling}
+                onPress={() => onCancel(o)}
+                className="mt-3 h-10 flex-row items-center justify-center gap-2 rounded-field border border-line-strong active:bg-surface-sunk disabled:opacity-50 dark:border-line-dark-strong dark:active:bg-surface-sunk-dark"
+              >
+                {cancelling ? <ActivityIndicator size="small" color={colors.danger} /> : null}
+                <Text className="text-sm font-semibold text-danger-600 dark:text-danger-dark">
+                  Cancel order
+                </Text>
+              </Pressable>
+            </View>
+          ) : filled ? (
+            <View>
+              <Text className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-faint dark:text-ink-dark-faint">
+                Charges on this order
+              </Text>
+              <SummaryBox>
+                {chargeLines(o.charges).map((line) => (
+                  <SummaryLine key={line.label} label={line.label} value={formatINR(line.value)} />
+                ))}
+                <SummaryLine label="Total" value={formatINR(o.charges.total)} strong />
+              </SummaryBox>
+            </View>
+          ) : null}
           <View>
             <Text className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-faint dark:text-ink-dark-faint">
               Effect on the account
@@ -220,14 +299,18 @@ const OrderRow = memo(function OrderRow({
                 label="Quantity"
                 value={`${formatQuantity(o.quantity)} (${o.lots} × ${formatQuantity(o.lotSize)})`}
               />
-              <SummaryLine
-                label={o.premiumFlow < 0 ? 'Premium received' : 'Premium paid'}
-                value={formatINR(flow.amount)}
-              />
-              <SummaryLine
-                label={o.marginDelta >= 0 ? 'Margin blocked' : 'Margin released'}
-                value={formatINR(Math.abs(o.marginDelta), 0)}
-              />
+              {filled ? (
+                <>
+                  <SummaryLine
+                    label={o.premiumFlow < 0 ? 'Premium received' : 'Premium paid'}
+                    value={formatINR(flow.amount)}
+                  />
+                  <SummaryLine
+                    label={o.marginDelta >= 0 ? 'Margin blocked' : 'Margin released'}
+                    value={formatINR(Math.abs(o.marginDelta), 0)}
+                  />
+                </>
+              ) : null}
               <SummaryLine
                 label="Contract"
                 value={`${o.kind === 'FUT' ? 'Future' : `${formatStrike(o.strike)} ${o.kind}`} · ${expiryLabel(o.expiry)} · ${o.exchange}`}

@@ -66,6 +66,66 @@ export function fromLinkedHolding(holding: LinkedHoldingRow): HoldingView {
   };
 }
 
+/**
+ * A holding re-priced at a live price: value, returns and today's move all follow it. Today's
+ * move is measured against the previous close the REST row implies (its price less its own
+ * per-share move), so it stays consistent with what the broker reported. The same object comes
+ * back when the price is unchanged or unusable.
+ */
+export function repriceHolding(holding: HoldingView, ltp: number): HoldingView {
+  if (!(ltp > 0) || !Number.isFinite(ltp) || ltp === holding.ltp) return holding;
+  const value = holding.qty * ltp;
+  const pnl = value - holding.invested;
+  const prevClose =
+    holding.ltp !== null && holding.dayChange !== null && holding.qty > 0
+      ? holding.ltp - holding.dayChange / holding.qty
+      : null;
+  const priced = prevClose !== null && prevClose > 0;
+  return {
+    ...holding,
+    ltp,
+    value,
+    pnl,
+    pnlPct: holding.invested > 0 ? (pnl / holding.invested) * 100 : null,
+    dayChange: priced ? (ltp - prevClose) * holding.qty : null,
+    dayChangePct: priced ? ((ltp - prevClose) / prevClose) * 100 : null,
+  };
+}
+
+export interface BookTotals {
+  value: number;
+  invested: number;
+  pnl: number;
+  pnlPct: number | null;
+}
+
+/**
+ * The server's totals moved by exactly what the live prices changed — a delta, not a re-sum, so
+ * however the server counts (unpriced rows, settling quantity) stays its rule. Rows the REST
+ * snapshot could not value are left out of the delta rather than added whole.
+ */
+export function liveTotals(
+  totals: BookTotals,
+  base: readonly HoldingView[],
+  live: readonly HoldingView[],
+): BookTotals {
+  let delta = 0;
+  for (let i = 0; i < base.length; i++) {
+    const before = base[i]!;
+    const after = live[i];
+    if (!after || after === before || before.value === null || after.value === null) continue;
+    delta += after.value - before.value;
+  }
+  if (delta === 0) return totals;
+  const pnl = totals.pnl + delta;
+  return {
+    value: totals.value + delta,
+    invested: totals.invested,
+    pnl,
+    pnlPct: totals.invested > 0 ? (pnl / totals.invested) * 100 : totals.pnlPct,
+  };
+}
+
 /** Same product → kind rule the server applies to mStock rows (portfolio-positions.ts). */
 export function fromLinkedPosition(position: LinkedPositionRow): PositionRow {
   const product = (position.product ?? '').toUpperCase();

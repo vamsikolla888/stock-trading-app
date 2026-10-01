@@ -279,6 +279,16 @@ export interface BrokerUsageReport {
       intervalMs: number;
       consecutiveFailures: number;
       asOf: string | null;
+      /** Which broker answered the last successful poll — 'groww' while an mStock failover runs. */
+      source?: 'mstock' | 'groww' | null;
+      /** Index-feed failover status. Optional: an older API omits it. */
+      failover?: {
+        source: 'primary' | 'fallback' | null;
+        failoverUntil: string | null;
+        fallbackBlockedUntil: string | null;
+        lastPrimaryError: string | null;
+        lastFallbackError: string | null;
+      };
     };
     breakers: { name: string; state: 'open' | 'closed' | 'halfOpen' }[];
     ledger: {
@@ -319,6 +329,8 @@ export interface AdminJob {
   queue: string;
   jobName: string;
   schedule: string | null;
+  /** False = the timing comes from the worker's environment (FA_WEEKLY_CRON), read-only here. */
+  editable?: boolean;
   nextRunAt: string | null;
   note: string;
   manual: boolean;

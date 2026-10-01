@@ -1,8 +1,11 @@
+import { useRouter } from 'expo-router';
 import React from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
+import { underlyingHref } from '@/features/fno/lib/explore';
+import { indexUnderlying } from '@/features/fno/lib/underlying';
 import { indexChange } from '@/features/home/lib/indexChange';
 import { formatNextOpen, nextMarketOpen } from '@/features/home/lib/istTime';
 import type { IndexQuote } from '@/features/market/types';
@@ -33,6 +36,7 @@ function formatMove(points: number | null, pct: number | null): string {
  * without data would be decoration posing as data.
  */
 export function IndexStrip({ indices, marketOpen, isLoading, error, onRetry }: IndexStripProps) {
+  const router = useRouter();
   const now = useNow();
   if (!isLoading && indices.length === 0) {
     return error ? <InlineError what="market indices" error={error} onRetry={onRetry} /> : null;
@@ -60,12 +64,17 @@ export function IndexStrip({ indices, marketOpen, isLoading, error, onRetry }: I
               const { points, pct } = indexChange(index);
               const label = index.label ?? index.symbol;
               const move = formatMove(points, pct);
+              // An index with derivatives opens its own chart screen; one without has none.
+              const fno = indexUnderlying(index.exchange, index.symbol);
               return (
-                <View
+                <Pressable
                   key={`${index.exchange}:${index.symbol}`}
-                  accessible
+                  accessibilityRole={fno ? 'button' : undefined}
                   accessibilityLabel={`${label}, ${formatNumber(index.ltp)}, ${move}`}
-                  className="min-w-[172px] rounded-xl border border-line bg-surface px-3.5 py-3 dark:border-line-dark dark:bg-surface-dark"
+                  accessibilityHint={fno ? 'Opens the chart' : undefined}
+                  disabled={!fno}
+                  onPress={() => fno && router.push(underlyingHref(fno.exchange, fno.underlying))}
+                  className="min-w-[172px] rounded-xl border border-line bg-surface px-3.5 py-3 active:bg-surface-sunk dark:border-line-dark dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
                 >
                   <Text
                     className="text-[13px] font-semibold text-ink dark:text-ink-dark"
@@ -88,7 +97,7 @@ export function IndexStrip({ indices, marketOpen, isLoading, error, onRetry }: I
                       {move}
                     </ChangeText>
                   </View>
-                </View>
+                </Pressable>
               );
             })}
       </ScrollView>

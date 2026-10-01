@@ -9,6 +9,7 @@ import { AnalyticsPanel } from '@/features/admin/panels/AnalyticsPanel';
 import { BrokerUsagePanel } from '@/features/admin/panels/BrokerUsagePanel';
 import { BrowserResearchPanel } from '@/features/admin/panels/BrowserResearchPanel';
 import { DataSourcesPanel } from '@/features/admin/panels/DataSourcesPanel';
+import { FundamentalsPanel } from '@/features/admin/panels/FundamentalsPanel';
 import { HealthPanel } from '@/features/admin/panels/HealthPanel';
 import { JobsPanel } from '@/features/admin/panels/JobsPanel';
 import { LogsPanel } from '@/features/admin/panels/LogsPanel';
@@ -28,6 +29,7 @@ const PANELS: Record<AdminSectionId, React.ComponentType> = {
   'browser-research': BrowserResearchPanel,
   ai: AiUsagePanel,
   'broker-usage': BrokerUsagePanel,
+  fundamentals: FundamentalsPanel,
   data: DataSourcesPanel,
   users: UsersPanel,
   trading: TradingPanel,

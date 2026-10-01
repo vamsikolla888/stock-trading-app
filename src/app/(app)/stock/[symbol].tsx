@@ -9,6 +9,7 @@ import { StackScreen } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
+import { FundamentalsSection } from '@/features/fundamentals/components/FundamentalsSection';
 import { formatIstDateTime, formatIstTime, istDayKey } from '@/features/home/lib/istTime';
 import { useTodayPicks } from '@/features/insights/api';
 import {
@@ -17,6 +18,7 @@ import {
   useRecordStockView,
   useStockDetail,
 } from '@/features/market/hooks';
+import { useLiveQuote } from '@/features/market/live';
 import { AnalysisTab } from '@/features/stock/components/AnalysisTab';
 import { NewsTab } from '@/features/stock/components/NewsTab';
 import { OverviewTab } from '@/features/stock/components/OverviewTab';
@@ -35,13 +37,16 @@ import { isApiError } from '@/types/api';
 
 export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
-type DetailTab = 'overview' | 'analysis' | 'news';
+type DetailTab = 'overview' | 'fundamentals' | 'analysis' | 'news';
 
 const TABS: readonly { key: DetailTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  { key: 'analysis', label: 'Analysis' },
+  { key: 'fundamentals', label: 'Fundamentals' },
+  { key: 'analysis', label: 'Technicals' },
   { key: 'news', label: 'News' },
 ];
+
+const TAB_KEYS = new Set<string>(TABS.map((t) => t.key));
 
 /** Today's published levels for this listing, shown under the chart as a reference. */
 function RecommendationLevels({
@@ -103,15 +108,18 @@ export default function StockDetailScreen() {
   const params = useLocalSearchParams<{
     symbol?: string | string[];
     exchange?: string | string[];
+    tab?: string | string[];
   }>();
   const { symbol, exchange } = parseStockParams(params);
+  // A link can open a tab directly (the Stock analysis list opens Fundamentals).
+  const linkedTab = typeof params.tab === 'string' && TAB_KEYS.has(params.tab) ? params.tab : null;
 
   const detail = useStockDetail(symbol, exchange);
   // `mutate` is stable across renders, so this records once per stock opened.
   const { mutate: recordView } = useRecordStockView();
   const watch = useListsContaining(exchange, symbol);
   const picks = useTodayPicks();
-  const [tab, setTab] = useState<DetailTab>('overview');
+  const [tab, setTab] = useState<DetailTab>((linkedTab as DetailTab | null) ?? 'overview');
   // Re-read each minute so the page flips to "closed" at 15:30 and "today" rolls over at
   // midnight without a manual refresh.
   const now = useNow();
@@ -119,6 +127,16 @@ export default function StockDetailScreen() {
   const todayIst = istDayKey(now) ?? '';
 
   const data = detail.data;
+  // Every tick for this one stock (stream mode), laid over the polled detail: the headline, the
+  // day's range, the overview figures and the chart's forming candle all move with it.
+  const liveQuote = useLiveQuote(exchange, symbol, { mode: 'stream', enabled: symbol.length > 0 });
+  const liveData = useMemo(
+    () =>
+      data && liveQuote
+        ? { ...data, ltp: liveQuote.ltp, prevClose: data.prevClose ?? liveQuote.prevClose }
+        : data,
+    [data, liveQuote],
+  );
 
   // Recorded once the stock is known to exist, under its catalogue key: the server rejects
   // an unknown symbol, so recording from the raw link would fail for every mistyped one.
@@ -133,7 +151,10 @@ export default function StockDetailScreen() {
   const needDailyVolume = Boolean(data) && istDayKey(data?.volumeAsOf) !== todayIst;
   const daily = useCandles(symbol, exchange, '1Y', needDailyVolume || tab === 'analysis');
   const lastBar = daily.data?.[daily.data.length - 1] ?? null;
-  const view = useMemo(() => stockPriceView(data, lastBar, todayIst), [data, lastBar, todayIst]);
+  const view = useMemo(
+    () => stockPriceView(liveData, lastBar, todayIst),
+    [liveData, lastBar, todayIst],
+  );
 
   const pick = picks.data?.recommendations.find(
     (rec) => rec.sym === symbol && rec.exch === exchange,
@@ -150,15 +171,17 @@ export default function StockDetailScreen() {
 
   const priceNote = !data
     ? null
-    : view.ltp === null
-      ? 'No price is available for this listing.'
-      : data.priceSource === 'snapshot'
-        ? `The broker didn’t answer — last saved price${
-            data.priceAsOf ? `, from ${formatIstDateTime(data.priceAsOf)} IST` : ''
-          }.`
-        : data.priceSource === 'broker' && data.priceAsOf
-          ? `Broker price as of ${formatIstTime(data.priceAsOf)} IST`
-          : null;
+    : liveQuote && marketOpen
+      ? null
+      : view.ltp === null
+        ? 'No price is available for this listing.'
+        : data.priceSource === 'snapshot'
+          ? `The broker didn’t answer — last saved price${
+              data.priceAsOf ? `, from ${formatIstDateTime(data.priceAsOf)} IST` : ''
+            }.`
+          : data.priceSource === 'broker' && data.priceAsOf
+            ? `Broker price as of ${formatIstTime(data.priceAsOf)} IST`
+            : null;
 
   const onRefresh = useCallback(
     () =>
@@ -237,7 +260,13 @@ export default function StockDetailScreen() {
         </View>
       ) : (
         <>
-          <StockHeader symbol={symbol} exchange={exchange} detail={data} marketOpen={marketOpen} />
+          <StockHeader
+            symbol={symbol}
+            exchange={exchange}
+            detail={data}
+            marketOpen={marketOpen}
+            streaming={Boolean(liveQuote) && marketOpen}
+          />
           {detail.error && !data ? (
             <InlineError
               className="mt-6"
@@ -274,7 +303,10 @@ export default function StockDetailScreen() {
                     batchDate={picks.data?.date}
                     picksLoading={picks.isPending}
                     onReadCase={() => setTab('analysis')}
+                    onOpenFundamentals={() => setTab('fundamentals')}
                   />
+                ) : tab === 'fundamentals' ? (
+                  <FundamentalsSection symbol={data.symbol} exchange={exchange} />
                 ) : tab === 'analysis' ? (
                   <AnalysisTab
                     detail={data}
