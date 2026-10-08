@@ -66,20 +66,23 @@ export function usePaperSegments(profileId?: string) {
   });
 }
 
-export function usePaperPortfolio(segment: CashSegment, profileId?: string) {
+/** `enabled: false` (a live ticket) reads nothing — the order ticket mounts these either way. */
+export function usePaperPortfolio(segment: CashSegment, profileId?: string, enabled = true) {
   return useQuery({
     queryKey: paperKeys.portfolio(segment, profileId),
     queryFn: () => paperApi.portfolio(segment, profileId),
+    enabled,
     staleTime: 10_000,
-    refetchInterval: () => livePriceInterval(POLL_MS),
+    refetchInterval: () => (enabled ? livePriceInterval(POLL_MS) : false),
   });
 }
 
 /** Both pools' orders, newest first. 200 is the server's ceiling. */
-export function usePaperOrders(profileId?: string, limit = 200) {
+export function usePaperOrders(profileId?: string, limit = 200, enabled = true) {
   return useQuery({
     queryKey: paperKeys.orders(limit, profileId),
     queryFn: () => paperApi.orders(limit, profileId),
+    enabled,
     staleTime: 10_000,
     // A resting order can fill on the server's matcher at any moment.
     refetchInterval: (query) =>

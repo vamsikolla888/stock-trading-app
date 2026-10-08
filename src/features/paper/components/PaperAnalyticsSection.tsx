@@ -101,7 +101,7 @@ function Headline({ a }: { a: PaperAnalytics }) {
         tone={a.wallet.netPnl}
         sub={
           a.wallet.returnPct != null
-            ? `${formatSignedPercent(a.wallet.returnPct)} of capital`
+            ? `${formatSignedPercent(a.wallet.returnPct)} · after charges`
             : 'after charges'
         }
       />
@@ -265,7 +265,6 @@ function AllocationCard({ a }: { a: PaperAnalytics }) {
           <KeyValueRow
             key={line.key}
             label={line.label}
-            hint={line.hint}
             value={mask(formatSignedINR(line.amount))}
             divider={index > 0}
           />
@@ -277,7 +276,7 @@ function AllocationCard({ a }: { a: PaperAnalytics }) {
         />
       </ListCard>
       <Text className="mt-2 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        Realised profit shows as a negative line: it came back into the cash above it.
+        Closed-trade profit is already in the cash, so it shows as a minus.
       </Text>
     </Section>
   );
@@ -359,6 +358,12 @@ function DistributionCard({ a }: { a: PaperAnalytics }) {
           );
         })}
       </ListCard>
+      {distribution.hasNegative ? (
+        <Text className="mt-2 text-[11px] text-danger-600 dark:text-danger-dark">
+          {mask(formatINR(Math.abs(distribution.negativeTotal)))} shortfall after a forced intraday
+          square-off — included in the total.
+        </Text>
+      ) : null}
       {distribution.unpricedPositions > 0 ? (
         <Text className="mt-2 text-[11px] text-ink-faint dark:text-ink-dark-faint">
           {plural(distribution.unpricedPositions, 'position')} with no price yet, carried at cost.
@@ -387,7 +392,7 @@ function TradesCard({ a }: { a: PaperAnalytics }) {
         <KeyValueRow label="Closing fills" value={String(t.closingFills)} divider />
         <KeyValueRow
           label="Profit factor"
-          hint="Gross profit ÷ gross loss"
+          hint="Wins ÷ losses, after charges"
           value={
             t.profitFactor == null
               ? t.closingFills > 0
@@ -404,14 +409,15 @@ function TradesCard({ a }: { a: PaperAnalytics }) {
         />
         <KeyValueRow
           label="Expectancy"
-          hint="Per closing fill"
+          hint="Per closed trade"
           value={t.expectancy == null ? '—' : mask(formatSignedINR(t.expectancy))}
           trend={t.expectancy}
           divider
         />
         {t.chargesPctOfGrossProfit != null ? (
           <KeyValueRow
-            label="Charges vs gross profit"
+            label="Charges vs winnings"
+            hint="Of gross profit"
             value={formatPercent(t.chargesPctOfGrossProfit, 1)}
             divider
           />
@@ -437,8 +443,8 @@ function ChargesCard({ a }: { a: PaperAnalytics }) {
         ))}
         {c.unitemised > 0 ? (
           <KeyValueRow
-            label="Before itemisation"
-            hint="Total exact, split never recorded"
+            label="Not itemised"
+            hint="Total only"
             value={mask(formatINR(c.unitemised))}
             divider
           />
@@ -454,7 +460,11 @@ function CashCheck({ a }: { a: PaperAnalytics }) {
   const r = a.reconciliation;
   const status = STATUS[r.status];
   return (
-    <Section title="Cash check" right={<Badge label={status.label} variant={status.tone} />}>
+    <Section
+      title="Cash check"
+      note="fills replayed vs stored"
+      right={<Badge label={status.label} variant={status.tone} />}
+    >
       <ListCard className="px-3.5">
         <KeyValueRow label="Replayed from the ledger" value={mask(formatINR(r.replayedCash))} />
         <KeyValueRow label="Stored balance" value={mask(formatINR(r.storedCash))} divider />

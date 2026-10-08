@@ -91,12 +91,12 @@ export function StrategyTodaySection({ strategyId }: { strategyId: string }) {
           </Text>
           {data.matches.length === 0 ? (
             <InlineEmpty
-              title="Nothing matches on the latest close"
-              message={`Normal for a crossover rule, which only fires on the bar it crosses.${
+              title="Nothing fires today"
+              message={
                 data.skippedForInsufficientBars > 0
-                  ? ` ${formatNumber(data.skippedForInsufficientBars, 0)} stocks had too little history to evaluate.`
-                  : ''
-              }`}
+                  ? `${formatNumber(data.skippedForInsufficientBars, 0)} stocks had too little history to evaluate.`
+                  : undefined
+              }
             />
           ) : (
             <>

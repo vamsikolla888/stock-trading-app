@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import FlaskConical from 'lucide-react-native/icons/flask-conical';
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
@@ -22,12 +22,22 @@ import {
 } from '@/features/fno/lib/format';
 import { useNow } from '@/hooks/useNow';
 import { cn } from '@/lib/utils/cn';
-import { formatINR, formatQuantity, formatSignedINR } from '@/lib/utils/formatters';
+import {
+  formatINR,
+  formatQuantity,
+  formatSignedINR,
+  formatSignedPercent,
+} from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
-import { usePaperBook, useSettleExpiredPaper, useSquareOffPaper } from '../hooks';
+import {
+  useLivePaperMarks,
+  usePaperBook,
+  useSettleExpiredPaper,
+  type PositionMark,
+} from '../hooks';
 import {
   expiredCount,
   isExpired,
@@ -37,41 +47,49 @@ import {
   settlementOutcome,
   type SettlementOutcome,
 } from '../lib/book';
+import { exitOrderFor, livePnlPct, ltpProvenance } from '../lib/paperFno';
 import { paperChainHref } from '../lib/routes';
-import type { FnoBook, FnoOrderView, FnoPositionView } from '../types';
+import type { FnoBook, FnoPositionView } from '../types';
 
 import { PayoffSheet } from './PayoffSheet';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
 
+/** Exit / Add hand a contract to the screen's ticket — they never place anything themselves. */
+export type PositionTrade = (p: FnoPositionView, side: 'BUY' | 'SELL', lots: number) => void;
+
 /**
- * The paper F&O book — the web's /fno/paper/positions: what is held, what it is worth and what
- * it is exposed to. Net greeks lead, above the rows: a multi-leg book is not described by its
- * legs. A net greek of null is NOT zero (nothing could be greeked), and `ungreekedCount` says
- * how much of the book the shown nets leave out. Margin is an approximation, not SPAN.
+ * The paper F&O book — the web's positions, marked LIVE: every position the server says is
+ * streamable is re-priced per tick from the F&O feed (with the user's own Groww market data);
+ * the rest keep the book's polled price and say where it came from and how old it is. Net
+ * greeks lead, above the rows: a multi-leg book is not described by its legs. A net greek of
+ * null is NOT zero, and `ungreekedCount` says how much of the book the nets leave out.
  *
- * One section per underlying, each with its expiry payoff priced at what the legs cost.
- * Square-off is an opposite order at the live price, so it can come back REJECTED (no price to
- * close against) like any order — that answer is shown, not treated as a failure.
+ * EXIT AND ADD OPEN THE TICKET (the opposite side and the whole size, or one more lot the same
+ * way), so the last thing read before an order is the server's own estimate — the P&L the exit
+ * books, the margin it releases. A partial exit is the same Exit with fewer lots.
+ *
+ * `compact` (the cash paper screen's F&O tab): the rows alone, without settlement, nets,
+ * payoffs or caveats — the full book is one tap away.
  */
-export function PaperPositions() {
+export function PaperPositions({
+  onTrade,
+  compact = false,
+}: {
+  onTrade: PositionTrade;
+  compact?: boolean;
+}) {
   const router = useRouter();
   const book = usePaperBook();
-  // Destructured so the row callbacks stay stable (the mutation object is new every render).
-  const {
-    mutate: squareOff,
-    isPending: squaringOff,
-    variables: squaringVariables,
-  } = useSquareOffPaper();
   const settle = useSettleExpiredPaper();
-  const now = useNow(60_000);
+  const now = useNow(5_000);
   const today = todayIst(now);
   const [settled, setSettled] = useState<SettlementOutcome | null>(null);
-  const [rejected, setRejected] = useState<FnoOrderView | null>(null);
   const [payoffFor, setPayoffFor] = useState<string | null>(null);
 
   const data = book.data;
   const positions = useMemo(() => data?.positions ?? [], [data]);
+  const { markOf, totals } = useLivePaperMarks(positions);
   const groups = useMemo(() => payoffGroups(positions), [positions]);
   const expired = expiredCount(positions, today);
   const payoffGroup = payoffFor ? (groups.find((g) => g.underlying === payoffFor) ?? null) : null;
@@ -85,49 +103,6 @@ export function PaperPositions() {
         }),
       ),
     [router, today],
-  );
-
-  const confirmSquareOff = useCallback(
-    (p: FnoPositionView) => {
-      if (squaringOff) return;
-      const lots = Math.abs(p.lots);
-      Alert.alert(
-        'Square off at the live price?',
-        `${p.side === 'LONG' ? 'Sell' : 'Buy'} ${lotsLabel(lots)} of ${p.tradingsymbol} in your paper book. Charges apply as on any order.`,
-        [
-          { text: 'Keep it', style: 'cancel' },
-          {
-            text: 'Square off',
-            style: 'destructive',
-            onPress: () => {
-              setRejected(null);
-              squareOff(
-                { exchange: p.exchange, tradingsymbol: p.tradingsymbol },
-                {
-                  onSuccess: (order) => {
-                    if (order.status === 'FILLED') {
-                      toast.success(
-                        'Squared off',
-                        `${order.tradingsymbol} at ${formatINR(order.price)}${
-                          order.realisedPnl != null
-                            ? ` · realised ${formatSignedINR(order.realisedPnl)}`
-                            : ''
-                        }`,
-                      );
-                    } else {
-                      setRejected(order);
-                      toast.error('Square-off rejected', order.note ?? order.tradingsymbol);
-                    }
-                  },
-                  onError: (error) => toast.error('Could not square off', getErrorMessage(error)),
-                },
-              );
-            },
-          },
-        ],
-      );
-    },
-    [squareOff, squaringOff, setRejected],
   );
 
   const runSettle = () => {
@@ -151,7 +126,9 @@ export function PaperPositions() {
   if (book.isPending) {
     return (
       <View className="gap-4">
-        <View className="h-[132px] rounded-card bg-surface-sunk dark:bg-surface-sunk-dark" />
+        {compact ? null : (
+          <View className="h-[132px] rounded-card bg-surface-sunk dark:bg-surface-sunk-dark" />
+        )}
         <ListSkeleton rows={3} />
       </View>
     );
@@ -167,7 +144,24 @@ export function PaperPositions() {
   }
   if (!data) return null;
 
-  const pendingSymbol = squaringOff ? (squaringVariables?.tradingsymbol ?? null) : null;
+  const rows = (list: readonly FnoPositionView[]) => (
+    <ListCard>
+      {list.map((p, index) => (
+        <React.Fragment key={p.id}>
+          {index > 0 ? <RowDivider /> : null}
+          <PositionRow
+            position={p}
+            mark={markOf(p)}
+            now={now}
+            dte={positionDteLabel(p, today)}
+            expired={isExpired(p.expiry, today)}
+            onOpen={openChain}
+            onTrade={onTrade}
+          />
+        </React.Fragment>
+      ))}
+    </ListCard>
+  );
 
   return (
     <View>
@@ -177,12 +171,12 @@ export function PaperPositions() {
         </Text>
       ) : null}
 
-      {expired > 0 ? (
+      {!compact && expired > 0 ? (
         <View className="mb-4 gap-2.5">
           <Banner
             tone="warning"
-            title={`${expired} position${expired === 1 ? ' has' : 's have'} passed expiry`}
-            message="Settling closes them at INTRINSIC value, not at zero — an expiring in-the-money option is worth real money and the exchange cash-settles it."
+            title={`${expired} position${expired === 1 ? '' : 's'} past expiry`}
+            message="Settles at intrinsic value after the close, or settle now."
           />
           <Button
             label={settle.isPending ? 'Settling…' : 'Settle expired positions'}
@@ -205,25 +199,16 @@ export function PaperPositions() {
         <Banner className="mb-4" tone="error" message={getErrorMessage(settle.error)} />
       ) : null}
 
-      {positions.length > 0 ? <NetExposure book={data} /> : null}
-
-      {rejected ? (
-        <Banner
-          className="mt-4"
-          tone="error"
-          title={`Square-off rejected — ${rejected.tradingsymbol}`}
-          message={rejected.note ?? 'The server gave no reason.'}
-        />
-      ) : null}
+      {!compact && positions.length > 0 ? <NetExposure book={data} /> : null}
 
       {positions.length === 0 ? (
         <View className="items-center gap-3 rounded-card border border-line bg-surface px-5 py-8 dark:border-line-dark dark:bg-surface-dark">
           <IconTile Icon={FlaskConical} tone="violet" size="lg" />
           <Text className="text-center text-base font-bold text-ink dark:text-ink-dark">
-            Nothing held in your paper book
+            No open F&amp;O positions
           </Text>
           <Text className="text-center text-[13px] text-ink-muted dark:text-ink-dark-muted">
-            Open the option chain to buy or sell your first contract — with paper money.
+            Nothing held.
           </Text>
           <Button
             label="Open option chain"
@@ -231,6 +216,8 @@ export function PaperPositions() {
             className="mt-1 self-stretch"
           />
         </View>
+      ) : compact ? (
+        <View className="mt-1">{rows(positions)}</View>
       ) : (
         groups.map((g) => (
           <Section
@@ -250,34 +237,25 @@ export function PaperPositions() {
               />
             }
           >
-            <ListCard>
-              {g.positions.map((p, index) => (
-                <React.Fragment key={p.id}>
-                  {index > 0 ? <RowDivider /> : null}
-                  <PositionRow
-                    position={p}
-                    dte={positionDteLabel(p, today)}
-                    expired={isExpired(p.expiry, today)}
-                    busy={pendingSymbol === p.tradingsymbol}
-                    disabled={squaringOff}
-                    onOpen={openChain}
-                    onSquareOff={confirmSquareOff}
-                  />
-                </React.Fragment>
-              ))}
-            </ListCard>
+            {rows(g.positions)}
           </Section>
         ))
       )}
 
       {positions.length > 0 ? (
-        <Text className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-          {book.isFetching ? 'Refreshing… ' : ''}Marked against live quotes about every 25 s while
-          the market is open. Tap a position for its chain.
+        <Text
+          className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint"
+          style={NUM}
+        >
+          {book.isFetching ? 'Refreshing… ' : ''}
+          {totals.unpriced > 0
+            ? `${totals.unpriced} of ${positions.length} without a price — the open P&L leaves ${totals.unpriced === 1 ? 'it' : 'them'} out. `
+            : ''}
+          Live where Groww streams the contract; otherwise marked about every 10 s.
         </Text>
       ) : null}
 
-      {data.caveats.length > 0 ? (
+      {!compact && data.caveats.length > 0 ? (
         <Disclosure
           className="mt-6"
           title="What these numbers assume"
@@ -287,12 +265,12 @@ export function PaperPositions() {
         </Disclosure>
       ) : null}
 
-      <PayoffSheet group={payoffGroup} onClose={() => setPayoffFor(null)} />
+      {compact ? null : <PayoffSheet group={payoffGroup} onClose={() => setPayoffFor(null)} />}
     </View>
   );
 }
 
-/* ── Summary and net exposure ────────────────────────────────────────────────────────── */
+/* ── Net exposure ────────────────────────────────────────────────────────────────────── */
 
 function NetExposure({ book }: { book: FnoBook }) {
   const t = book.totals;
@@ -311,7 +289,7 @@ function NetExposure({ book }: { book: FnoBook }) {
     {
       label: 'Net theta',
       value: signedGreek(t.netTheta, 0),
-      why: t.netTheta == null ? 'no model output' : 'per day, all else equal',
+      why: t.netTheta == null ? 'no model output' : 'per day',
     },
     {
       label: 'Net vega',
@@ -320,7 +298,7 @@ function NetExposure({ book }: { book: FnoBook }) {
     },
   ];
   return (
-    <Section title="Net exposure" note="scaled and signed">
+    <Section title="Net exposure" note="scaled by quantity, signed">
       <View className="flex-row flex-wrap rounded-card border border-line bg-surface p-1.5 dark:border-line-dark dark:bg-surface-dark">
         {greeks.map((g) => (
           <View
@@ -341,9 +319,7 @@ function NetExposure({ book }: { book: FnoBook }) {
       </View>
       {missing > 0 ? (
         <Note className="mt-2">
-          {missing} position{missing === 1 ? ' has' : 's have'} no implied volatility, so no greeks
-          could be computed for {missing === 1 ? 'it' : 'them'}. The nets above are the sum over the
-          rest — not the whole book’s exposure.
+          {missing} position{missing === 1 ? '' : 's'} without IV, excluded from the nets.
         </Note>
       ) : null}
     </Section>
@@ -354,101 +330,140 @@ function NetExposure({ book }: { book: FnoBook }) {
 
 const PositionRow = memo(function PositionRow({
   position: p,
+  mark,
+  now,
   dte,
   expired,
-  busy,
-  disabled,
   onOpen,
-  onSquareOff,
+  onTrade,
 }: {
   position: FnoPositionView;
+  mark: PositionMark;
+  now: number;
   dte: string;
   expired: boolean;
-  busy: boolean;
-  disabled: boolean;
   onOpen: (p: FnoPositionView) => void;
-  onSquareOff: (p: FnoPositionView) => void;
+  onTrade: PositionTrade;
 }) {
   const { colors } = useTheme();
-  const title = contractTitle({ underlying: p.underlying, kind: p.kind, strike: p.strike });
-  const short = p.side === 'SHORT';
+  const title = contractTitle({
+    underlying: p.underlying,
+    kind: p.kind,
+    strike: p.kind === 'FUT' ? null : p.strike,
+  });
+  const short = p.lots < 0;
   const lots = Math.abs(p.lots);
-  const pnl = p.unrealisedPnl;
+  const pnl = mark.pnl;
+  const pct = livePnlPct(pnl, p);
   const isOption = p.kind !== 'FUT';
+  const exit = exitOrderFor(p);
+  const value = mark.ltp != null ? mark.ltp * p.quantity : p.currentValue;
+  const source = ltpProvenance(p, mark.streamed, now);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${title}, ${short ? 'short' : 'long'} ${lotsLabel(lots)}, unrealised P&L ${
-        pnl == null ? 'unknown, no live price' : formatSignedINR(pnl)
-      }. Opens the paper chain`}
-      onPress={() => onOpen(p)}
-      className="gap-2 px-3.5 py-3 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
-    >
-      <View className="flex-row items-start gap-3">
-        <View className="min-w-0 flex-1">
-          <Text className="text-sm font-semibold text-ink dark:text-ink-dark" numberOfLines={1}>
-            {title}
-          </Text>
-          <View className="mt-1 flex-row flex-wrap items-center gap-1.5">
-            <Tag label={p.side} tone={short ? 'warning' : 'info'} />
-            {expired ? <Tag label="Expired" tone="warning" /> : null}
-            <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
-              {expiryLabel(p.expiry)} · {dte}
+    <View className="gap-2 px-3.5 py-3">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${title}, ${short ? 'short' : 'long'} ${lotsLabel(lots)}, unrealised P&L ${
+          pnl == null ? 'unknown, no live price' : formatSignedINR(pnl)
+        }. Opens the paper chain`}
+        onPress={() => onOpen(p)}
+        className="gap-2 active:opacity-70"
+      >
+        <View className="flex-row items-start gap-3">
+          <View className="min-w-0 flex-1">
+            <Text className="text-sm font-semibold text-ink dark:text-ink-dark" numberOfLines={1}>
+              {title}
+            </Text>
+            <View className="mt-1 flex-row flex-wrap items-center gap-1.5">
+              <Tag label={short ? 'SHORT' : 'LONG'} tone={short ? 'warning' : 'info'} />
+              {expired ? <Tag label="Expired" tone="warning" /> : null}
+              {!expired && p.daysToExpiry === 0 ? (
+                <Tag label="Expires today" tone="warning" />
+              ) : null}
+              <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
+                {expiryLabel(p.expiry)} · {dte}
+              </Text>
+            </View>
+          </View>
+          <View className="items-end">
+            <ChangeText value={pnl} className="text-sm" style={NUM}>
+              {formatSignedINR(pnl)}
+            </ChangeText>
+            <Text
+              className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint"
+              style={NUM}
+            >
+              {pnl == null
+                ? 'no live price'
+                : pct != null
+                  ? formatSignedPercent(pct)
+                  : 'unrealised'}
             </Text>
           </View>
         </View>
-        <View className="items-end">
-          <ChangeText value={pnl} className="text-sm" style={NUM}>
-            {formatSignedINR(pnl)}
-          </ChangeText>
-          <Text className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-            {pnl == null ? 'no live price' : 'unrealised'}
+
+        <View className="flex-row items-center gap-2">
+          <Text
+            className="min-w-0 flex-1 text-xs text-ink-muted dark:text-ink-dark-muted"
+            style={NUM}
+            numberOfLines={2}
+          >
+            <Text className={cn(short && 'text-danger-600 dark:text-danger-dark')}>
+              {short ? '−' : ''}
+              {lotsLabel(lots)}
+            </Text>
+            {` × ${formatQuantity(p.lotSize)} · Avg ${formatINR(p.avgPrice)} · LTP ${
+              mark.ltp != null ? formatINR(mark.ltp) : DASH
+            }`}
           </Text>
+          <View className="flex-row items-center gap-1">
+            {mark.streamed ? (
+              <View
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: colors.success }}
+              />
+            ) : null}
+            <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint" numberOfLines={1}>
+              {source}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      <Text
-        className="text-xs text-ink-muted dark:text-ink-dark-muted"
-        style={NUM}
-        numberOfLines={2}
-      >
-        <Text className={cn(short && 'text-danger-600 dark:text-danger-dark')}>
-          {short ? '−' : ''}
-          {lotsLabel(lots)}
-        </Text>
-        {` × ${formatQuantity(p.lotSize)} · Avg ${formatINR(p.avgPrice)} · LTP ${
-          p.ltp != null ? formatINR(p.ltp) : DASH
-        }`}
-      </Text>
-
-      <View className="flex-row items-center gap-3">
         <Text
-          className="flex-1 text-[11px] text-ink-faint dark:text-ink-dark-faint"
+          className="text-[11px] text-ink-faint dark:text-ink-dark-faint"
           style={NUM}
           numberOfLines={2}
         >
-          Value {p.currentValue != null ? formatINR(p.currentValue, 0) : DASH}
+          Value {value != null ? formatINR(value, 0) : DASH}
           {isOption ? ` · IV ${ivPct(p.impliedVolatility)}` : ''}
           {` · Δ ${signedGreek(p.greeks?.delta, 1)}`}
           {isOption ? ` · Θ ${signedGreek(p.greeks?.theta, 0)}` : ''}
           {` · Margin ${p.marginBlocked > 0 ? formatINR(p.marginBlocked, 0) : DASH}`}
         </Text>
-        {busy ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+        {p.realisedPnl !== 0 || p.totalCharges > 0 ? (
+          <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint" style={NUM}>
+            {p.realisedPnl !== 0 ? `Realised ${formatSignedINR(p.realisedPnl)} · ` : ''}
+            Charges {formatINR(p.totalCharges)}
+          </Text>
+        ) : null}
+      </Pressable>
+
+      <View className="flex-row justify-end gap-2">
+        <PillButton
+          label="Add"
+          tone="brand"
+          disabled={expired}
+          onPress={() => onTrade(p, short ? 'SELL' : 'BUY', 1)}
+          accessibilityLabel={`Add a lot to ${title}`}
+        />
         <PillButton
           label="Exit"
-          onPress={() => onSquareOff(p)}
-          disabled={disabled}
-          accessibilityLabel={`Square off ${title}`}
+          disabled={expired}
+          onPress={() => onTrade(p, exit.side, exit.lots)}
+          accessibilityLabel={`Exit ${title} — opens the ticket for all ${lotsLabel(lots)}`}
         />
       </View>
-
-      {p.realisedPnl !== 0 || p.totalCharges > 0 ? (
-        <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint" style={NUM}>
-          {p.realisedPnl !== 0 ? `Realised ${formatSignedINR(p.realisedPnl)} · ` : ''}
-          Charges {formatINR(p.totalCharges)}
-        </Text>
-      ) : null}
-    </Pressable>
+    </View>
   );
 });

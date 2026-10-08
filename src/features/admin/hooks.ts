@@ -1,16 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { newsKeys } from '@/features/news/hooks';
 import { tradingKeys } from '@/features/trading/hooks';
 import type { MstockConnectPayload } from '@/features/trading/types';
+import { isApiError } from '@/types/api';
 
 import { adminApi, opsApi, recommendationAdminApi } from './api';
+import { growwUnsupported } from './lib/apiUsage';
+import { hasRunningRun } from './lib/jobs';
 import { mergeUserUpdate } from './lib/users';
 import type {
   AdminJobKind,
-  BrokerUsageRange,
+  AiProvider,
+  ApiProvider,
+  ApiUsageRange,
   BrowserResearchConfig,
   BrowserResearchGuardrails,
   CatalogAction,
+  KillSwitchAdminState,
   ObsRange,
   PlatformUser,
   PlatformUserUpdate,
@@ -24,12 +31,16 @@ export const adminKeys = {
   serviceHealth: (range: ObsRange) => ['admin', 'service-health', range] as const,
   analytics: (range: ObsRange) => ['admin', 'server-analytics', range] as const,
   logs: (minLevel: number) => ['admin', 'logs', minLevel] as const,
-  aiUsage: (period: UsagePeriod) => ['admin', 'ai-usage', period] as const,
-  brokerUsage: (range: BrokerUsageRange) => ['admin', 'broker-usage', range] as const,
+  aiUsage: (period: UsagePeriod, provider?: AiProvider) =>
+    ['admin', 'ai-usage', period, provider ?? 'all'] as const,
+  apiUsage: (range: ApiUsageRange, provider: ApiProvider) =>
+    ['admin', 'api-usage', range, provider] as const,
   users: ['admin', 'users'] as const,
   jobs: (kind: AdminJobKind) => ['admin', 'jobs', kind] as const,
   jobsAll: ['admin', 'jobs'] as const,
   jobLogs: ['admin', 'job-logs'] as const,
+  newsRunsAll: ['admin', 'news-runs'] as const,
+  newsRuns: (pageSize: number) => ['admin', 'news-runs', pageSize] as const,
   browserResearch: ['admin', 'browser-research'] as const,
   browserResearchRuns: ['admin', 'browser-research-runs'] as const,
   recServiceStatus: ['recommendations', 'service-status'] as const,
@@ -96,21 +107,66 @@ export function useRecentLogs(minLevel: number, live: boolean) {
 
 // ── Usage ──────────────────────────────────────────────────────────────────────────────
 
-export function useAiUsage(period: UsagePeriod) {
+export function useAiUsage(period: UsagePeriod, provider?: AiProvider, enabled = true) {
   return useQuery({
-    queryKey: adminKeys.aiUsage(period),
-    queryFn: () => adminApi.aiUsage(period),
+    queryKey: adminKeys.aiUsage(period, provider),
+    queryFn: () => adminApi.aiUsage(period, provider),
+    enabled,
     staleTime: 60_000,
   });
 }
 
-export function useBrokerUsage(range: BrokerUsageRange) {
+/**
+ * One provider's usage. Asks the server for that provider alone; a server that predates the
+ * filter refuses it (422), and then the every-provider report stands in — `filtered` says which
+ * one the screen got, so it can say what it can and cannot split.
+ */
+export function useProviderUsage(period: UsagePeriod, provider: AiProvider) {
+  const filtered = useAiUsage(period, provider);
+  const unsupported = !filtered.data && isApiError(filtered.error) && filtered.error.status === 422;
+  const all = useAiUsage(period, undefined, unsupported);
+  const source = unsupported ? all : filtered;
+  return {
+    data: source.data,
+    filtered: !unsupported,
+    error: source.error,
+    isPending: unsupported ? all.isPending : filtered.isPending,
+    refetch: () => (unsupported ? all.refetch() : filtered.refetch()),
+  };
+}
+
+function useApiUsageReport(range: ApiUsageRange, provider: ApiProvider, enabled = true) {
   return useQuery({
-    queryKey: adminKeys.brokerUsage(range),
-    queryFn: () => adminApi.brokerUsage(range),
+    queryKey: adminKeys.apiUsage(range, provider),
+    queryFn: ({ signal }) => adminApi.apiUsage(range, provider, signal),
+    enabled,
     staleTime: ADMIN_STALE_MS,
-    refetchInterval: 30_000,
+    // The serving process's live state (limiter queues, the tail) moves; history is hourly. A
+    // server that refused the provider (422) will refuse it again — no point asking every 30s.
+    refetchInterval: (query) =>
+      isApiError(query.state.error) && query.state.error.status === 422 ? false : 30_000,
   });
+}
+
+/**
+ * One third-party API's usage report. Groww is asked by name; a server that predates Groww
+ * measuring refuses the parameter (422) or answers without a provider — then the mStock report
+ * stands in and `fallback` says so, so the screen never labels mStock figures as Groww.
+ */
+export function useApiUsage(range: ApiUsageRange, provider: ApiProvider) {
+  const asked = useApiUsageReport(range, provider);
+  const unsupported = growwUnsupported(provider, asked.error, asked.data);
+  // Same key as the mStock view, so switching back is instant. Enabled only when needed.
+  const mstock = useApiUsageReport(range, 'mstock', unsupported);
+  const source = unsupported ? mstock : asked;
+  return {
+    data: source.data,
+    /** True when Groww was asked for and the mStock report is shown instead. */
+    fallback: unsupported,
+    error: source.error,
+    isPending: source.isPending,
+    refetch: () => source.refetch(),
+  };
 }
 
 // ── Users ──────────────────────────────────────────────────────────────────────────────
@@ -179,6 +235,32 @@ export function useUpdateAdminCron() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: adminKeys.jobs('cron') });
       void queryClient.invalidateQueries({ queryKey: adminKeys.jobLogs });
+    },
+  });
+}
+
+// ── News ingestion ─────────────────────────────────────────────────────────────────
+
+/** Recent ingestion batches with their per-provider timeline. Polls quickly only while a run is
+ *  still waiting on providers to report back. */
+export function useAdminNewsRuns(pageSize = 15, enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.newsRuns(pageSize),
+    queryFn: ({ signal }) => adminApi.newsRuns(pageSize, signal),
+    enabled,
+    staleTime: 10_000,
+    refetchInterval: (query) => (hasRunningRun(query.state.data?.runs ?? []) ? 10_000 : 60_000),
+  });
+}
+
+export function useTriggerNewsIngestion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: adminApi.triggerNewsIngestion,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: adminKeys.newsRunsAll });
+      // Today's activity rows read the same runs through the news feature.
+      void queryClient.invalidateQueries({ queryKey: [...newsKeys.all, 'runs'] });
     },
   });
 }
@@ -264,15 +346,27 @@ export function useSetLiveTradingEnabled() {
   });
 }
 
+/**
+ * Engage (with a reason) or release the platform kill switch. Never optimistic: the shared
+ * kill-switch query (read by every order ticket) takes the state the server CONFIRMED, then
+ * re-reads it.
+ */
 export function useKillSwitchControl() {
   const queryClient = useQueryClient();
+  const confirmed = (state: KillSwitchAdminState) =>
+    queryClient.setQueryData(tradingKeys.killSwitch, state);
   const refresh = () => queryClient.invalidateQueries({ queryKey: tradingKeys.killSwitch });
   return {
     engage: useMutation({
       mutationFn: (reason: string) => adminApi.engageKillSwitch(reason),
+      onSuccess: confirmed,
       onSettled: refresh,
     }),
-    disengage: useMutation({ mutationFn: adminApi.disengageKillSwitch, onSettled: refresh }),
+    disengage: useMutation({
+      mutationFn: adminApi.disengageKillSwitch,
+      onSuccess: confirmed,
+      onSettled: refresh,
+    }),
   };
 }
 

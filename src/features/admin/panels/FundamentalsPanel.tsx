@@ -1,6 +1,8 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, Switch, Text, View } from 'react-native';
 
+import { SplitColumns } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Badge } from '@/components/ui/Badge';
 import { Banner } from '@/components/ui/Banner';
@@ -46,6 +48,7 @@ function when(iso: string | null | undefined): string {
  * spend against the on-demand budget, failed jobs with a retry, and which indices feed it.
  */
 export function FundamentalsPanel() {
+  const layout = useScreenLayout();
   const overview = useFundamentalsOverview();
   const failed = useFailedFundamentalJobs();
   const indices = useFundamentalIndices();
@@ -74,174 +77,192 @@ export function FundamentalsPanel() {
       title="Fundamental analysis"
       subtitle={o ? `Framework ${o.frameworkVersion}` : 'Weekly batch and on-demand jobs'}
       onRefresh={() => Promise.all([overview.refetch(), failed.refetch(), indices.refetch()])}
+      fill
     >
-      {overview.isPending ? (
-        <ListSkeleton rows={4} />
-      ) : !o ? (
-        <AdminQueryError
-          what="the fundamentals overview"
-          error={overview.error}
-          onRetry={() => void overview.refetch()}
-        />
-      ) : (
-        <View>
-          {o.alerts.map((alert) => (
-            <Banner key={alert} tone="warning" className="mb-3" message={alert} />
-          ))}
-          <Card>
-            <KeyValueRow
-              label="Weekly batch"
-              hint={
-                o.schedule ? `Next ${when(o.schedule.nextRunAt)}` : 'No worker has scheduled it'
-              }
-              value={o.schedule ? o.schedule.pattern : 'Not scheduled'}
+      <SplitColumns
+        split={!layout.compact}
+        left={
+          overview.isPending ? (
+            <ListSkeleton rows={4} />
+          ) : !o ? (
+            <AdminQueryError
+              what="the fundamentals overview"
+              error={overview.error}
+              onRetry={() => void overview.refetch()}
             />
-            <KeyValueRow
-              label="Failed in the last 24 h"
-              value={formatNumber(o.failedLast24h, 0)}
-              trend={o.failedLast24h > 0 ? -1 : undefined}
-              divider
-            />
-            <KeyValueRow
-              label="High-priority wait (p95)"
-              value={
-                o.highWaitP95Seconds == null ? '—' : `${formatNumber(o.highWaitP95Seconds, 0)} s`
-              }
-              divider
-            />
-            <KeyValueRow
-              label="AI provider errors"
-              hint={`${formatNumber(o.provider.ok, 0)} ok · ${formatNumber(o.provider.error, 0)} failed`}
-              value={
-                o.provider.errorRatePct == null
-                  ? '—'
-                  : `${formatNumber(o.provider.errorRatePct, 1)}%`
-              }
-              divider
-            />
-            <KeyValueRow
-              label="On-demand AI budget today"
-              hint={`${formatNumber(o.ai.onDemandBudget.calls, 0)} / ${formatNumber(o.ai.onDemandBudget.callCap, 0)} calls`}
-              value={`$${formatNumber(o.ai.onDemandBudget.usd, 2)} / $${formatNumber(o.ai.onDemandBudget.usdCap, 2)}`}
-              trend={o.ai.onDemandBudget.exceeded ? -1 : undefined}
-              divider
-            />
-          </Card>
-          <Button
-            label="Start a batch now"
-            variant="secondary"
-            className="mt-3"
-            loading={startBatch.isPending}
-            disabled={Boolean(o.currentBatch)}
-            onPress={confirmStart}
-          />
-
-          <BatchCard title="Current batch" run={o.currentBatch} />
-          <BatchCard title="Last batch" run={o.lastBatch} />
-
-          <Section title="Average stage time" note="last 24 h">
-            <ListCard className="px-3.5">
-              {Object.entries(o.stageAvgMs).map(([stage, ms], index) => (
-                <KeyValueRow
-                  key={stage}
-                  label={STAGE_TEXT[stage as JobStage] ?? stage}
-                  value={ms == null ? '—' : `${formatNumber(ms / 1000, 1)} s`}
-                  divider={index > 0}
-                />
+          ) : (
+            <View>
+              {o.alerts.map((alert) => (
+                <Banner key={alert} tone="warning" className="mb-3" message={alert} />
               ))}
-            </ListCard>
-          </Section>
-        </View>
-      )}
+              <Card>
+                <KeyValueRow
+                  label="Weekly batch"
+                  hint={
+                    o.schedule ? `Next ${when(o.schedule.nextRunAt)}` : 'No worker has scheduled it'
+                  }
+                  value={o.schedule ? o.schedule.pattern : 'Not scheduled'}
+                />
+                <KeyValueRow
+                  label="Failed in the last 24 h"
+                  value={formatNumber(o.failedLast24h, 0)}
+                  trend={o.failedLast24h > 0 ? -1 : undefined}
+                  divider
+                />
+                <KeyValueRow
+                  label="High-priority wait (p95)"
+                  value={
+                    o.highWaitP95Seconds == null
+                      ? '—'
+                      : `${formatNumber(o.highWaitP95Seconds, 0)} s`
+                  }
+                  divider
+                />
+                <KeyValueRow
+                  label="AI provider errors"
+                  hint={`${formatNumber(o.provider.ok, 0)} ok · ${formatNumber(o.provider.error, 0)} failed`}
+                  value={
+                    o.provider.errorRatePct == null
+                      ? '—'
+                      : `${formatNumber(o.provider.errorRatePct, 1)}%`
+                  }
+                  divider
+                />
+                <KeyValueRow
+                  label="On-demand AI budget today"
+                  hint={`${formatNumber(o.ai.onDemandBudget.calls, 0)} / ${formatNumber(o.ai.onDemandBudget.callCap, 0)} calls`}
+                  value={`$${formatNumber(o.ai.onDemandBudget.usd, 2)} / $${formatNumber(o.ai.onDemandBudget.usdCap, 2)}`}
+                  trend={o.ai.onDemandBudget.exceeded ? -1 : undefined}
+                  divider
+                />
+              </Card>
+              <Button
+                label="Start a batch now"
+                variant="secondary"
+                className="mt-3"
+                loading={startBatch.isPending}
+                disabled={Boolean(o.currentBatch)}
+                onPress={confirmStart}
+              />
 
-      <Section title="Failed jobs" note={failed.data ? String(failed.data.length) : undefined}>
-        {failed.isPending ? (
-          <ListSkeleton rows={2} />
-        ) : !failed.data ? (
-          <AdminQueryError
-            what="failed jobs"
-            error={failed.error}
-            onRetry={() => void failed.refetch()}
-          />
-        ) : failed.data.length === 0 ? (
-          <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
-            Nothing has failed.
-          </Text>
-        ) : (
-          <ListCard>
-            {failed.data.slice(0, 30).map((job, index) => (
-              <View key={job.id}>
-                {index > 0 ? <RowDivider /> : null}
-                <View className="gap-1 px-3.5 py-3">
-                  <View className="flex-row items-center gap-2">
-                    <Text
-                      className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark"
-                      numberOfLines={1}
-                    >
-                      {job.symbol} · {job.companyName}
-                    </Text>
-                    <Badge label={job.status} variant="danger" />
-                  </View>
-                  <Text
-                    className="text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted"
-                    numberOfLines={3}
-                  >
-                    {job.error ?? 'No error recorded'} · {job.attempts} attempt
-                    {job.attempts === 1 ? '' : 's'} · {when(job.finishedAt)}
-                  </Text>
-                  {job.retryable !== false ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={retry.isPending}
-                      onPress={() =>
-                        retry.mutate(job.id, {
-                          onSuccess: () =>
-                            toast.success('Retry queued', `${job.symbol} at high priority.`),
-                          onError: (error) => toast.error("Couldn't retry", getErrorMessage(error)),
-                        })
-                      }
-                      className="mt-1 self-start active:opacity-60"
-                    >
-                      <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">
-                        Retry
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </View>
-            ))}
-          </ListCard>
-        )}
-      </Section>
+              <BatchCard title="Current batch" run={o.currentBatch} />
+              <BatchCard title="Last batch" run={o.lastBatch} />
 
-      <Section title="Indices in the weekly batch">
-        {indices.isPending ? (
-          <ListSkeleton rows={3} />
-        ) : !indices.data ? (
-          <AdminQueryError
-            what="indices"
-            error={indices.error}
-            onRetry={() => void indices.refetch()}
-          />
-        ) : (
-          <IndexList
-            indices={indices.data}
-            busyKey={setIndexEnabled.isPending ? (setIndexEnabled.variables?.key ?? null) : null}
-            onToggle={(key, enabled) =>
-              setIndexEnabled.mutate(
-                { key, enabled },
-                {
-                  onError: (error) =>
-                    toast.error("Couldn't update the index", getErrorMessage(error)),
-                },
-              )
-            }
-          />
-        )}
-        <Text className="mt-2 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-          Custom indices are added from the web console.
-        </Text>
-      </Section>
+              <Section title="Average stage time" note="last 24 h">
+                <ListCard className="px-3.5">
+                  {Object.entries(o.stageAvgMs).map(([stage, ms], index) => (
+                    <KeyValueRow
+                      key={stage}
+                      label={STAGE_TEXT[stage as JobStage] ?? stage}
+                      value={ms == null ? '—' : `${formatNumber(ms / 1000, 1)} s`}
+                      divider={index > 0}
+                    />
+                  ))}
+                </ListCard>
+              </Section>
+            </View>
+          )
+        }
+        right={
+          <>
+            <Section
+              title="Failed jobs"
+              className={layout.compact ? undefined : 'mt-0'}
+              note={failed.data ? String(failed.data.length) : undefined}
+            >
+              {failed.isPending ? (
+                <ListSkeleton rows={2} />
+              ) : !failed.data ? (
+                <AdminQueryError
+                  what="failed jobs"
+                  error={failed.error}
+                  onRetry={() => void failed.refetch()}
+                />
+              ) : failed.data.length === 0 ? (
+                <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
+                  Nothing has failed.
+                </Text>
+              ) : (
+                <ListCard>
+                  {failed.data.slice(0, 30).map((job, index) => (
+                    <View key={job.id}>
+                      {index > 0 ? <RowDivider /> : null}
+                      <View className="gap-1 px-3.5 py-3">
+                        <View className="flex-row items-center gap-2">
+                          <Text
+                            className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark"
+                            numberOfLines={1}
+                          >
+                            {job.symbol} · {job.companyName}
+                          </Text>
+                          <Badge label={job.status} variant="danger" />
+                        </View>
+                        <Text
+                          className="text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted"
+                          numberOfLines={3}
+                        >
+                          {job.error ?? 'No error recorded'} · {job.attempts} attempt
+                          {job.attempts === 1 ? '' : 's'} · {when(job.finishedAt)}
+                        </Text>
+                        {job.retryable !== false ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={retry.isPending}
+                            onPress={() =>
+                              retry.mutate(job.id, {
+                                onSuccess: () =>
+                                  toast.success('Retry queued', `${job.symbol} at high priority.`),
+                                onError: (error) =>
+                                  toast.error("Couldn't retry", getErrorMessage(error)),
+                              })
+                            }
+                            className="mt-1 self-start active:opacity-60"
+                          >
+                            <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">
+                              Retry
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    </View>
+                  ))}
+                </ListCard>
+              )}
+            </Section>
+
+            <Section title="Indices in the weekly batch">
+              {indices.isPending ? (
+                <ListSkeleton rows={3} />
+              ) : !indices.data ? (
+                <AdminQueryError
+                  what="indices"
+                  error={indices.error}
+                  onRetry={() => void indices.refetch()}
+                />
+              ) : (
+                <IndexList
+                  indices={indices.data}
+                  busyKey={
+                    setIndexEnabled.isPending ? (setIndexEnabled.variables?.key ?? null) : null
+                  }
+                  onToggle={(key, enabled) =>
+                    setIndexEnabled.mutate(
+                      { key, enabled },
+                      {
+                        onError: (error) =>
+                          toast.error("Couldn't update the index", getErrorMessage(error)),
+                      },
+                    )
+                  }
+                />
+              )}
+              <Text className="mt-2 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
+                Custom indices are added from the web console.
+              </Text>
+            </Section>
+          </>
+        }
+      />
     </StackScreen>
   );
 }

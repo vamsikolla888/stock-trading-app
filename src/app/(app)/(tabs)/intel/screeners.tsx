@@ -1,4 +1,5 @@
-import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Plus from 'lucide-react-native/icons/plus';
 import Sparkles from 'lucide-react-native/icons/sparkles';
@@ -11,7 +12,10 @@ import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { ListCard, RowDivider, Section } from '@/components/ui/Section';
+import { SegmentedControl } from '@/components/ui/Tabs';
 import { useScreeners } from '@/features/market/hooks';
+import { NextDayBoard } from '@/features/next-day/components/NextDayBoard';
+import { nextDayKeys } from '@/features/next-day/hooks';
 import {
   CustomScreenerFormFields,
   useCustomScreenerForm,
@@ -114,9 +118,21 @@ function ScreenerRow({
 const EMPTY_BUILT_INS: ScreenerSummary[] = [];
 const EMPTY_CUSTOMS: CustomScreener[] = [];
 
+type ScannerView = 'next-day' | 'screeners';
+
+/**
+ * Intelligence › Scanner. Two views, as on the web: NEXT DAY (default) — the Next-Day Opportunity
+ * system's evening report (features/next-day) — and SCREENERS, the built-in and custom screens.
+ * `?view=screeners` opens the second.
+ */
 export default function ScreenersScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const queryClient = useQueryClient();
+  const params = useLocalSearchParams<{ view?: string }>();
+  const [view, setView] = useState<ScannerView>(
+    params.view === 'screeners' ? 'screeners' : 'next-day',
+  );
   const builtInQuery = useScreeners();
   const customQuery = useCustomScreeners();
   const builtIns = builtInQuery.data ?? EMPTY_BUILT_INS;
@@ -202,6 +218,28 @@ export default function ScreenersScreen() {
     );
   }
 
+  const screenerCount = builtIns.length + customs.length;
+  const views: readonly { key: ScannerView; label: string }[] = [
+    { key: 'next-day', label: 'Next day' },
+    { key: 'screeners', label: screenerCount > 0 ? `Screeners ${screenerCount}` : 'Screeners' },
+  ];
+  const switcher = (
+    <SegmentedControl items={views} value={view} onChange={setView} className="mb-5" />
+  );
+
+  if (view === 'next-day') {
+    return (
+      <GroupScreen
+        intro="Tomorrow’s candidates from NSE’s end-of-day data · 11 scanners, one vote"
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: nextDayKeys.all })}
+        fill
+      >
+        {switcher}
+        <NextDayBoard />
+      </GroupScreen>
+    );
+  }
+
   const intro =
     builtIns.length > 0
       ? `${builtIns.length} built-in${customs.length > 0 ? ` · ${customs.length} custom` : ''} · NSE + BSE`
@@ -215,6 +253,7 @@ export default function ScreenersScreen() {
       }
       onRefresh={refresh}
     >
+      {switcher}
       <RunAllScansStatus progress={runAll.progress} lastError={runAll.lastError} />
 
       <View className="flex-row gap-2.5">

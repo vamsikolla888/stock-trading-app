@@ -1,10 +1,10 @@
 import { useRouter, type Href } from 'expo-router';
 import Bell from 'lucide-react-native/icons/bell';
-import Bot from 'lucide-react-native/icons/bot';
 import ChartCandlestick from 'lucide-react-native/icons/chart-candlestick';
 import FlaskConical from 'lucide-react-native/icons/flask-conical';
 import LayoutGrid from 'lucide-react-native/icons/layout-grid';
-import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
+import Route from 'lucide-react-native/icons/route';
+import ScanSearch from 'lucide-react-native/icons/scan-search';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import Star from 'lucide-react-native/icons/star';
 import React from 'react';
@@ -28,11 +28,12 @@ interface Tool {
 export const TOOLS: readonly Tool[] = [
   { label: 'Strong picks', href: '/strong-picks', Icon: Star, tone: 'amber' },
   { label: 'Heatmap', href: '/heatmap', Icon: LayoutGrid, tone: 'teal' },
-  { label: 'Screeners', href: '/intel/screeners', Icon: SlidersHorizontal, tone: 'blue' },
+  // "Scanner": the Next-Day board and the screener library (web rename, 2026-10-07).
+  { label: 'Scanner', href: '/intel/screeners', Icon: ScanSearch, tone: 'blue' },
   { label: 'Signals', href: '/intel/signals', Icon: Sparkles, tone: 'violet' },
   { label: 'F&O', href: '/fno', Icon: ChartCandlestick, tone: 'rose' },
   { label: 'Paper trade', href: '/trade/paper', Icon: FlaskConical, tone: 'green' },
-  { label: 'Strategies', href: '/intel/strategies', Icon: Bot, tone: 'slate' },
+  { label: 'Strategies', href: '/intel/strategies', Icon: Route, tone: 'slate' },
   { label: 'Alerts', href: '/alerts', Icon: Bell, tone: 'amber' },
 ];
 

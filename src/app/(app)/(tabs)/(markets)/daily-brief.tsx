@@ -11,6 +11,7 @@ import {
   CalendarSection,
   DerivativesSection,
   IndicesSection,
+  IpoListingsSection,
   MoversSection,
   NewsSection,
   OutlookSection,
@@ -45,8 +46,8 @@ import { getErrorMessage } from '@/types/api';
 
 /**
  * Markets › Daily Brief (web: /markets/daily-brief). One scrolling page per session day:
- * the 30-second summary, the AI outlook, indices, breadth, sectors, movers, NIFTY
- * derivatives, the user's portfolio and watchlists, technical signals, what needs
+ * the 30-second summary, the AI outlook, indices, the day's IPO listings, breadth, sectors,
+ * movers, NIFTY derivatives, the user's portfolio and watchlists, technical signals, what needs
  * attention, analyzed news and provider status — in the order and selection the user
  * saved. Observed data, calculated metrics and model interpretation are labelled apart,
  * and a section whose source is down says so instead of showing a stand-in.
@@ -241,7 +242,10 @@ const BriefBody = React.memo(function BriefBody({
   onListen: () => void;
   onRefresh: () => void;
 }) {
-  const order = visibleSections(preferences);
+  // The IPO section shows only on a day something lists.
+  const order = visibleSections(preferences).filter(
+    (section) => section !== 'ipo' || brief.ipoListings.items.length > 0,
+  );
   const render = (section: DailyBriefSection): React.ReactNode => {
     switch (section) {
       case 'summary':
@@ -257,6 +261,8 @@ const BriefBody = React.memo(function BriefBody({
         return <OutlookSection brief={brief} onRefresh={onRefresh} canRefresh={canRefresh} />;
       case 'indices':
         return <IndicesSection brief={brief} preferred={preferences.preferredIndices} />;
+      case 'ipo':
+        return <IpoListingsSection brief={brief} isToday={brief.date === todayIst()} />;
       case 'breadth':
         return <PulseSection brief={brief} />;
       case 'sectors':
@@ -295,19 +301,20 @@ const BriefBody = React.memo(function BriefBody({
         <Banner
           tone="warning"
           className="mt-4"
-          title="Some sources are delayed or unavailable"
-          message={[
-            'The sections that did load are shown with their source times.',
-            ...brief.partialFailures.slice(0, 2),
-          ].join(' ')}
+          title={
+            brief.partialFailures.length > 0 ? 'Some sources are delayed or unavailable' : undefined
+          }
+          message={
+            brief.partialFailures.slice(0, 2).join(' · ') ||
+            'Some sources are delayed or unavailable.'
+          }
         />
       ) : null}
       {order.map((section) => (
         <React.Fragment key={section}>{render(section)}</React.Fragment>
       ))}
       <Text className="mt-8 text-center text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-        Observed data, calculated metrics and model interpretation are labelled separately. Nothing
-        here guarantees a market direction or a return.
+        Nothing here guarantees a market direction or a return.
       </Text>
     </View>
   );

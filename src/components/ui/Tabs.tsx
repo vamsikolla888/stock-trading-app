@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { type LayoutChangeEvent, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -23,29 +23,30 @@ interface SelectorProps<K extends string> {
   className?: string;
 }
 
-const SLIDE = { duration: 220, easing: Easing.out(Easing.cubic) };
+const SLIDE_DURATION = 220;
 
 /**
  * The selected marker's slide — an underline or a pill moving between options instead of
  * jumping. Placed without motion the first time it is measured (nothing to slide from), then
  * every change of `x`/`width` eases there on the UI thread.
  */
-function useSlide(x: number | null, width: number) {
+function useSlide(x: number | null, width: number, duration = SLIDE_DURATION) {
   const left = useSharedValue(0);
   const size = useSharedValue(0);
   const placed = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (x === null || width <= 0) return;
+    const motion = { duration, easing: Easing.out(Easing.cubic) };
     if (placed.current) {
-      left.set(withTiming(x, SLIDE));
-      size.set(withTiming(width, SLIDE));
+      left.set(withTiming(x, motion));
+      size.set(withTiming(width, motion));
     } else {
       left.set(x);
       size.set(width);
       placed.current = true;
     }
-  }, [x, width, left, size]);
+  }, [duration, x, width, left, size]);
 
   return useAnimatedStyle(() => ({
     width: size.get(),
@@ -230,13 +231,14 @@ export function SegmentedControl<K extends string>({
   value,
   onChange,
   className,
-}: SelectorProps<K>) {
+  motionDuration = SLIDE_DURATION,
+}: SelectorProps<K> & { motionDuration?: number }) {
   const { colors } = useTheme();
   const [rowWidth, onLayout] = useRowWidth();
   const index = items.findIndex((item) => item.key === value);
   const count = Math.max(items.length, 1);
   const slot = rowWidth > 0 ? (rowWidth - SEGMENT_PAD * 2 - SEGMENT_GAP * (count - 1)) / count : 0;
-  const thumb = useSlide(index >= 0 ? index * (slot + SEGMENT_GAP) : null, slot);
+  const thumb = useSlide(index >= 0 ? index * (slot + SEGMENT_GAP) : null, slot, motionDuration);
   const measured = slot > 0;
 
   return (
@@ -343,14 +345,23 @@ export function RangeSelector<K extends string>({
   );
 }
 
-/** Horizontally scrolling filter chips that bleed to the screen edge. */
-export function Chips<K extends string>({ items, value, onChange, className }: SelectorProps<K>) {
+/**
+ * Horizontally scrolling filter chips that bleed to the screen edge. Inside a card (whose edge
+ * would clip the bleed) pass `bleed={false}` to keep them within the content box.
+ */
+export function Chips<K extends string>({
+  items,
+  value,
+  onChange,
+  className,
+  bleed = true,
+}: SelectorProps<K> & { bleed?: boolean }) {
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      className={cn('-mx-5', className)}
-      contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
+      className={cn(bleed && '-mx-5', className)}
+      contentContainerStyle={{ paddingHorizontal: bleed ? 20 : 0, gap: 8 }}
     >
       {items.map((item) => {
         const selected = item.key === value;

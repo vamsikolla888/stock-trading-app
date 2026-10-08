@@ -148,7 +148,7 @@ export function PaperAnalytics() {
         </ListCard>
       </Section>
 
-      <Section title="Charges paid" note="every filled order">
+      <Section title="Charges paid" note="all filled orders">
         <ListCard className="px-3.5">
           {chargeLines(charges).map((line, index) => (
             <KeyValueRow
@@ -169,7 +169,11 @@ export function PaperAnalytics() {
         </ListCard>
       </Section>
 
-      <Section title="Cash check" right={<Badge label={status.label} variant={status.tone} />}>
+      <Section
+        title="Cash check"
+        note="order log vs stored"
+        right={<Badge label={status.label} variant={status.tone} />}
+      >
         <ListCard className="px-3.5">
           <KeyValueRow
             label="Opening cash"
@@ -189,10 +193,6 @@ export function PaperAnalytics() {
           <KeyValueRow label="Expected" value={formatINR(reconciliation.expectedCash)} divider />
           <KeyValueRow label="Stored" value={formatINR(reconciliation.actualCash)} divider />
         </ListCard>
-        <Text className="mt-2 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-          Rebuilt from the order log alone and compared with the stored balance — a real
-          disagreement would show here rather than be hidden.
-        </Text>
       </Section>
     </View>
   );
@@ -208,7 +208,7 @@ function PnlSlices({ pnl }: { pnl: FnoAnalytics['pnl'] }) {
       <SegmentedControl items={SLICES} value={slice} onChange={setSlice} className="mb-3" />
       {rows.length === 0 ? (
         <Text className="rounded-card border border-dashed border-line-strong px-4 py-5 text-center text-[13px] text-ink-muted dark:border-line-dark-strong dark:text-ink-dark-muted">
-          No trade has closed yet — nothing to slice.
+          No closed trades yet.
         </Text>
       ) : (
         <ListCard className="gap-3 px-3.5 py-3">
@@ -248,7 +248,7 @@ function PnlSlices({ pnl }: { pnl: FnoAnalytics['pnl'] }) {
       )}
       {all.length > rows.length ? (
         <Text className="mt-2 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-          {all.length - rows.length} more not shown — the smallest by P&amp;L.
+          +{all.length - rows.length} smaller not shown
         </Text>
       ) : null}
     </Section>

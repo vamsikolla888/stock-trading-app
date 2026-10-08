@@ -314,8 +314,8 @@ export default function WatchlistsScreen() {
                     title={readOnly ? 'Nothing flagged yet' : 'Nothing here yet'}
                     message={
                       readOnly
-                        ? "The daily batch hasn't flagged anything in this window. The list fills itself as recommendations are published."
-                        : 'Add a stock and this list tracks it from today’s price.'
+                        ? 'This list fills itself.'
+                        : 'Add a stock to track it from today’s price.'
                     }
                     action={
                       readOnly

@@ -54,6 +54,20 @@ function pick(symbol: string, suitable: Partial<Record<MarketSegment, boolean>>)
     rationale: '',
     invalidation: '',
     caveat: '',
+    date: '2026-09-01',
+    category: null,
+    direction: 'long',
+    entryMode: 'band',
+    horizonDays: 1,
+    sessionsElapsed: 0,
+    sources: ['news'],
+    swing: null,
+    news: [],
+    fundamentals: null,
+    contract: null,
+    riskNote: '',
+    outcome: null,
+    triggeredAt: null,
   };
 }
 

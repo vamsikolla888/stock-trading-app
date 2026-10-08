@@ -12,6 +12,8 @@ import { stockHref } from '@/lib/navigation';
 import { formatINR, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { circuitBadge, type CircuitView } from '../lib/circuit';
+
 /**
  * "SSRETAIL · NSE" — and, for a company listed on both exchanges, the NSE/BSE switch. Each
  * option shows that book's own price: the gap between them is real, not rounding. Switching
@@ -83,6 +85,7 @@ export function StockHeader({
   detail,
   marketOpen,
   streaming = false,
+  circuit,
 }: {
   symbol: string;
   exchange: string;
@@ -90,7 +93,10 @@ export function StockHeader({
   marketOpen: boolean;
   /** Ticks are arriving on the live feed right now. */
   streaming?: boolean;
+  /** Where the price sits against today's circuit limits: a badge only at or near one. */
+  circuit?: Pick<CircuitView, 'at' | 'near'>;
 }) {
+  const circuitTag = circuit ? circuitBadge(circuit) : null;
   const displaySymbol =
     detail?.listings?.find((listing) => listing.exchange === exchange)?.displaySymbol ?? symbol;
   const tags = detail?.indices
@@ -121,6 +127,7 @@ export function StockHeader({
         <View className="mt-3 flex-row flex-wrap items-center gap-1.5">
           {live ? <Badge label="● Live" variant="success" /> : null}
           {!marketOpen ? <Badge label="Market closed" /> : null}
+          {circuitTag ? <Badge label={circuitTag.label} variant={circuitTag.tone} /> : null}
           {detail && !detail.isActive ? (
             <Badge label="Suspended / delisted" variant="warning" />
           ) : null}

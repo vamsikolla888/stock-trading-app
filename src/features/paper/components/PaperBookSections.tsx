@@ -89,7 +89,7 @@ export function PaperHoldingsSection({
     return (
       <InlineEmpty
         title="No delivery holdings"
-        message="Buy a stock with virtual cash — it's held here, marked at real prices."
+        message="Paper money only."
         action={{ label: 'Buy a stock', onPress: () => props.onNewOrder('equity') }}
       />
     );
@@ -126,10 +126,6 @@ export function PaperHoldingsSection({
           </View>
         ))}
       </ListCard>
-      <Note>
-        Avg is the price you paid, as a broker shows it — so a stock that hasn't moved reads ₹0.00.
-        Charges are counted once, in the net P&L above; each holding's break-even includes them.
-      </Note>
 
       <PositionSheets
         rows={rows}
@@ -168,9 +164,7 @@ export function PaperPositionsSection({
         const closed = result.squaredOff + result.marginCalled + result.staleClosed;
         toast.info(
           closed === 0 ? 'Nothing to close' : `Closed ${plural(closed, 'intraday position')}`,
-          closed === 0
-            ? `The sweep ran in ${result.mode} mode — before 15:15 IST it only closes margin calls.`
-            : undefined,
+          closed === 0 ? 'Before 3:15 PM IST only margin calls close.' : undefined,
         );
       },
       onError: (error) => toast.error('Couldn’t run the sweep', getErrorMessage(error)),
@@ -186,7 +180,7 @@ export function PaperPositionsSection({
           className="mb-3"
           tone="error"
           title={`${formatINR(shortfall)} short`}
-          message="A forced square-off lost more than the margin behind it. That loss is real and isn't floored at zero — deposit or reset the wallet from Funds to trade again."
+          message="A forced square-off lost more than its margin. Deposit or reset from Funds to trade again."
         />
       ) : null}
       {called.length > 0 ? (
@@ -194,7 +188,7 @@ export function PaperPositionsSection({
           className="mb-3"
           tone="error"
           title={`${plural(called.length, 'position')} will be force-closed on the next sweep`}
-          message={`${called.map((position) => position.symbol).join(', ')} — each has lost most of the margin behind it. Exit now if you'd rather choose the moment.`}
+          message={`${called.map((position) => position.symbol).join(', ')} — most of the margin is gone. Exit now to choose the moment.`}
         />
       ) : null}
     </>
@@ -206,7 +200,7 @@ export function PaperPositionsSection({
         {alerts}
         <InlineEmpty
           title="No intraday positions"
-          message="Pick Intraday in a paper order to open one — they're squared off at 3:15 PM IST."
+          message="Auto square-off at 3:15 PM IST."
           action={{ label: 'Trade intraday', onPress: () => props.onNewOrder('intraday') }}
         />
       </View>
@@ -221,7 +215,8 @@ export function PaperPositionsSection({
           className="flex-1 text-[13px] text-ink-muted dark:text-ink-dark-muted"
           numberOfLines={2}
         >
-          {rows.length} open · {squareOffText(portfolio.minutesToSquareOff)}
+          {rows.length} open · {portfolio.leverage ?? 5}× ·{' '}
+          {squareOffText(portfolio.minutesToSquareOff)}
         </Text>
         <ChangeText value={totalPnl} className="text-[13px]" style={NUMBERS}>
           {totalPnl === null ? '—' : mask(formatSignedINR(totalPnl))}
@@ -248,11 +243,7 @@ export function PaperPositionsSection({
         loading={sweep.isPending}
         onPress={squareOff}
       />
-      <Note>
-        Runs the same sweep the worker runs every minute. It reads the clock, so before 3:15 PM IST
-        it can only force-close a margin call. Margin is your own money in each position; the rest
-        is borrowed at {portfolio.leverage ?? 5}× and repaid on exit — P&L % is against that margin.
-      </Note>
+      <Note>Before 3:15 PM IST this only closes margin calls. P&amp;L % is on your margin.</Note>
 
       <PositionSheets
         rows={rows}
@@ -420,7 +411,7 @@ function PaperPositionSheet({
           className="mb-3"
           tone="error"
           title="Margin call"
-          message="This position has lost most of the margin behind it and will be force-closed on the next sweep."
+          message="Most of the margin is gone — force-closed on the next sweep."
         />
       ) : null}
       <View className="rounded-xl bg-surface-sunk px-3.5 py-3 dark:bg-surface-sunk-dark">
@@ -500,8 +491,8 @@ function PaperPositionSheet({
         </Text>
         <Text className="mt-1 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
           {position.autoExit
-            ? 'An engine sells the whole position at the first snapshot price at or beyond either level, once a minute in market hours.'
-            : 'Recorded for reference — nothing acts on reminders.'}
+            ? 'Sold at either level, checked once a minute in market hours.'
+            : 'Reminders only — nothing sells.'}
         </Text>
         <Button
           label={hasLevels ? 'Edit levels' : 'Set levels'}
@@ -604,8 +595,8 @@ function LevelsSheet({
           </Text>
           <Text className="mt-0.5 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
             {hasLevel
-              ? 'On: an engine sells the whole position at the first snapshot price at or beyond either level, once a minute in market hours. Off: they are reminders, and nothing acts on them.'
-              : 'Enter a target or a stop first — authorising an engine to act on nothing reads as protection and is not.'}
+              ? 'Sell at either level, checked once a minute in market hours. Off: reminders only.'
+              : 'Set a target or stop first.'}
           </Text>
         </View>
         <Switch

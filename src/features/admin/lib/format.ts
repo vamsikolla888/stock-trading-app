@@ -73,6 +73,25 @@ export function uptimeTone(value: number | null | undefined): StatusTone {
   return 'bad';
 }
 
+/**
+ * Failed calls → tone, by share rather than count: a handful of failures in thousands of calls
+ * is normal noise, not an alarm. Under 1% stays plain, amber to 5%, red above.
+ */
+export function failureTone(failed: number, calls: number): StatusTone | undefined {
+  if (failed <= 0 || calls <= 0) return undefined;
+  const rate = failed / calls;
+  if (rate >= 0.05) return 'bad';
+  if (rate >= 0.01) return 'warn';
+  return undefined;
+}
+
+/** "16 failed · 0.22%", or "All answered" when nothing failed. */
+export function failedCallsLabel(failed: number, calls: number): string {
+  if (failed <= 0) return 'All answered';
+  const pct = calls > 0 ? (failed / calls) * 100 : 0;
+  return `${formatCount(failed)} failed · ${pct < 0.1 ? '<0.1' : pct.toFixed(pct < 10 ? 1 : 0)}%`;
+}
+
 /** One history bucket → tone. An unsampled bucket is a visible gap, not green. */
 export function bucketTone(uptimePct: number | null, checks: number): StatusTone {
   if (checks === 0 || uptimePct === null) return 'neutral';

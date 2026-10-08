@@ -33,7 +33,7 @@ import { venueOf } from '@/features/fno/lib/format';
 import type { ChartTarget, FnoExchange } from '@/features/fno/types';
 import { useStockDetail } from '@/features/market/hooks';
 import { overlayQuote } from '@/features/market/lib/liveQuote';
-import { useLiveQuote } from '@/features/market/live';
+import { useLiveness, useLiveQuote } from '@/features/market/live';
 import { usable } from '@/features/stock/lib/priceView';
 import { parseStockParams } from '@/features/stock/lib/routeParams';
 import { useNow } from '@/hooks/useNow';
@@ -107,7 +107,9 @@ export default function AdvancedChartScreen() {
   const fnoHistory = useFnoChartHistory(fnoExchange, anchor, symbol, fnoTarget, interval, fno);
   const history = fno ? fnoHistory : equityHistory;
   const { spec } = history;
-  const detail = useStockDetail(fno ? '' : symbol, exchange);
+  // While ticks stream (either broker), the REST quote is only a fallback and slows down.
+  const equityLive = useLiveness(fno ? null : exchange, fno ? null : symbol);
+  const detail = useStockDetail(fno ? '' : symbol, exchange, { streaming: equityLive.live });
   // The live price: the stock's own stream, else the F&O feed — the index/stock's cash listing
   // for an underlying chart, the contract for a contract chart.
   const liveExchange =

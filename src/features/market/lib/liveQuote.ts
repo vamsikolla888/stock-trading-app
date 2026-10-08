@@ -7,6 +7,8 @@
  * the same thing about the same stock at the same moment.
  */
 
+import { circuitLimitsOf, sameCircuit, type CircuitLimits } from './circuit';
+
 /** A `price:update` / `prices:batch` tick — the server's TickPayload (realtime/tickBus.ts). */
 export interface LiveTick {
   exchange: string;
@@ -24,6 +26,9 @@ export interface LiveTick {
   direction: 'up' | 'down' | null;
   volume: number | null;
   ohlc: { open: number; high: number; low: number; close: number } | null;
+  /** The session's circuit limits, when the broker's full-mode tick carries them (server
+   *  TickPayload.circuit). Optional: list and F&O feeds and older servers omit it. */
+  circuit?: CircuitLimits | null;
 }
 
 /** What a screen reads for one symbol. */
@@ -34,6 +39,8 @@ export interface LiveQuote {
   changePct: number | null;
   volume: number | null;
   ohlc: LiveTick['ohlc'];
+  /** The last valid circuit limits any tick carried; a tick without them keeps these. */
+  circuit?: CircuitLimits | null;
   /** Which way the price moved on its LAST change — what a cell's flash shows. */
   dir: 'up' | 'down' | null;
   /** Counts price changes; a flash keys on it so two moves the same way each replay. */
@@ -69,7 +76,15 @@ export function toLiveQuote(
 ): LiveQuote | null {
   if (!positive(tick.ltp)) return null;
   const volume = finite(tick.volume) ? tick.volume : (prev?.volume ?? null);
-  if (prev && prev.ltp === tick.ltp && prev.volume === volume) return prev;
+  const circuit = circuitLimitsOf(tick.circuit) ?? prev?.circuit ?? null;
+  if (
+    prev &&
+    prev.ltp === tick.ltp &&
+    prev.volume === volume &&
+    sameCircuit(prev.circuit, circuit)
+  ) {
+    return prev;
+  }
   const moved = prev != null && prev.ltp !== tick.ltp;
   return {
     ltp: tick.ltp,
@@ -77,6 +92,7 @@ export function toLiveQuote(
     changePct: finite(tick.changePct) ? tick.changePct : (prev?.changePct ?? null),
     volume,
     ohlc: tick.ohlc ?? prev?.ohlc ?? null,
+    circuit,
     dir: moved ? (tick.ltp > prev.ltp ? 'up' : 'down') : (prev?.dir ?? null),
     seq: (prev?.seq ?? 0) + (moved || !prev ? 1 : 0),
     at: now,

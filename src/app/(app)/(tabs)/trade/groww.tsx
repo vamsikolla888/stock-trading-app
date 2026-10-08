@@ -1,6 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
+import Bot from 'lucide-react-native/icons/bot';
 import React, { useCallback, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 
 import { GroupScreen } from '@/components/navigation/GroupScreen';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
@@ -26,7 +28,7 @@ import {
   LinkedFundsSection,
   TradesSection,
 } from '@/features/portfolio/components/TradesFundsSections';
-import { portfolioKeys, useLinkedPortfolio } from '@/features/portfolio/hooks';
+import { portfolioKeys, useHoldingReviews, useLinkedPortfolio } from '@/features/portfolio/hooks';
 import { formatAsOf } from '@/features/portfolio/lib/dates';
 import {
   fromLinkedHolding,
@@ -37,6 +39,8 @@ import { useLiveHoldings } from '@/features/portfolio/useLiveHoldings';
 import { Caveats } from '@/features/trading/components/Sheet';
 import { useBrokerCatalog } from '@/features/trading/hooks';
 import { formatINR } from '@/lib/utils/formatters';
+import { useAuthStore } from '@/store/authStore';
+import { useTheme } from '@/theme/ThemeProvider';
 
 type SectionKey =
   'holdings' | 'positions' | 'orders' | 'trades' | 'funds' | 'pnl' | 'analytics' | 'statement';
@@ -52,11 +56,17 @@ const BROKER = 'groww';
  */
 export default function GrowwPortfolioScreen() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const { colors } = useTheme();
+  // The index trading bot trades through Groww; it is admin-only on the server.
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const catalog = useBrokerCatalog();
   const label = catalog.data?.find((entry) => entry.id === BROKER)?.label ?? 'Groww';
   const { query, state } = useLinkedPortfolio(BROKER);
   const snapshot = query.data;
   const [section, setSection] = useState<SectionKey>('holdings');
+  // The AI portfolio review covers the Groww book — each holding's verdict sits in its row.
+  const reviews = useHoldingReviews();
 
   // Linked holdings report `dayChange` as the ROW's rupee move (see fromLinkedHolding).
   const restHoldings = useMemo(() => snapshot?.holdings.map(fromLinkedHolding) ?? [], [snapshot]);
@@ -136,6 +146,19 @@ export default function GrowwPortfolioScreen() {
       right={
         <View className="flex-row items-center gap-2">
           <ConnectionDot state={state} />
+          {isAdmin ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Trading bot"
+              hitSlop={10}
+              onPress={() =>
+                router.push({ pathname: '/agents/index-trading', params: { tab: 'controls' } })
+              }
+              className="h-8 w-8 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+            >
+              <Bot size={18} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
           <HideValuesButton />
         </View>
       }
@@ -210,6 +233,7 @@ export default function GrowwPortfolioScreen() {
               tradable={false}
               extras={extras}
               emptyMessage={`No holdings in your ${label} account.`}
+              reviews={holdings.length > 0 ? reviews : undefined}
             />
           ) : section === 'positions' ? (
             <PositionsSection rows={positions} brokerLabel={label} tradable={false} />

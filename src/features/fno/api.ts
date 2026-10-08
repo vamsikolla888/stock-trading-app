@@ -1,5 +1,6 @@
 import { apiClient } from '@/services/api/client';
 
+import { normalizeExpiryCalendar } from './lib/calendar';
 import type {
   ChartTarget,
   ExitPositionInput,
@@ -60,9 +61,13 @@ export const fnoApi = {
     return data;
   },
 
-  async expiryCalendar(signal?: AbortSignal): Promise<ExpiryCalendar> {
-    const { data } = await apiClient.get<ExpiryCalendar>('/fno/expiry-calendar', { signal });
-    return data;
+  /** One calendar month (YYYY-MM): expiries, plus published public and exchange holidays. */
+  async expiryCalendar(month: string, signal?: AbortSignal): Promise<ExpiryCalendar> {
+    const { data } = await apiClient.get<unknown>('/fno/expiry-calendar', {
+      params: { month },
+      signal,
+    });
+    return normalizeExpiryCalendar(data, month);
   },
 
   async underlyings(signal?: AbortSignal): Promise<{ underlyings: FnoUnderlying[]; asOf: string }> {

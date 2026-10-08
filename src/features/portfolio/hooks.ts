@@ -1,32 +1,39 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
-import { useBrokerConnections } from '@/features/trading/hooks';
-import type { BrokerConnectionSummary } from '@/features/trading/types';
+import { usePortfolioReview } from '@/features/agents/hooks';
 import { livePriceInterval } from '@/lib/utils/market';
+import { isServerOutdated } from '@/services/api/contract';
 
 import { portfolioApi } from './api';
 import { portfolioKeys } from './keys';
 import { OPEN_AT_BROKER } from './lib/book';
-import {
-  brokerStateOf,
-  resolveOverview,
-  type BrokerState,
-  type PortfolioOverview,
-} from './lib/overview';
+import { bookFigures, homeBooks, readBook, type HomeBook } from './lib/books';
+import { brokerStateOf, type BrokerState } from './lib/overview';
+import { reviewIndex, type HoldingReviews } from './lib/reviews';
 import type { OrderHistoryPage, PortfolioHistoryScope } from './types';
+import { useLiveHoldings } from './useLiveHoldings';
 
 export { portfolioApi } from './api';
 export { portfolioKeys } from './keys';
-export type { BrokerState, PortfolioOverview } from './lib/overview';
+export type { BrokerState } from './lib/overview';
+export type { HomeBook } from './lib/books';
+export type { HoldingReviews } from './lib/reviews';
 
-/** GET /portfolio — one definition, shared by the overview and the mStock screen. */
+/**
+ * A broker book polls while the market is open — unless the broker isn't connected at all
+ * (404), when there is nothing to poll for; pull-to-refresh still asks again.
+ */
+const bookPoll = (query: { state: { error: unknown } }) =>
+  readBook(query.state.error).connected ? livePriceInterval(15_000) : false;
+
+/** GET /portfolio — one definition, shared by Today and the mStock screen. */
 const mstockQuery = {
   queryKey: portfolioKeys.broker,
   queryFn: portfolioApi.broker,
   staleTime: 10_000,
   retry: false,
-  refetchInterval: () => livePriceInterval(15_000),
+  refetchInterval: bookPoll,
 } as const;
 
 const linkedQuery = (broker: string) =>
@@ -35,84 +42,68 @@ const linkedQuery = (broker: string) =>
     queryFn: () => portfolioApi.linked(broker),
     staleTime: 10_000,
     retry: false,
-    refetchInterval: () => livePriceInterval(15_000),
+    refetchInterval: bookPoll,
   }) as const;
 
-/** The API-linked broker (anything but mStock) the user has set up, if any. */
-function linkedBrokerOf(connections: readonly BrokerConnectionSummary[] | undefined) {
-  return (
-    connections?.find(
-      (connection) =>
-        connection.broker !== 'mstock' && connection.status !== 'pending_verification',
-    )?.broker ?? null
-  );
-}
-
 /**
- * The user's book — see resolveOverview for which one wins. `/portfolio` only knows
- * mStock, so a Groww-only user's holdings are read from /portfolio/linked/groww, asked
- * for only when mStock has nothing to show.
+ * Today's holdings card: every book the user has — Groww, then mStock, then holdings added by
+ * hand — each priced live (lib/books.ts). ONE live subscription for every book's rows together.
+ * Loading until both broker reads have answered once, so the carousel never opens on one book and
+ * then jumps when the one that goes first arrives.
  */
-export function usePortfolioOverview(): PortfolioOverview {
-  const broker = useQuery(mstockQuery);
-  const mstockState = brokerStateOf(broker.error, Boolean(broker.data), broker.isPending);
-  const mstockEmpty = !broker.isPending && (broker.data?.holdings.length ?? 0) === 0;
-
-  const connections = useBrokerConnections();
-  const linkedId = mstockEmpty ? linkedBrokerOf(connections.data) : null;
-  const linked = useQuery({ ...linkedQuery(linkedId ?? ''), enabled: linkedId !== null });
-  // A disabled query also reports isPending, so only an enabled one can be "loading".
-  const linkedPending = linkedId !== null && linked.isPending;
-  const linkedResolving = mstockEmpty && (connections.isPending || linkedPending);
-  const linkedEmpty = (linked.data?.holdings.length ?? 0) === 0;
-
-  const needManual = mstockEmpty && !linkedResolving && linkedEmpty;
+export function useHomeBooks(): {
+  books: HomeBook[];
+  isLoading: boolean;
+  refetch: () => Promise<unknown>;
+} {
+  const groww = useQuery(linkedQuery('groww'));
+  const mstock = useQuery(mstockQuery);
   const manual = useQuery({
     queryKey: portfolioKeys.manual,
     queryFn: portfolioApi.manual,
     staleTime: 60_000,
-    enabled: needManual,
   });
 
-  return useMemo<PortfolioOverview>(
-    () => ({
-      ...resolveOverview({
-        mstock: { data: broker.data, state: mstockState, error: broker.error },
-        linked: {
-          id: linkedId,
-          data: linkedId ? linked.data : undefined,
-          state: brokerStateOf(linked.error, Boolean(linked.data), linkedPending),
-          error: linked.error,
-          resolving: linkedResolving,
-        },
-        manual: {
-          needed: needManual,
-          data: manual.data,
-          error: manual.error,
-          isPending: manual.isPending,
-        },
+  const bases = useMemo(
+    () =>
+      homeBooks({
+        groww: { data: groww.data, error: groww.error },
+        mstock: { data: mstock.data, error: mstock.error },
+        manual: { data: manual.data },
       }),
-      refetch: () =>
-        Promise.all([
-          broker.refetch(),
-          linkedId ? linked.refetch() : null,
-          needManual ? manual.refetch() : null,
-        ]),
-    }),
-    [broker, linked, manual, mstockState, linkedId, linkedPending, linkedResolving, needManual],
+    [groww.data, groww.error, mstock.data, mstock.error, manual.data],
   );
-}
+  const rows = useMemo(() => bases.flatMap((book) => book.holdings), [bases]);
+  const live = useLiveHoldings(rows);
+  // Each book takes back its own slice of the re-priced rows, in order.
+  const books = useMemo(
+    () =>
+      bases.reduce<{ out: HomeBook[]; at: number }>(
+        (acc, book) => {
+          const holdings = live.slice(acc.at, acc.at + book.holdings.length);
+          return {
+            out: [...acc.out, { ...book, holdings, figures: bookFigures(holdings) }],
+            at: acc.at + book.holdings.length,
+          };
+        },
+        { out: [], at: 0 },
+      ).out,
+    [bases, live],
+  );
 
-/** The last three trading days of orders at `broker`; idle while there's no live broker. */
-export function useOrderHistory(broker: string | null) {
-  return useQuery({
-    queryKey: portfolioKeys.orders(broker ?? '', 1),
-    queryFn: () => portfolioApi.orderHistory(broker!, 1, 3),
-    enabled: broker !== null,
-    staleTime: 15_000,
-    retry: false,
-    refetchInterval: () => livePriceInterval(20_000),
-  });
+  const { refetch: refetchGroww } = groww;
+  const { refetch: refetchMstock } = mstock;
+  const { refetch: refetchManual } = manual;
+  const refetch = useCallback(
+    () => Promise.all([refetchGroww(), refetchMstock(), refetchManual()]),
+    [refetchGroww, refetchMstock, refetchManual],
+  );
+
+  return {
+    books,
+    isLoading: groww.isPending || mstock.isPending || (manual.isPending && books.length === 0),
+    refetch,
+  };
 }
 
 /**
@@ -140,48 +131,35 @@ export function useLinkedPortfolio(broker: string) {
   return { query, state: bookStateOf(query) };
 }
 
-/** Individual mStock portfolio overview for dedicated card rendering. */
-export function useMstockPortfolioOverview(): PortfolioOverview {
-  const { query, state } = useMstockPortfolio();
-  return useMemo<PortfolioOverview>(
-    () => ({
-      ...resolveOverview({
-        mstock: { data: query.data, state, error: query.error },
-        linked: {
-          id: null,
-          data: undefined,
-          state: 'not-connected',
-          error: null,
-          resolving: false,
-        },
-        manual: { needed: false, data: undefined, error: null, isPending: false },
-      }),
-      refetch: () => query.refetch(),
-    }),
-    [query, state],
-  );
+/**
+ * The AI portfolio review's verdict per holding, for the Groww and mStock holdings lists (web:
+ * agents/hooks/useHoldingReviews.ts). The same query as Agents › Portfolio review, so every
+ * screen reads one cached answer and agrees with it. A failure only means no verdicts are shown —
+ * the holdings themselves never wait on it.
+ */
+export function useHoldingReviews(): HoldingReviews {
+  const query = usePortfolioReview();
+  const data = query.data ?? null;
+  const index = useMemo(() => reviewIndex(data?.holdings), [data]);
+  return {
+    index,
+    data,
+    isLoading: query.isPending,
+    isError: query.isError && !data,
+    outdated: !data && isServerOutdated(query.error),
+  };
 }
 
-/** Individual Groww portfolio overview for dedicated card rendering. */
-export function useGrowwPortfolioOverview(): PortfolioOverview {
-  const { query, state } = useLinkedPortfolio('groww');
-  return useMemo<PortfolioOverview>(
-    () => ({
-      ...resolveOverview({
-        mstock: { data: undefined, state: 'not-connected', error: null },
-        linked: {
-          id: 'groww',
-          data: query.data,
-          state,
-          error: query.error,
-          resolving: query.isPending,
-        },
-        manual: { needed: false, data: undefined, error: null, isPending: false },
-      }),
-      refetch: () => query.refetch(),
-    }),
-    [query, state],
-  );
+/** The last three trading days of orders at `broker`; idle while there's no live broker. */
+export function useOrderHistory(broker: string | null) {
+  return useQuery({
+    queryKey: portfolioKeys.orders(broker ?? '', 1),
+    queryFn: () => portfolioApi.orderHistory(broker!, 1, 3),
+    enabled: broker !== null,
+    staleTime: 15_000,
+    retry: false,
+    refetchInterval: () => livePriceInterval(20_000),
+  });
 }
 
 function hasWorkingOrder(page: OrderHistoryPage | undefined): boolean {

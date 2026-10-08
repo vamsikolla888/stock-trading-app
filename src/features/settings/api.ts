@@ -21,6 +21,14 @@ export const settingsApi = {
     const { data } = await apiClient.get<PushDevicesResponse>('/notifications/devices');
     return data;
   },
+  /** Subscribes this phone's push token to the signed-in account (moves it if another had it). */
+  async registerPushDevice(token: string, userAgent: string): Promise<void> {
+    await apiClient.post('/notifications/devices', { token, userAgent });
+  },
+  /** Unsubscribes this phone only — the account's other devices keep their alerts. */
+  async unregisterPushDevice(token: string): Promise<void> {
+    await apiClient.delete('/notifications/devices', { data: { token } });
+  },
   async sendPushTest(): Promise<PushTestResult> {
     const { data } = await apiClient.post<PushTestResult>('/notifications/test');
     return data;

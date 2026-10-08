@@ -140,3 +140,24 @@ export function memberSince(createdAt: string): string {
   if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return '';
   return `Member since ${date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}`;
 }
+
+/** The server's refusal of a real order while the account's Safe Mode is on (403 SAFE_MODE_ON). */
+export const SAFE_MODE_REFUSAL = 'SAFE_MODE_ON';
+
+export function isSafeModeRefusal(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === SAFE_MODE_REFUSAL;
+}
+
+/** The profile switch's second line. `known` is false until the server has answered. */
+export function safeModeCaption(state: {
+  known: boolean;
+  failed: boolean;
+  saving: boolean;
+  enabled: boolean;
+}): string {
+  if (!state.known) return state.failed ? 'Couldn’t check right now' : 'Checking…';
+  if (state.saving) return 'Saving…';
+  return state.enabled
+    ? 'On — real orders are blocked on every broker'
+    : 'Off — real orders are allowed';
+}

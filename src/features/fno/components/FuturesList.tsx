@@ -4,8 +4,10 @@ import { Text, View } from 'react-native';
 import { InlineEmpty } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
 import { ListCard, RowDivider } from '@/components/ui/Section';
+import { cn } from '@/lib/utils/cn';
 import { formatINR, formatQuantity, formatSignedPercent } from '@/lib/utils/formatters';
 
+import { isCommodityExchange } from '../lib/explore';
 import { changeLine, compactQty, DASH, dteLabel, expiryLabel } from '../lib/format';
 import type { FnoContract, FnoFutures, FnoSide } from '../types';
 
@@ -24,13 +26,22 @@ function signed(n: number): string {
  * is contango, and it converges to zero at expiry — the one number that says whether a future
  * is rich or cheap to its underlying. Day change is Groww's quote; the platform feed carries
  * last price only, and those cells show a dash rather than a zero.
+ *
+ * A commodity future (MCX / NSE commodity) is READ-ONLY — Groww's API places no commodity
+ * orders — so its row offers Chart in place of Buy / Sell, and has no cash spot to basis against.
  */
 export function FuturesList({
   data,
   onTrade,
+  onChart,
+  selected,
 }: {
   data: FnoFutures;
   onTrade: (contract: FnoContract, side: FnoSide) => void;
+  /** Charts a commodity future (its only action). */
+  onChart?: (contract: FnoContract) => void;
+  /** Trading symbol of the contract on the chart, outlined. */
+  selected?: string | null;
 }) {
   if (!data.futures.length) {
     return (
@@ -49,10 +60,17 @@ export function FuturesList({
             ? Math.round((f.ltp - data.spot) * 100) / 100
             : f.basis;
         const basisPct = basis != null && data.spot ? (basis / data.spot) * 100 : f.basisPct;
+        const readOnly = isCommodityExchange(c.exchange);
+        const charted = selected === c.tradingSymbol;
         return (
           <React.Fragment key={c.tradingSymbol}>
             {index > 0 ? <RowDivider /> : null}
-            <View className="gap-2.5 px-3.5 py-3">
+            <View
+              className={cn(
+                'gap-2.5 px-3.5 py-3',
+                charted && 'bg-surface-sunk dark:bg-surface-sunk-dark',
+              )}
+            >
               <View className="flex-row items-start gap-3">
                 <View className="min-w-0 flex-1">
                   <Text
@@ -88,32 +106,44 @@ export function FuturesList({
                   }
                 />
                 <Stat label="Volume" value={compactQty(f.volume)} />
-                <Stat
-                  label="Basis"
-                  value={basis != null ? signed(basis) : DASH}
-                  sub={basisPct != null ? formatSignedPercent(basisPct) : null}
+                {readOnly ? null : (
+                  <Stat
+                    label="Basis"
+                    value={basis != null ? signed(basis) : DASH}
+                    sub={basisPct != null ? formatSignedPercent(basisPct) : null}
+                  />
+                )}
+              </View>
+              {readOnly ? (
+                <PillButton
+                  label={charted ? 'On the chart' : 'Chart'}
+                  tone={charted ? 'brand' : 'neutral'}
+                  disabled={!onChart}
+                  onPress={() => onChart?.(c)}
+                  accessibilityLabel={`Chart ${c.tradingSymbol}`}
                 />
-              </View>
-              <View className="flex-row gap-2">
-                <View className="flex-1">
-                  <PillButton
-                    label="Buy"
-                    tone="buy"
-                    disabled={!c.buyAllowed}
-                    onPress={() => onTrade(c, 'BUY')}
-                    accessibilityLabel={`Buy ${c.tradingSymbol}`}
-                  />
+              ) : (
+                <View className="flex-row gap-2">
+                  <View className="flex-1">
+                    <PillButton
+                      label="Buy"
+                      tone="buy"
+                      disabled={!c.buyAllowed}
+                      onPress={() => onTrade(c, 'BUY')}
+                      accessibilityLabel={`Buy ${c.tradingSymbol}`}
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <PillButton
+                      label="Sell"
+                      tone="sell"
+                      disabled={!c.sellAllowed}
+                      onPress={() => onTrade(c, 'SELL')}
+                      accessibilityLabel={`Sell ${c.tradingSymbol}`}
+                    />
+                  </View>
                 </View>
-                <View className="flex-1">
-                  <PillButton
-                    label="Sell"
-                    tone="sell"
-                    disabled={!c.sellAllowed}
-                    onPress={() => onTrade(c, 'SELL')}
-                    accessibilityLabel={`Sell ${c.tradingSymbol}`}
-                  />
-                </View>
-              </View>
+              )}
             </View>
           </React.Fragment>
         );

@@ -96,8 +96,10 @@ export default function StrategyMatrixScreen() {
     body = (
       <InlineEmpty
         title="Nothing to compare yet"
-        message="The matrix is built from each strategy's per-stock backtest breakdown, so at least one strategy needs a completed run with trades in it."
-        action={{ label: 'Go to strategies', onPress: () => router.push('/intel/strategies') }}
+        action={{
+          label: 'Go to strategies',
+          onPress: () => router.push({ pathname: '/intel/strategies', params: { tab: 'swing' } }),
+        }}
       />
     );
   } else if (detailsPending) {
@@ -115,16 +117,14 @@ export default function StrategyMatrixScreen() {
       <InlineEmpty
         title="No per-stock breakdown yet"
         message={`${shown.length === 1 ? "This strategy's backtest was" : 'These backtests were'} run before per-stock results were recorded. Re-run a backtest to add it to the matrix.`}
-        action={{ label: 'Go to strategies', onPress: () => router.push('/intel/strategies') }}
+        action={{
+          label: 'Go to strategies',
+          onPress: () => router.push({ pathname: '/intel/strategies', params: { tab: 'swing' } }),
+        }}
       />
     );
   } else if (model.columns.length === 0) {
-    body = (
-      <InlineEmpty
-        title="No stocks in common"
-        message="Each of these strategies traded a different set of stocks, so there is nothing to line up side by side. Comparing them is more useful one strategy at a time."
-      />
-    );
+    body = <InlineEmpty title="No stocks in common" />;
   } else {
     body = (
       <>
@@ -148,10 +148,7 @@ export default function StrategyMatrixScreen() {
           Tap a cell for its trades, tap a name to open the strategy.
         </Text>
         <Text className="mt-4 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-          Read down a column, not across a row: a stock where every strategy does well is telling
-          you about the stock, not about the strategies. Cells from fewer than{' '}
-          {MIN_TRADES_FOR_SYMBOL_STATS} trades are dimmed — a profit factor of 8 from two trades
-          would be the brightest number here and the least useful.
+          Dimmed: fewer than {MIN_TRADES_FOR_SYMBOL_STATS} trades.
           {total > shown.length
             ? ` Showing the ${shown.length} most recently updated of ${total} backtested strategies.`
             : ''}

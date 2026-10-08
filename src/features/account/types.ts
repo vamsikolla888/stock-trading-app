@@ -60,6 +60,16 @@ export interface MfaSetup {
   expiresAt: string;
 }
 
+/**
+ * Safe Mode (server account/safe-mode.service.ts): while on, the server refuses to place or modify
+ * any real order on any broker (403 SAFE_MODE_ON). Cancels, paper trading and reads stay open.
+ * Off by default; `changedAt` is null for an account that never set it.
+ */
+export interface SafeModeState {
+  enabled: boolean;
+  changedAt: string | null;
+}
+
 export interface EmailChangeResult {
   profile: AccountProfile;
   accessToken: string;

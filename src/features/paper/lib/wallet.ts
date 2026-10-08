@@ -8,8 +8,17 @@ export interface WalletLimits {
   maxCapital: number;
 }
 
-/** One-tap wallet sizes, as on the web's Settings → Paper wallet. */
-export const WALLET_PRESETS = [100_000, 500_000, 1_000_000, 2_500_000] as const;
+/** One-tap sizes for the cash paper wallet — the web's Settings → Paper wallet chips. */
+export const CASH_WALLET_PRESETS = [500_000, 1_000_000, 2_500_000, 5_000_000] as const;
+/** One-tap sizes for the F&O sandbox's own wallet — the web's F&O paper wallet chips. */
+export const FNO_WALLET_PRESETS = [250_000, 500_000, 1_000_000, 2_500_000] as const;
+/** The editor's default chips (the cash wallet's). Kept for existing callers. */
+export const WALLET_PRESETS = CASH_WALLET_PRESETS;
+
+/** A preset chip's label: "₹2.5L", "₹10L", "₹1Cr" (the figures above the chips stay exact). */
+export function presetLabel(amount: number): string {
+  return amount >= 10_000_000 ? `₹${amount / 10_000_000}Cr` : `₹${amount / 100_000}L`;
+}
 
 export interface WalletDraft {
   amount: number | null;
@@ -49,7 +58,7 @@ export function walletDraft(pool: WalletLimits, text: string): WalletDraft {
   else if (delta < 0)
     message = `Withdraws ${formatINR(-delta, 0)} of free cash: cash falls to ${formatINR(pool.cash + delta)}. Positions and history stay as they are.`;
   else
-    message = `Can be set between ${formatINR(pool.minCapital, 0)} and ${formatINR(pool.maxCapital, 0)}.`;
+    message = `Between ${formatINR(pool.minCapital, 0)} and ${formatINR(pool.maxCapital, 0)}. Raising deposits the difference; lowering withdraws free cash.`;
 
   return {
     amount,

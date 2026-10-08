@@ -8,12 +8,24 @@ import { GroupScreen } from '@/components/navigation/GroupScreen';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Button } from '@/components/ui/Button';
 import { ScrollTabs } from '@/components/ui/Tabs';
+import {
+  PaperFnoBook,
+  type FnoTicketRequest,
+} from '@/features/derivatives/components/PaperFnoBook';
+import { PaperTicket } from '@/features/derivatives/components/PaperTicket';
+import {
+  isPaperExchange,
+  paperContractOfFno,
+  type FnoSearchHit,
+} from '@/features/derivatives/lib/paperFno';
+import { paperBookHref, paperChainHref, paperWalletHref } from '@/features/derivatives/lib/routes';
 import { PaperAnalyticsSection } from '@/features/paper/components/PaperAnalyticsSection';
 import {
   PaperHoldingsSection,
   PaperPositionsSection,
 } from '@/features/paper/components/PaperBookSections';
 import { PaperFundsSection } from '@/features/paper/components/PaperFundsSection';
+import { PaperOrderSearchSheet } from '@/features/paper/components/PaperOrderSearchSheet';
 import { PaperOrdersSection } from '@/features/paper/components/PaperOrdersSection';
 import { PaperSummaryCard } from '@/features/paper/components/PaperSummaryCard';
 import { ProfileButton, ProfileSheet } from '@/features/paper/components/ProfileSwitcher';
@@ -29,17 +41,19 @@ import { paperKpis, type KpiScope } from '@/features/paper/lib/book';
 import type { CashSegment, PaperPortfolio } from '@/features/paper/types';
 import { useLiveBookQuotes } from '@/features/paper/useLiveBookQuotes';
 import { afterSheetClose } from '@/features/trading/components/Sheet';
-import { StockSearchSheet, type StockPick } from '@/features/trading/components/StockSearchSheet';
+import type { StockPick } from '@/features/trading/components/StockSearchSheet';
 import { ticketHref } from '@/features/trading/lib/ticket';
 import { useNow } from '@/hooks/useNow';
+import { toast } from '@/lib/utils/toast';
 
-type BookTab = 'holdings' | 'positions' | 'orders' | 'funds' | 'analytics';
+type BookTab = 'holdings' | 'positions' | 'orders' | 'funds' | 'fno' | 'analytics';
 
 const TABS: readonly { key: BookTab; label: string }[] = [
   { key: 'holdings', label: 'Holdings' },
   { key: 'positions', label: 'Positions' },
   { key: 'orders', label: 'Orders' },
   { key: 'funds', label: 'Funds' },
+  { key: 'fno', label: 'F&O' },
   { key: 'analytics', label: 'Analytics' },
 ];
 
@@ -55,9 +69,11 @@ function scopeOf(tab: BookTab): KpiScope {
 /**
  * Paper trading (Trade › Paper trading) — virtual cash, real prices, no broker. Shaped like a
  * broker's own account screen, as on the web: a summary card that follows the tab, then the book
- * — Holdings (delivery), Positions (intraday), Orders, Funds and Analytics. ONE wallet funds both
- * products; F&O paper trading has its own pool on the F&O tab. The tab lives in the route
- * (`?tab=funds`), so other screens can link straight to a part of the book.
+ * — Holdings (delivery), Positions (intraday), Orders, Funds, F&O and Analytics. ONE wallet funds
+ * both cash products; F&O paper trading has its own pool, shown on the F&O tab (live positions
+ * and orders, the same as F&O › Paper trading). The order search also finds F&O underlyings and
+ * contracts: a contract opens the paper F&O ticket here, an underlying its paper chain. The tab
+ * lives in the route (`?tab=funds`), so other screens can link straight to a part of the book.
  */
 export default function PaperTradingScreen() {
   const router = useRouter();
@@ -71,6 +87,8 @@ export default function PaperTradingScreen() {
   const setTab = useCallback((next: BookTab) => router.setParams({ tab: next }), [router]);
 
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  /** A paper F&O contract on the ticket — picked from the search or the F&O tab. */
+  const [fnoTicket, setFnoTicket] = useState<FnoTicketRequest | null>(null);
   /** The product a new paper order is being searched for; null while the search is closed. */
   const [searchFor, setSearchFor] = useState<CashSegment | null>(null);
 
@@ -149,6 +167,27 @@ export default function PaperTradingScreen() {
     );
   };
 
+  const pickFno = (hit: FnoSearchHit) => {
+    setSearchFor(null);
+    afterSheetClose(() => {
+      // Commodities (MCX / NCO) are read-only here: they have no paper book.
+      if (hit.type === 'underlying') {
+        if (isPaperExchange(hit.underlying.exchange)) {
+          router.push(paperChainHref({ underlying: hit.underlying.underlying }));
+        } else {
+          toast.info('Not in the paper book', 'Commodities are read-only here.');
+        }
+        return;
+      }
+      const contract = paperContractOfFno(hit.contract);
+      if (contract) {
+        setFnoTicket({ target: { ...contract, side: 'BUY', nonce: Date.now() }, quote: null });
+      } else {
+        toast.info('Not in the paper book', 'Commodities are read-only here.');
+      }
+    });
+  };
+
   const scopePortfolio: PaperPortfolio | undefined =
     scope === 'equity' ? delivery.data : scope === 'intraday' ? intraday.data : undefined;
   const summaryLoading = overview.isPending && delivery.isPending;
@@ -166,7 +205,13 @@ export default function PaperTradingScreen() {
         footer={
           <View className="border-t border-line px-5 pb-2 pt-3 dark:border-line-dark">
             <Button
-              label={tab === 'positions' ? 'Place an intraday order' : 'Place a paper order'}
+              label={
+                tab === 'positions'
+                  ? 'Place an intraday order'
+                  : tab === 'fno'
+                    ? 'Find an F&O contract'
+                    : 'Place a paper order'
+              }
               size="lg"
               fullWidth
               onPress={() => setSearchFor(tab === 'positions' ? 'intraday' : 'equity')}
@@ -248,6 +293,8 @@ export default function PaperTradingScreen() {
             profileName={active?.name ?? null}
             profileCount={profiles.data?.length ?? 1}
           />
+        ) : tab === 'fno' ? (
+          <PaperFnoBook onTrade={setFnoTicket} />
         ) : (
           <PaperAnalyticsSection profileId={profileId} />
         )}
@@ -257,15 +304,26 @@ export default function PaperTradingScreen() {
         </Text>
       </GroupScreen>
 
-      <StockSearchSheet
+      <PaperOrderSearchSheet
         visible={searchFor !== null}
         title="New paper order"
-        subtitle={`${searchFor === 'intraday' ? 'Intraday' : 'Delivery'} · virtual cash`}
+        subtitle={`${searchFor === 'intraday' ? 'Intraday' : 'Delivery'} · or F&O · virtual cash`}
         onClose={() => setSearchFor(null)}
         onPick={pickStock}
+        onPickFno={pickFno}
         quickPicks={quickPicks}
         quickPicksTitle="In this book"
-        actionLabel="Trade"
+      />
+
+      <PaperTicket
+        target={fnoTicket?.target ?? null}
+        quote={fnoTicket?.quote ?? null}
+        onClose={() => setFnoTicket(null)}
+        onViewPositions={() => router.navigate(paperBookHref('positions'))}
+        onAddFunds={() => {
+          setFnoTicket(null);
+          afterSheetClose(() => router.navigate(paperWalletHref()));
+        }}
       />
 
       {profileSheetOpen && profiles.data ? (

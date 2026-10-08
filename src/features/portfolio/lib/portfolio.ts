@@ -69,17 +69,28 @@ export function fromLinkedHolding(holding: LinkedHoldingRow): HoldingView {
 /**
  * A holding re-priced at a live price: value, returns and today's move all follow it. Today's
  * move is measured against the previous close the REST row implies (its price less its own
- * per-share move), so it stays consistent with what the broker reported. The same object comes
- * back when the price is unchanged or unusable.
+ * per-share move), so it stays consistent with what the broker reported. A row with no reported
+ * move (a hand-added holding) is measured against `quotePrevClose`, the tick's own previous
+ * close, when there is one. The same object comes back when nothing would change.
  */
-export function repriceHolding(holding: HoldingView, ltp: number): HoldingView {
-  if (!(ltp > 0) || !Number.isFinite(ltp) || ltp === holding.ltp) return holding;
-  const value = holding.qty * ltp;
-  const pnl = value - holding.invested;
-  const prevClose =
+export function repriceHolding(
+  holding: HoldingView,
+  ltp: number,
+  quotePrevClose: number | null = null,
+): HoldingView {
+  if (!(ltp > 0) || !Number.isFinite(ltp)) return holding;
+  const restPrevClose =
     holding.ltp !== null && holding.dayChange !== null && holding.qty > 0
       ? holding.ltp - holding.dayChange / holding.qty
       : null;
+  const hint =
+    holding.dayChange === null && quotePrevClose !== null && quotePrevClose > 0
+      ? quotePrevClose
+      : null;
+  if (ltp === holding.ltp && hint === null) return holding;
+  const value = holding.qty * ltp;
+  const pnl = value - holding.invested;
+  const prevClose = restPrevClose ?? hint;
   const priced = prevClose !== null && prevClose > 0;
   return {
     ...holding,

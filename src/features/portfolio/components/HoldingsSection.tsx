@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import ArrowUpDown from 'lucide-react-native/icons/arrow-up-down';
 import React, { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -15,6 +15,7 @@ import { stockLogoUrl } from '@/features/market/api';
 import { afterSheetClose, Note, Sheet } from '@/features/trading/components/Sheet';
 import { ticketHref } from '@/features/trading/lib/ticket';
 import type { LiveBroker } from '@/features/trading/types';
+import { useNow } from '@/hooks/useNow';
 import { stockHref } from '@/lib/navigation';
 import {
   formatINR,
@@ -26,9 +27,11 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import { HOLDING_SORT_LABEL, sortHoldings, type HoldingSort } from '../lib/book';
 import type { HoldingView } from '../lib/portfolio';
+import { reviewKey, type HoldingReviews } from '../lib/reviews';
 import type { HoldingFlag } from '../types';
 
 import { formatReturn, useMask } from './BookSummaryCard';
+import { ReviewMark, ReviewSheetBlock, ReviewSummaryLine } from './HoldingReview';
 
 const NUMBERS = { fontVariant: ['tabular-nums' as const] };
 const SORTS = (Object.keys(HOLDING_SORT_LABEL) as HoldingSort[]).map((key) => ({
@@ -51,6 +54,12 @@ interface HoldingsSectionProps {
   tradable: boolean;
   extras?: Record<string, HoldingExtras>;
   emptyMessage: string;
+  /**
+   * The AI portfolio review (Groww and mStock books): a summary line over the list and each
+   * holding's verdict. Left out while it loads or can't be read — never a column of "not
+   * reviewed" that is really "not known".
+   */
+  reviews?: HoldingReviews;
 }
 
 /** Holdings as tappable rows (name, qty · avg, current value, returns), sortable. */
@@ -61,10 +70,13 @@ export function HoldingsSection({
   tradable,
   extras,
   emptyMessage,
+  reviews,
 }: HoldingsSectionProps) {
   const router = useRouter();
   const { colors } = useTheme();
   const mask = useMask();
+  const now = useNow();
+  const showMarks = Boolean(reviews?.data);
   const [sort, setSort] = useState<HoldingSort>('value');
   const [sorting, setSorting] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -101,6 +113,16 @@ export function HoldingsSection({
         </Pressable>
       </View>
 
+      {reviews ? (
+        <ReviewSummaryLine
+          reviews={reviews}
+          holdings={holdings}
+          bookLabel={brokerLabel}
+          now={now}
+          onOpen={() => router.push('/agents/portfolio')}
+        />
+      ) : null}
+
       <ListCard>
         {sorted.map((holding, index) => {
           const t1 = extras?.[holding.key]?.t1Qty ?? 0;
@@ -126,6 +148,11 @@ export function HoldingsSection({
                         ? 'No price'
                         : mask(formatReturn(holding.pnl, holding.pnlPct))}
                     </ChangeText>
+                    {showMarks && reviews ? (
+                      <ReviewMark
+                        summary={reviews.index.get(reviewKey(holding.exchange, holding.symbol))}
+                      />
+                    ) : null}
                   </View>
                 }
               />
@@ -150,6 +177,8 @@ export function HoldingsSection({
           broker={broker}
           brokerLabel={brokerLabel}
           tradable={tradable}
+          reviews={reviews}
+          now={now}
           onClose={() => setOpenKey(null)}
           onNavigate={(href) => {
             setOpenKey(null);
@@ -169,6 +198,8 @@ function HoldingSheet({
   broker,
   brokerLabel,
   tradable,
+  reviews,
+  now,
   onClose,
   onNavigate,
 }: {
@@ -177,8 +208,10 @@ function HoldingSheet({
   broker?: LiveBroker;
   brokerLabel: string;
   tradable: boolean;
+  reviews?: HoldingReviews;
+  now: number;
   onClose: () => void;
-  onNavigate: (href: ReturnType<typeof ticketHref> | ReturnType<typeof stockHref>) => void;
+  onNavigate: (href: Href) => void;
 }) {
   const mask = useMask();
   const flag = extras?.flag ?? null;
@@ -308,6 +341,16 @@ function HoldingSheet({
             </Text>
           ) : null}
         </View>
+      ) : null}
+
+      {reviews ? (
+        <ReviewSheetBlock
+          reviews={reviews}
+          exchange={holding.exchange}
+          symbol={holding.symbol}
+          now={now}
+          onOpenNote={(key) => onNavigate({ pathname: '/holding-review/[key]', params: { key } })}
+        />
       ) : null}
 
       {tradable ? (

@@ -15,6 +15,7 @@ export const SECTION_LABELS: Record<DailyBriefSection, string> = {
   summary: 'Today in 30 seconds',
   outlook: 'AI market outlook',
   indices: 'Major indices',
+  ipo: 'IPO listings',
   breadth: 'Market pulse',
   sectors: 'Sector pulse',
   movers: 'Market movers',

@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import Bot from 'lucide-react-native/icons/bot';
 import CircleCheck from 'lucide-react-native/icons/circle-check';
 import OctagonX from 'lucide-react-native/icons/octagon-x';
 import Power from 'lucide-react-native/icons/power';
@@ -7,13 +8,17 @@ import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid, SplitColumns } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { IconTile } from '@/components/ui/IconTile';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { MenuRow } from '@/components/ui/MenuRow';
-import { ListCard, Section } from '@/components/ui/Section';
+import { ListCard, RowDivider, Section } from '@/components/ui/Section';
+import { useSafeMode } from '@/features/account/hooks';
 import { AdminQueryError } from '@/features/admin/components/AdminState';
 import {
   useKillSwitchControl,
@@ -63,13 +68,16 @@ function GateCard({ enabled, engaged }: { enabled?: boolean; engaged?: boolean }
 }
 
 /**
- * The two global gates on real-money orders (web: Feature flags → Live trading; the web
- * shows the kill switch read-only). Both are Redis settings that fail closed on the server.
+ * The two platform switches every real order passes through (web: Admin › Trading controls):
+ * the live-trading master switch and the kill switch — an emergency stop with a recorded reason.
+ * Both are Redis settings that fail closed on the server. Nothing here is optimistic: a switch
+ * moves only when the server confirms it.
  */
 export function TradingPanel() {
   const router = useRouter();
   const settings = useLiveTradingSettings();
   const killSwitch = useKillSwitch();
+  const safeMode = useSafeMode();
   const users = usePlatformUsers();
   const setEnabled = useSetLiveTradingEnabled();
   const { engage, disengage } = useKillSwitchControl();
@@ -87,7 +95,8 @@ export function TradingPanel() {
   const engagedBy = actorLabel(stringField(killSwitch.data, 'engagedBy'), emails);
   const reasonError = killReasonError(reason);
 
-  const onRefresh = () => Promise.all([settings.refetch(), killSwitch.refetch(), users.refetch()]);
+  const onRefresh = () =>
+    Promise.all([settings.refetch(), killSwitch.refetch(), safeMode.refetch(), users.refetch()]);
 
   const toggleLive = (next: boolean) =>
     confirmAction({
@@ -112,7 +121,7 @@ export function TradingPanel() {
     confirmAction({
       title: 'Engage the kill switch?',
       message:
-        'Every new live order is refused for every user until an administrator clears it. Orders already at the broker are not cancelled.',
+        'It takes effect at once, on every broker: every new live order is refused until an administrator releases it. Orders already at the broker are not cancelled.',
       confirmLabel: 'Engage',
       destructive: true,
       onConfirm: () =>
@@ -129,18 +138,17 @@ export function TradingPanel() {
 
   const disengageNow = () =>
     confirmAction({
-      title: 'Clear the kill switch?',
-      message: enabled
-        ? 'Live orders are accepted again straight away.'
-        : 'Live trading is still switched off, so orders stay refused until it’s switched on.',
-      confirmLabel: 'Clear',
+      title: 'Release the kill switch?',
+      message: `Live orders become possible again${enabled ? '' : ' once the master switch is on'}. Make sure the reason it was engaged is resolved.`,
+      confirmLabel: 'Release',
       onConfirm: () =>
         disengage.mutate(undefined, {
-          onSuccess: () => toast.success('Kill switch cleared'),
-          onError: (error) => toast.error('Couldn’t clear it', getErrorMessage(error)),
+          onSuccess: () => toast.success('Kill switch released'),
+          onError: (error) => toast.error('Couldn’t release it', getErrorMessage(error)),
         }),
     });
 
+  const layout = useScreenLayout();
   const loading = settings.isPending || killSwitch.isPending;
   const failed = !settings.data || !killSwitch.data;
 
@@ -149,6 +157,7 @@ export function TradingPanel() {
       title="Trading controls"
       subtitle="Global gates on real orders"
       onRefresh={onRefresh}
+      fill
     >
       {loading ? (
         <ListSkeleton rows={3} />
@@ -162,115 +171,165 @@ export function TradingPanel() {
         <>
           <GateCard enabled={enabled} engaged={engaged} />
 
-          <Section title="Live trading">
-            <ListCard>
-              <SwitchRow
-                Icon={Power}
-                iconTone="green"
-                title="Accept live orders"
-                subtitle={enabled ? 'On for every user' : 'Off — real orders are refused'}
-                value={Boolean(enabled)}
-                disabled={setEnabled.isPending}
-                onValueChange={toggleLive}
-              />
-            </ListCard>
-            <Text className="mt-2 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
-              {settings.data?.updatedAt
-                ? `Last changed ${formatDateTime(settings.data.updatedAt)} IST${settingsBy ? ` by ${settingsBy}` : ''}.`
-                : 'Never switched on — off by default.'}
-            </Text>
-          </Section>
+          <Grid columns={layout.compact ? 2 : 3} gap={12} className="mt-3">
+            <StatTile
+              label="Master switch"
+              value={enabled ? 'On' : 'Off'}
+              status={enabled ? 'ok' : 'neutral'}
+              sub={
+                settings.data?.updatedAt
+                  ? `Changed ${formatDateTime(settings.data.updatedAt)}`
+                  : 'Never changed'
+              }
+            />
+            <StatTile
+              label="Kill switch"
+              value={engaged ? 'Engaged' : 'Clear'}
+              status={engaged ? 'bad' : 'ok'}
+              sub={
+                engaged && killSwitch.data?.engagedAt
+                  ? `Since ${formatDateTime(killSwitch.data.engagedAt)}`
+                  : 'No emergency stop'
+              }
+            />
+            <StatTile
+              label="Your Safe Mode"
+              value={safeMode.data ? (safeMode.data.enabled ? 'On' : 'Off') : '—'}
+              status={safeMode.data?.enabled ? 'warn' : undefined}
+              sub={
+                safeMode.data?.enabled ? 'Your real orders are refused' : 'Set from your profile'
+              }
+              onPress={() => router.push('/profile')}
+            />
+          </Grid>
 
-          <Section title="Kill switch">
-            <Card className="gap-1">
-              <View className="flex-row items-center gap-3">
-                <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
-                  {engaged ? 'Engaged' : 'Clear'}
-                </Text>
-                <StatusPill
-                  tone={engaged ? 'bad' : 'ok'}
-                  label={engaged ? 'Orders blocked' : 'Not blocking'}
-                />
-              </View>
-              {engaged ? (
-                <>
-                  <Text
-                    selectable
-                    className="mt-1 text-[13px] leading-[19px] text-ink dark:text-ink-dark"
-                  >
-                    {killSwitch.data?.reason ?? 'No reason recorded.'}
+          <SplitColumns
+            split={!layout.compact}
+            left={
+              <>
+                <Section title="Live trading">
+                  <ListCard>
+                    <SwitchRow
+                      Icon={Power}
+                      iconTone="green"
+                      title="Accept live orders"
+                      subtitle={enabled ? 'On for every user' : 'Off — real orders are refused'}
+                      value={Boolean(enabled)}
+                      disabled={setEnabled.isPending}
+                      onValueChange={toggleLive}
+                    />
+                  </ListCard>
+                  <Text className="mt-2 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
+                    {settings.data?.updatedAt
+                      ? `Last changed ${formatDateTime(settings.data.updatedAt)} IST${settingsBy ? ` by ${settingsBy}` : ''}.`
+                      : 'Never switched on — off by default.'}
                   </Text>
-                  <KeyValueRow
-                    label="Engaged"
-                    value={
-                      killSwitch.data?.engagedAt
-                        ? `${formatDateTime(killSwitch.data.engagedAt)} IST`
-                        : '—'
-                    }
-                    divider
-                    className="mt-2"
-                  />
-                  {engagedBy ? <KeyValueRow label="By" value={engagedBy} divider /> : null}
-                  <Button
-                    label="Clear kill switch"
-                    variant="outline"
-                    fullWidth
-                    className="mt-3"
-                    loading={disengage.isPending}
-                    onPress={disengageNow}
-                  />
-                </>
-              ) : (
-                <View className="mt-2 gap-3">
-                  <Text className="text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-                    Stops every new live order for every user at once — for a broker outage, a bad
-                    feed or anything that needs trading paused now.
-                  </Text>
-                  <TextArea
-                    label="Reason"
-                    value={reason}
-                    onChangeText={setReason}
-                    onBlur={() => setReasonTouched(true)}
-                    maxLength={KILL_REASON_MAX}
-                    minHeight={72}
-                    placeholder="e.g. mStock order API returning errors"
-                    helperText="Shown to traders whose orders are refused."
-                  />
-                  {reasonTouched && reasonError ? (
-                    <Text
-                      accessibilityRole="alert"
-                      className="text-[13px] text-danger-600 dark:text-danger-dark"
-                    >
-                      {reasonError}
+                </Section>
+
+                <Section title="Related controls">
+                  <ListCard>
+                    <MenuRow
+                      Icon={ShieldCheck}
+                      iconTone="amber"
+                      title="Risk controls"
+                      subtitle="Market hours, funds, order and daily limits"
+                      onPress={() => router.push('/risk')}
+                    />
+                    <RowDivider />
+                    <MenuRow
+                      Icon={Bot}
+                      iconTone="violet"
+                      title="Index bot settings"
+                      subtitle="The index-trading agent’s own controls"
+                      onPress={() => router.push('/agents/index-trading')}
+                    />
+                  </ListCard>
+                </Section>
+              </>
+            }
+            right={
+              <Section title="Kill switch">
+                <Card className="gap-1">
+                  <View className="flex-row items-center gap-3">
+                    <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
+                      {engaged ? 'Engaged' : 'Clear'}
                     </Text>
-                  ) : null}
-                  <Button
-                    label="Engage kill switch"
-                    variant="danger"
-                    fullWidth
-                    loading={engage.isPending}
-                    onPress={engageNow}
-                  />
-                </View>
-              )}
-            </Card>
-          </Section>
-
-          <Section title="Also checked on every order">
-            <ListCard>
-              <MenuRow
-                Icon={ShieldCheck}
-                iconTone="amber"
-                title="Risk controls"
-                subtitle="Market hours, funds, order and daily limits"
-                onPress={() => router.push('/risk')}
-              />
-            </ListCard>
-          </Section>
+                    <StatusPill
+                      tone={engaged ? 'bad' : 'ok'}
+                      label={engaged ? 'Orders blocked' : 'Not blocking'}
+                    />
+                  </View>
+                  {engaged ? (
+                    <>
+                      <Text
+                        selectable
+                        className="mt-1 text-[13px] leading-[19px] text-ink dark:text-ink-dark"
+                      >
+                        {killSwitch.data?.reason ?? 'No reason recorded.'}
+                      </Text>
+                      <KeyValueRow
+                        label="Engaged"
+                        value={
+                          killSwitch.data?.engagedAt
+                            ? `${formatDateTime(killSwitch.data.engagedAt)} IST`
+                            : '—'
+                        }
+                        divider
+                        className="mt-2"
+                      />
+                      {engagedBy ? <KeyValueRow label="By" value={engagedBy} divider /> : null}
+                      <Button
+                        label="Release kill switch"
+                        variant="outline"
+                        fullWidth
+                        className="mt-3"
+                        loading={disengage.isPending}
+                        onPress={disengageNow}
+                      />
+                    </>
+                  ) : (
+                    <View className="mt-2 gap-3">
+                      <Text className="text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
+                        An emergency stop for real orders. It takes effect at once, on every broker,
+                        and stays until an administrator releases it.
+                      </Text>
+                      <TextArea
+                        label="Reason"
+                        value={reason}
+                        onChangeText={setReason}
+                        onBlur={() => setReasonTouched(true)}
+                        maxLength={KILL_REASON_MAX}
+                        minHeight={72}
+                        placeholder="e.g. Broker outage — investigating fills"
+                        helperText="Recorded, and shown to anyone whose order it refuses."
+                      />
+                      {reasonTouched && reasonError ? (
+                        <Text
+                          accessibilityRole="alert"
+                          className="text-[13px] text-danger-600 dark:text-danger-dark"
+                        >
+                          {reasonError}
+                        </Text>
+                      ) : null}
+                      <Button
+                        label="Engage kill switch"
+                        variant="danger"
+                        fullWidth
+                        loading={engage.isPending}
+                        onPress={engageNow}
+                      />
+                    </View>
+                  )}
+                </Card>
+              </Section>
+            }
+          />
 
           <Text className="mt-4 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-            Both switches fail safe: if the server can’t read them, live trading reads as off and
-            the kill switch as engaged. Paper trading is never affected.
+            A real order needs the master switch on, the kill switch clear, and its user’s own Safe
+            Mode off; per-order risk limits apply on top. Both switches fail safe: if the server
+            can’t read them, live trading reads as off and the kill switch as engaged. Paper trading
+            is never affected.
           </Text>
         </>
       )}

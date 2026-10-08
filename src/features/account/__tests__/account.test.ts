@@ -1,15 +1,18 @@
 import {
   checkProfileDraft,
   groupSecret,
+  isSafeModeRefusal,
   profileInitials,
   profileName,
   recoveryCodesText,
+  safeModeCaption,
   sessionDevice,
   sessionTitle,
   sortSessions,
 } from '@/features/account/lib/account';
 import type { AccountSession } from '@/features/account/types';
 import { buildUserAgent } from '@/services/api/userAgent';
+import { ApiError } from '@/types/api';
 
 function session(overrides: Partial<AccountSession>): AccountSession {
   return {
@@ -157,5 +160,33 @@ describe('buildUserAgent', () => {
     expect(
       buildUserAgent({ ...base, platform: 'android', osVersion: null, model: 'Galaxy (S23; 5G)' }),
     ).toBe('Stocks/1.0.0 (Linux; Android ?; Galaxy S23 5G) Mobile');
+  });
+});
+
+describe('Safe Mode helpers', () => {
+  it('recognises only the server’s Safe Mode refusal', () => {
+    expect(
+      isSafeModeRefusal(
+        new ApiError({ status: 403, code: 'SAFE_MODE_ON', message: 'Safe Mode is on' }),
+      ),
+    ).toBe(true);
+    expect(
+      isSafeModeRefusal(
+        new ApiError({ status: 403, code: 'LIVE_TRADING_DISABLED', message: 'Off' }),
+      ),
+    ).toBe(false);
+    expect(isSafeModeRefusal(new Error('network'))).toBe(false);
+    expect(isSafeModeRefusal(null)).toBe(false);
+  });
+
+  it('says what the switch is doing, never guessing before the server answers', () => {
+    const base = { known: true, failed: false, saving: false, enabled: false };
+    expect(safeModeCaption({ ...base, known: false })).toBe('Checking…');
+    expect(safeModeCaption({ ...base, known: false, failed: true })).toBe(
+      'Couldn’t check right now',
+    );
+    expect(safeModeCaption({ ...base, saving: true })).toBe('Saving…');
+    expect(safeModeCaption({ ...base, enabled: true })).toMatch(/^On — real orders are blocked/);
+    expect(safeModeCaption(base)).toMatch(/^Off — real orders are allowed/);
   });
 });

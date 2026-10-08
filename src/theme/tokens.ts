@@ -190,6 +190,31 @@ export const darkColors: ColorTokens = {
   overlay: 'rgba(0, 0, 0, 0.6)',
 };
 
+/**
+ * Shareholding categories (web tokens.css --holder-*): Groww's hue per holder — Promoters lilac,
+ * FII sky blue, DII olive, retail orange; mutual funds, which Groww folds into DII, magenta —
+ * validated per theme by the web's dataviz check. Dark re-steps olive and orange so the two stay
+ * apart for a deutan reader. Identity only: every bar also carries its label and value.
+ */
+export const holderPalette = {
+  light: {
+    promoters: '#826dbd',
+    fii: '#49a9e0',
+    mf: '#c53b74',
+    dii: '#90be76',
+    retail: '#fb9511',
+  },
+  dark: {
+    promoters: '#8069bf',
+    fii: '#1ba2d6',
+    mf: '#c53b74',
+    dii: '#82a15d',
+    retail: '#b96408',
+  },
+} as const;
+
+export type HolderTone = keyof typeof holderPalette.light;
+
 export const shadows = {
   sm: {
     shadowColor: palette.black,

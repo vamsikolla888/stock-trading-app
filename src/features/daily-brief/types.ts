@@ -8,6 +8,7 @@ export type DailyBriefSection =
   | 'summary'
   | 'outlook'
   | 'indices'
+  | 'ipo'
   | 'breadth'
   | 'sectors'
   | 'movers'
@@ -200,9 +201,34 @@ export interface DailyBrief {
   portfolio: BriefPortfolio;
   watchlist: BriefWatchlist;
   news: BriefNewsItem[];
+  /** IPOs listing on the brief's date — empty on most days, and on briefs stored before it existed. */
+  ipoListings: { available: boolean; items: BriefIpoListing[] };
   ai: BriefAi | null;
   aiStatus: 'ready' | 'not-generated' | 'unavailable';
   aiStale: boolean;
+}
+
+/** A research report's headline numbers (server ipo-report.summary.ts). */
+export interface BriefIpoReport {
+  status: 'queued' | 'running' | 'ready' | 'failed';
+  composite: number | null;
+  verdict: string | null;
+  headline: string | null;
+  generatedAt: string | null;
+}
+
+/** An IPO listing on the brief's date (server ipo-report.service.ts ipoListingsOn). */
+export interface BriefIpoListing {
+  id: string;
+  companyName: string;
+  issueType: 'mainboard' | 'sme';
+  exchange: string | null;
+  issuePrice: number | null;
+  gmpPercent: number | null;
+  estimatedListingPrice: number | null;
+  totalSubscription: number | null;
+  preListing: BriefIpoReport | null;
+  postListing: BriefIpoReport | null;
 }
 
 export interface DailyBriefPreferences {

@@ -384,9 +384,25 @@ export interface LifetimeYear {
   trades: number;
 }
 
+/** The broker's own P&L report, as uploaded (its totals, not this app's replay). */
+export interface ReportSummary {
+  from: string | null;
+  to: string | null;
+  realised: number | null;
+  unrealised: number | null;
+  charges: number | null;
+  netRealised: number | null;
+  breakdown: { label: string; amount: number }[];
+}
+
 /** GET /portfolio/linked/:broker/lifetime — imported reports + captured orders, FIFO. */
 export interface LifetimeOverview {
   sync: { attemptedAt: string; succeededAt: string | null; error: string | null } | null;
+  /**
+   * The uploaded report covering the latest period (not merely the last file uploaded). Optional:
+   * a cache written before the app read it lacks the key.
+   */
+  latestReport?: (ReportSummary & { fileName: string }) | null;
   months: LifetimeMonth[];
   outcomes: {
     lots: number;

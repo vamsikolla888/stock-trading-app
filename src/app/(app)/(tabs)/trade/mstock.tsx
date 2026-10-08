@@ -23,7 +23,7 @@ import {
   MstockFundsSection,
   TradesSection,
 } from '@/features/portfolio/components/TradesFundsSections';
-import { portfolioKeys, useMstockPortfolio } from '@/features/portfolio/hooks';
+import { portfolioKeys, useHoldingReviews, useMstockPortfolio } from '@/features/portfolio/hooks';
 import { formatAsOf } from '@/features/portfolio/lib/dates';
 import { dayMove, fromBrokerHolding, liveTotals } from '@/features/portfolio/lib/portfolio';
 import { useLiveHoldings } from '@/features/portfolio/useLiveHoldings';
@@ -45,6 +45,8 @@ export default function MstockPortfolioScreen() {
   const { query, state } = useMstockPortfolio();
   const snapshot = query.data;
   const [section, setSection] = useState<SectionKey>('holdings');
+  // The AI portfolio review covers this book — each holding's verdict sits in its row.
+  const reviews = useHoldingReviews();
 
   const restHoldings = useMemo(() => snapshot?.holdings.map(fromBrokerHolding) ?? [], [snapshot]);
   // Re-priced at the live feed's ticks: rows, totals and the day's move follow the market.
@@ -165,6 +167,7 @@ export default function MstockPortfolioScreen() {
               tradable
               extras={extras}
               emptyMessage="No holdings in your mStock account yet."
+              reviews={holdings.length > 0 ? reviews : undefined}
             />
           ) : section === 'positions' ? (
             <PositionsSection rows={positions} broker="mstock" brokerLabel={LABEL} tradable />

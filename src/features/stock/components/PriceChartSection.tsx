@@ -41,6 +41,8 @@ interface PriceChartSectionProps {
   marketOpen: boolean;
   /** Where the price came from, when that isn't obvious (broker time, saved snapshot). */
   note?: string | null;
+  /** Whether the price streams (LiveMark), shown beside the day's move. */
+  liveMark?: React.ReactNode;
 }
 
 /**
@@ -57,6 +59,7 @@ export function PriceChartSection({
   prevClose,
   marketOpen,
   note,
+  liveMark,
 }: PriceChartSectionProps) {
   const { colors } = useTheme();
   const router = useRouter();
@@ -119,6 +122,7 @@ export function PriceChartSection({
             </ChangeText>
             <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">{label}</Text>
           </View>
+          {liveMark && !scrub ? <View className="mt-1">{liveMark}</View> : null}
           {note && !scrub ? (
             <Text className="mt-1 text-[11px] text-ink-faint dark:text-ink-dark-faint">{note}</Text>
           ) : null}

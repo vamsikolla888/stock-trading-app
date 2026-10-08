@@ -16,8 +16,9 @@ export const CHART_RANGES: readonly { key: ChartRange; label: string }[] = [
 /**
  * Range → candle request. The server resamples (weekly bars from daily), returns the latest
  * `count` bars, and rate-limits candles to 30/min — so each range is one request, cached.
- * 1Y is exactly what the technical summary needs (250 daily bars ⊇ the 200-DMA), so the
- * Analysis tab shares its cache entry instead of making a second call.
+ * 1Y is what the technical summary needs (260 daily bars ⊇ the 200-DMA) and reaches a full
+ * calendar year back (~250 sessions) for the Overview's 1Y return, so the Technicals and
+ * Overview tabs share its cache entry instead of making calls of their own.
  */
 export const RANGE_REQUEST: Record<
   ChartRange,
@@ -26,7 +27,7 @@ export const RANGE_REQUEST: Record<
   '1D': { minutesPerBar: 5, count: 80, staleMs: 60_000 },
   '1W': { minutesPerBar: 30, count: 70, staleMs: 5 * 60_000 },
   '1M': { minutesPerBar: 60, count: 160, staleMs: 10 * 60_000 },
-  '1Y': { minutesPerBar: 1440, count: 250, staleMs: 30 * 60_000 },
+  '1Y': { minutesPerBar: 1440, count: 260, staleMs: 30 * 60_000 },
   '5Y': { minutesPerBar: 10080, count: 260, staleMs: 60 * 60_000 },
 };
 

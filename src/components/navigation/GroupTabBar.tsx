@@ -1,12 +1,41 @@
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/tabs';
+import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '@/components/navigation/AppHeader';
+import { navGroup } from '@/config/navigation';
 import { cn } from '@/lib/utils/cn';
 import { useTheme } from '@/theme/ThemeProvider';
+
+/** The bar of a group pushed over the tabs (Settings): back · the group's name. */
+function PushedHeader({ title }: { title: string }) {
+  const router = useRouter();
+  const { colors } = useTheme();
+  return (
+    <View className="min-h-[52px] flex-row items-center gap-2 px-2">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+        hitSlop={8}
+        onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        className="h-10 w-10 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+      >
+        <ArrowLeft size={22} color={colors.text} />
+      </Pressable>
+      <Text
+        accessibilityRole="header"
+        className="flex-1 text-[17px] font-bold tracking-tight text-ink dark:text-ink-dark"
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+    </View>
+  );
+}
 
 /**
  * The top of every main-menu tab: the app bar, then the group's sub-tabs as a scrollable
@@ -122,7 +151,11 @@ export function GroupTabBar({ group, state, descriptors, navigation, position }:
       }}
       className="border-b border-line dark:border-line-dark"
     >
-      <AppHeader group={group} />
+      {group && navGroup(group).placement === 'header' ? (
+        <PushedHeader title={navGroup(group).label} />
+      ) : (
+        <AppHeader group={group} />
+      )}
       <ScrollView
         ref={scrollRef}
         horizontal

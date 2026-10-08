@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 
+import { InstrumentMark } from '@/features/fno/components/Glyphs';
 import { Note, PillButton } from '@/features/fno/components/primitives';
 import { DASH, dteLabel, expiryLabel, formatStrike, venueOf } from '@/features/fno/lib/format';
 import { cn } from '@/lib/utils/cn';
@@ -27,18 +28,28 @@ export function PaperChainHeader({
   const future = chain.future;
   return (
     <View className="rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">
-      <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
-        {chain.underlying} · {chain.isIndex ? 'index options' : 'stock options'} ·{' '}
-        {venueOf(chain.exchange)} · spot
-      </Text>
-      <Text
-        className="mt-1 text-2xl font-bold text-ink dark:text-ink-dark"
-        style={[NUM, { letterSpacing: -0.5 }]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-      >
-        {chain.spot != null ? formatINR(chain.spot) : DASH}
-      </Text>
+      <View className="flex-row items-center gap-3">
+        <InstrumentMark
+          kind={chain.isIndex ? 'index' : 'stock'}
+          underlying={chain.underlying}
+          exchange={chain.exchange}
+          size={40}
+        />
+        <View className="min-w-0 flex-1">
+          <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
+            {chain.underlying} · {chain.isIndex ? 'index options' : 'stock options'} ·{' '}
+            {venueOf(chain.exchange)} · spot
+          </Text>
+          <Text
+            className="mt-0.5 text-2xl font-bold text-ink dark:text-ink-dark"
+            style={[NUM, { letterSpacing: -0.5 }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {chain.spot != null ? formatINR(chain.spot) : DASH}
+          </Text>
+        </View>
+      </View>
       <Text
         className={cn(
           'mt-0.5 text-[11px] font-semibold',
@@ -53,10 +64,7 @@ export function PaperChainHeader({
         Spot: {spotSourceLabel(chain.spotSource)}
       </Text>
       {derived ? (
-        <Note className="mt-1">
-          Not a traded price of {chain.underlying} — back-solved from derivative quotes, so it can
-          differ from the cash market.
-        </Note>
+        <Note className="mt-1">Derived — not a traded price of {chain.underlying}.</Note>
       ) : null}
 
       <View className="mt-3 flex-row border-t border-line pt-3 dark:border-line-dark">

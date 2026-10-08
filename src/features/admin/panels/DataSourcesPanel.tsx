@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { SplitColumns } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { StackScreen } from '@/components/navigation/StackScreen';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { ListCard, RowDivider, Section } from '@/components/ui/Section';
 import { useCatalogAction, useRecServiceStatus } from '@/features/admin/hooks';
+import { dataSourceRows } from '@/features/admin/lib/dataSources';
 import type { CatalogAction, CatalogActionResult } from '@/features/admin/types';
 import { useWorkflows } from '@/features/automations/hooks';
 import { JsonBlock } from '@/features/settings/components/JsonBlock';
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { confirmAction } from '@/features/settings/lib/confirm';
-import type { StatusTone } from '@/features/settings/lib/status';
 import { formatDateTime } from '@/features/settings/lib/time';
 import { useBrokerConnections } from '@/features/trading/hooks';
 import { toast } from '@/lib/utils/toast';
@@ -44,15 +46,6 @@ const CATALOG_ACTIONS: readonly {
     confirm: 'Re-prices every tracked stock from the broker now.',
   },
 ];
-
-interface SourceRow {
-  name: string;
-  feeds: string;
-  updated: string | null;
-  scope: string;
-  tone: StatusTone;
-  label: string;
-}
 
 function humanize(key: string): string {
   const spaced = key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
@@ -95,42 +88,20 @@ function ResultSummary({ result }: { result: CatalogActionResult }) {
 
 /** Feed freshness and catalog maintenance (web: Data sources). */
 export function DataSourcesPanel() {
+  const layout = useScreenLayout();
   const connections = useBrokerConnections();
   const workflows = useWorkflows();
   const recService = useRecServiceStatus();
   const catalog = useCatalogAction();
   const [running, setRunning] = useState<CatalogAction | null>(null);
 
-  const mstock = connections.data?.find((connection) => connection.broker === 'mstock');
-  const wf = workflows.data?.summary;
-
-  const rows: SourceRow[] = [
-    {
-      name: 'mStock API — your session',
-      feeds: 'Quotes, holdings, live ticks',
-      updated: mstock?.connectedAt ?? null,
-      scope: 'Per user',
-      tone: mstock?.status === 'connected' ? 'ok' : mstock ? 'warn' : 'neutral',
-      label: mstock ? mstock.status.replace(/_/g, ' ') : 'Not connected',
-    },
-    {
-      name: 'mStock API — engine account',
-      feeds: 'Backs recommendation generation',
-      updated: recService.data?.lastRefreshedAt ?? null,
-      scope: 'Shared',
-      tone: recService.data === undefined ? 'neutral' : recService.data.connected ? 'ok' : 'bad',
-      label:
-        recService.data === undefined ? 'Unknown' : recService.data.connected ? 'Live' : 'Down',
-    },
-    {
-      name: 'News via n8n',
-      feeds: 'Articles for sentiment scoring',
-      updated: wf?.lastSuccessAt ?? null,
-      scope: wf ? `${wf.total} workflows` : '—',
-      tone: wf == null ? 'neutral' : wf.failedLast24h > 0 ? 'bad' : 'ok',
-      label: wf == null ? 'Unknown' : wf.failedLast24h > 0 ? 'Failing' : 'Live',
-    },
-  ];
+  const rows = dataSourceRows({
+    recService: recService.data,
+    connections: connections.data,
+    // Undefined while loading; null once n8n could not be read (unconfigured or down).
+    workflows: workflows.data ? workflows.data.summary : workflows.isError ? null : undefined,
+  });
+  const live = rows.filter((row) => row.tone === 'ok').length;
 
   const runAction = (action: (typeof CATALOG_ACTIONS)[number]) =>
     confirmAction({
@@ -150,65 +121,78 @@ export function DataSourcesPanel() {
   return (
     <StackScreen
       title="Data sources"
-      subtitle="Freshness and coverage"
+      subtitle="Where market data and news come from"
+      fill
       onRefresh={() =>
         Promise.all([connections.refetch(), workflows.refetch(), recService.refetch()])
       }
     >
-      <ListCard>
-        {rows.map((row, index) => (
-          <View key={row.name}>
-            {index > 0 ? <RowDivider /> : null}
-            <View className="gap-1.5 px-3.5 py-3">
-              <View className="flex-row items-start gap-3">
-                <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
-                  {row.name}
-                </Text>
-                <StatusPill tone={row.tone} label={row.label} />
-              </View>
-              <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
-                {row.feeds} · {row.scope}
-              </Text>
-              <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">
-                Last update {row.updated ? formatDateTime(row.updated) : '—'}
-              </Text>
-            </View>
-          </View>
-        ))}
-      </ListCard>
-      <Text className="mt-2 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        All three rows are live. Historical backtest datasets need their own status endpoint and
-        aren’t listed.
-      </Text>
-
-      <Section title="Catalog maintenance" note="Writes · admin only">
-        <ListCard>
-          {CATALOG_ACTIONS.map((action, index) => (
-            <View key={action.id}>
-              {index > 0 ? <RowDivider /> : null}
-              <View className="flex-row items-center gap-3 px-3.5 py-3">
-                <View className="flex-1">
-                  <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
-                    {action.label}
-                  </Text>
-                  <Text className="mt-0.5 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
-                    {action.detail}
-                  </Text>
+      <SplitColumns
+        split={!layout.compact}
+        left={
+          <Section title="Sources" note={`${live} of ${rows.length} live`} className="mt-0">
+            <ListCard>
+              {rows.map((row, index) => (
+                <View key={row.name}>
+                  {index > 0 ? <RowDivider /> : null}
+                  <View className="gap-1.5 px-3.5 py-3">
+                    <View className="flex-row items-start gap-3">
+                      <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
+                        {row.name}
+                      </Text>
+                      <StatusPill tone={row.tone} label={row.label} />
+                    </View>
+                    <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
+                      {row.feeds} · {row.scope}
+                    </Text>
+                    <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">
+                      Last update {row.updated ? formatDateTime(row.updated) : '—'}
+                    </Text>
+                  </View>
                 </View>
-                <Button
-                  label="Run"
-                  size="sm"
-                  variant="outline"
-                  disabled={catalog.isPending && running !== action.id}
-                  loading={running === action.id}
-                  onPress={() => runAction(action)}
-                />
-              </View>
-            </View>
-          ))}
-        </ListCard>
-        {catalog.data ? <ResultSummary result={catalog.data} /> : null}
-      </Section>
+              ))}
+            </ListCard>
+            <Text className="mt-2 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
+              Every row is read live from the server. Your own broker sessions are listed once
+              connected.
+            </Text>
+          </Section>
+        }
+        right={
+          <Section
+            title="Catalog maintenance"
+            note="Writes · admin only"
+            className={layout.compact ? undefined : 'mt-0'}
+          >
+            <ListCard>
+              {CATALOG_ACTIONS.map((action, index) => (
+                <View key={action.id}>
+                  {index > 0 ? <RowDivider /> : null}
+                  <View className="flex-row items-center gap-3 px-3.5 py-3">
+                    <View className="flex-1">
+                      <Text className="text-sm font-semibold text-ink dark:text-ink-dark">
+                        {action.label}
+                      </Text>
+                      <Text className="mt-0.5 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
+                        {action.detail}
+                      </Text>
+                    </View>
+                    <Button
+                      label="Run"
+                      size="sm"
+                      variant="outline"
+                      disabled={catalog.isPending && running !== action.id}
+                      loading={running === action.id}
+                      onPress={() => runAction(action)}
+                    />
+                  </View>
+                </View>
+              ))}
+            </ListCard>
+            {catalog.data ? <ResultSummary result={catalog.data} /> : null}
+          </Section>
+        }
+      />
     </StackScreen>
   );
 }

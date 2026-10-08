@@ -170,14 +170,12 @@ export function isShortOfMargin(required: number | null, available: number | nul
 
 /** The one-line risk statement the web ticket shows under every order. */
 export function riskNote(kind: ContractKind, side: FnoSide): string {
-  if (kind === 'FUT') {
-    return 'A future is linear: every rupee the underlying moves is lot × ₹1 for or against you, and losses are not capped at the margin.';
-  }
-  if (side === 'BUY')
-    return 'Buying an option pays the premium, and the premium is the most it can lose.';
+  // The web's 2026-10-07 short forms: one phrase each, the risk itself kept.
+  if (kind === 'FUT') return 'Futures losses are not capped at the margin.';
+  if (side === 'BUY') return 'Max loss: the premium paid.';
   return kind === 'CE'
-    ? 'Writing a call collects the premium and blocks margin — its loss is UNLIMITED if the underlying rises.'
-    : 'Writing a put collects the premium and blocks margin — it loses down to the underlying reaching zero.';
+    ? 'Writing a call: loss is UNLIMITED if the underlying rises.'
+    : 'Writing a put: can lose until the underlying reaches zero.';
 }
 
 /* ── Positions ────────────────────────────────────────────────────────────────────────── */

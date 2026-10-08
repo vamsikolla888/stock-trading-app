@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Clock from 'lucide-react-native/icons/clock';
 import Search from 'lucide-react-native/icons/search';
@@ -12,6 +12,12 @@ import { SCREEN_EDGES_NO_BOTTOM } from '@/components/common/safeArea';
 import { StockRow } from '@/components/market/StockRow';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { ListCard, RowDivider, Section } from '@/components/ui/Section';
+import { FnoSearchResults } from '@/features/derivatives/components/FnoSearchResults';
+import { useFnoSearchHits } from '@/features/derivatives/hooks';
+import type { FnoSearchHit } from '@/features/derivatives/lib/paperFno';
+import { fnoSearchHref, parseSearchScope } from '@/features/derivatives/lib/routes';
+import { useCommoditySearchHits } from '@/features/fno/hooks';
+import { commodityContractHref, commodityHref } from '@/features/fno/lib/explore';
 import { stockLogoUrl } from '@/features/market/api';
 import { useMovers, useStockSearch } from '@/features/market/hooks';
 import {
@@ -31,20 +37,42 @@ export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteEr
 /** Ten, not six: the same request (and cache entry) as Explore's Most traded shelf. */
 const POPULAR_LIMIT = 10;
 const POPULAR_SHOWN = 6;
+/** The F&O group stays under the stocks: a few underlyings, a handful of contracts. */
+const FNO_LIMITS = { underlyings: 3, contracts: 6 };
+const COMMODITY_LIMITS = { commodities: 3, contracts: 3 };
 
 /**
- * Stock search, Groww-style: the field is focused on arrival and results update as you
- * type (debounced like the web's header search). With nothing typed it shows your recent
- * searches and today's most-traded names. The keyboard's search key opens the top result.
+ * Search, Groww-style: the field is focused on arrival and results update as you type
+ * (debounced like the web's header search) — stocks first, then futures & options (an
+ * underlying, or one contract). With nothing typed it shows your recent searches and today's
+ * most-traded names. The keyboard's search key opens the top result.
+ *
+ * SCOPE. `/search?scope=paper` is the search a PAPER screen opens: there an F&O pick opens the
+ * paper chain (an underlying) or the paper ticket on that chain (a contract) — never the live
+ * Groww chain, which is one wrong tap away from a real order. Anywhere else, the live screens.
  */
 export default function SearchScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
+  const scope = parseSearchScope(useLocalSearchParams<{ scope?: string }>().scope);
+  const paper = scope === 'paper';
   const [query, setQuery] = useState('');
   const debounced = useDebounce(query.trim(), SEARCH_DEBOUNCE_MS);
-  const results = useStockSearch(debounced);
+  // One row per company: the stock page switches between a company's NSE and BSE listings.
+  const results = useStockSearch(debounced, { group: 'company' });
+  const fno = useFnoSearchHits(debounced, true, FNO_LIMITS);
+  const fnoHits = query.trim() ? fno.hits : [];
+  // MCX / NSE commodities open their chain read-only (Groww's API places no commodity orders).
+  // Never on a paper screen's search: the paper book has no commodity contracts.
+  const commodities = useCommoditySearchHits(
+    debounced,
+    !paper && query.trim().length > 0,
+    COMMODITY_LIMITS,
+  );
+  const derivativeCount =
+    fnoHits.length + (paper ? 0 : commodities.commodities.length + commodities.contracts.length);
   const recentSearches = usePreferencesStore((state) => state.recentSearches);
   const addRecentSearch = usePreferencesStore((state) => state.addRecentSearch);
   const clearRecentSearches = usePreferencesStore((state) => state.clearRecentSearches);
@@ -76,9 +104,16 @@ export default function SearchScreen() {
     openStock(item.symbol, item.exchange);
   };
 
+  const openFno = (hit: FnoSearchHit) => {
+    Keyboard.dismiss();
+    router.push(fnoSearchHref(hit, scope));
+  };
+
   const onSubmit = () => {
     const top = phase === 'results' && !stale ? rows[0] : undefined;
+    const topFno = phase === 'empty' ? fnoHits[0] : undefined;
     if (top) openResult(top);
+    else if (topFno) openFno(topFno);
     else Keyboard.dismiss();
   };
 
@@ -108,21 +143,30 @@ export default function SearchScreen() {
       />
     );
   } else if (phase === 'empty') {
-    body = (
-      <InlineEmpty
-        title={`No stocks match “${debounced}”`}
-        message="Try the ticker (like TCS) or a word from the company’s name."
-      />
-    );
+    body =
+      derivativeCount > 0 ? (
+        <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
+          No stocks match “{debounced}”.
+        </Text>
+      ) : fno.searching ? (
+        <ListSkeleton rows={3} />
+      ) : (
+        <InlineEmpty
+          title={`Nothing matches “${debounced}”`}
+          message="Try the ticker (like TCS), a word from the company’s name, or an index like NIFTY."
+        />
+      );
   } else {
     body = (
       <ListCard className={stale ? 'opacity-60' : undefined}>
         {rows.map((item, index) => (
           <View key={`${item.exchange}:${item.symbol}`}>
             {index > 0 ? <RowDivider /> : null}
+            {/* `exchange` keys the live price; the subtitle carries no NSE/BSE tag. */}
             <StockRow
               symbol={item.symbol}
               name={item.companyName}
+              exchange={item.exchange}
               subtitle={searchResultMeta(item)}
               price={item.ltp}
               changePercent={item.changePct}
@@ -163,9 +207,11 @@ export default function SearchScreen() {
             spellCheck={false}
             maxLength={SEARCH_MAX_LENGTH}
             returnKeyType="search"
-            placeholder="Search NSE / BSE — ticker or company"
+            placeholder={
+              paper ? 'Search a stock, NIFTY or an F&O contract' : 'Search stocks, NIFTY or F&O'
+            }
             placeholderTextColor={colors.textFaint}
-            accessibilityLabel="Search stocks"
+            accessibilityLabel={paper ? 'Search stocks and paper F&O' : 'Search stocks and F&O'}
             className="h-full flex-1 text-[15px] text-ink dark:text-ink-dark"
           />
           {query ? (
@@ -192,7 +238,40 @@ export default function SearchScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        <View accessibilityLiveRegion="polite">{body}</View>
+        {paper ? (
+          <View className="mb-3 mt-3 flex-row items-center gap-2">
+            <View className="rounded-md bg-info-wash px-1.5 py-0.5 dark:bg-info-wash-dark">
+              <Text className="text-[10px] font-bold text-info dark:text-info-dark">PAPER</Text>
+            </View>
+            <Text className="flex-1 text-xs text-ink-muted dark:text-ink-dark-muted">
+              An F&amp;O pick opens the paper chain and ticket — never a live order.
+            </Text>
+          </View>
+        ) : null}
+        <View accessibilityLiveRegion="polite">
+          {body}
+          {phase !== 'idle' ? (
+            <FnoSearchResults
+              hits={fnoHits}
+              title={paper ? 'Futures & options · paper' : 'Futures & options'}
+              onPick={openFno}
+              commodities={paper ? undefined : commodities}
+              onPickCommodity={
+                paper
+                  ? undefined
+                  : (pick) => {
+                      Keyboard.dismiss();
+                      router.push(
+                        pick.type === 'commodity'
+                          ? commodityHref(pick.commodity)
+                          : commodityContractHref(pick.contract),
+                      );
+                    }
+              }
+              className="mt-6"
+            />
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -234,6 +313,7 @@ function IdleContent({
               symbol={item.symbol}
               name={item.companyName}
               exchange={item.exchange}
+              subtitle={searchResultMeta(item)}
               price={item.ltp}
               changePercent={item.changePct}
               logoUri={stockLogoUrl(item.symbol)}

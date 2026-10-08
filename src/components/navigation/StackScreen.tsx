@@ -5,6 +5,7 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SCREEN_EDGES } from '@/components/common/safeArea';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { LiveScope } from '@/features/market/live';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -23,6 +24,8 @@ interface StackScreenProps {
    * every safe-area edge still applies.
    */
   immersive?: boolean;
+  /** Use the whole window instead of the 640px reading column (dashboards, admin panels). */
+  fill?: boolean;
 }
 
 /**
@@ -38,9 +41,12 @@ export function StackScreen({
   footer,
   scroll = true,
   immersive = false,
+  fill = false,
 }: StackScreenProps) {
   const router = useRouter();
   const { colors } = useTheme();
+  const layout = useScreenLayout();
+  const gutter = fill ? layout.gutter : 20;
   const focused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -89,7 +95,7 @@ export function StackScreen({
         {scroll ? (
           <ScrollView
             className="flex-1"
-            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 }}
+            contentContainerStyle={{ paddingHorizontal: gutter, paddingTop: 16, paddingBottom: 32 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             refreshControl={
@@ -103,7 +109,7 @@ export function StackScreen({
               ) : undefined
             }
           >
-            <View className="w-full max-w-[640px] self-center">{children}</View>
+            <View className={fill ? 'w-full' : 'w-full max-w-[640px] self-center'}>{children}</View>
           </ScrollView>
         ) : (
           <View className="flex-1">{children}</View>

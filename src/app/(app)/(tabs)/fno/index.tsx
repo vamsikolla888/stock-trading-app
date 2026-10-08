@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { GroupScreen } from '@/components/navigation/GroupScreen';
@@ -18,9 +18,16 @@ import { Freshness, GrowwAccessBanner } from '@/features/fno/components/FnoChrom
 import { Caveats, Disclosure } from '@/features/fno/components/primitives';
 import { SearchSheet } from '@/features/fno/components/SearchSheet';
 import { useFnoExplore, useFnoStatus } from '@/features/fno/hooks';
-import { chainHref, isChainExchange, liveMove, underlyingHref } from '@/features/fno/lib/explore';
+import {
+  chainHref,
+  exploreCommodityHref,
+  isEquityFnoExchange,
+  liveMove,
+  underlyingHref,
+} from '@/features/fno/lib/explore';
 import { expiryLabel, futureTitle } from '@/features/fno/lib/format';
 import type { ExploreTile } from '@/features/fno/types';
+import { useAuthStore } from '@/store/authStore';
 
 const TOP_KINDS = [
   { key: 'equity', label: 'Equity' },
@@ -36,6 +43,7 @@ const TOP_KINDS = [
  */
 export default function FnoExploreScreen() {
   const router = useRouter();
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin');
   const explore = useFnoExplore();
   const status = useFnoStatus();
   const data = explore.data;
@@ -118,11 +126,6 @@ export default function FnoExploreScreen() {
               title={
                 topKind === 'commodities' ? 'No MCX contracts listed' : 'No F&O underlyings listed'
               }
-              message={
-                topKind === 'commodities'
-                  ? 'Groww’s instrument master lists no MCX contracts right now.'
-                  : undefined
-              }
             />
           ) : (
             <View className="gap-2.5">
@@ -136,7 +139,15 @@ export default function FnoExploreScreen() {
                   {row.map((tile) => {
                     const move = liveMove(tile.ltp, tile.prevClose);
                     const exchange = tile.exchange;
-                    const opens = tile.kind !== 'commodity' && isChainExchange(exchange);
+                    // An index or stock opens its own screen; a commodity tile (one future) its
+                    // commodity's futures with that contract charted — read-only.
+                    const commodityLink =
+                      tile.kind === 'commodity' ? exploreCommodityHref(tile) : null;
+                    const onPress = commodityLink
+                      ? () => router.push(commodityLink)
+                      : tile.kind !== 'commodity' && isEquityFnoExchange(exchange)
+                        ? () => router.push(underlyingHref(exchange, tile.underlying))
+                        : null;
                     return (
                       <TradedTile
                         key={`${tile.exchange}:${tile.underlying}:${tile.tradingSymbol ?? ''}`}
@@ -152,11 +163,7 @@ export default function FnoExploreScreen() {
                         isLevel={tile.kind === 'index'}
                         candles={tile.candles}
                         candleNote={tile.candleNote}
-                        onPress={
-                          opens
-                            ? () => router.push(underlyingHref(exchange, tile.underlying))
-                            : null
-                        }
+                        onPress={onPress}
                       />
                     );
                   })}
@@ -178,6 +185,26 @@ export default function FnoExploreScreen() {
       <FnoStocksShelf stocks={data?.stocks} loading={explore.isLoading} />
 
       <FnoToolsGrid />
+
+      {/* The index-options bot lives under Agents; admins only, like every route it reads. */}
+      {isAdmin ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="Index bot. Paper-only research and risk controls. Opens Agents, Index trading."
+          onPress={() => router.push('/agents/index-trading')}
+          className="mt-6 flex-row items-center gap-3 rounded-card border border-line bg-surface px-4 py-3.5 active:bg-surface-sunk dark:border-line-dark dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
+        >
+          <View className="flex-1">
+            <Text className="text-sm font-semibold text-ink dark:text-ink-dark">Index bot</Text>
+            <Text className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted">
+              Paper-only research and risk controls
+            </Text>
+          </View>
+          <Text className="text-[15px] font-semibold text-brand-text dark:text-brand-text-dark">
+            →
+          </Text>
+        </Pressable>
+      ) : null}
 
       {failed ? null : (
         <>

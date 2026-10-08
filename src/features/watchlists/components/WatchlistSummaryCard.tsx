@@ -140,8 +140,7 @@ export function WatchlistSummaryCard({
           </View>
           {unmeasured > 0 ? (
             <Text className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-              {unmeasured} not measurable — no price at one end, so left out of the averages rather
-              than counted as flat.
+              {unmeasured} not measurable · excluded from averages
             </Text>
           ) : null}
         </>

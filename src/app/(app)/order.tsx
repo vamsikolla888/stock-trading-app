@@ -11,12 +11,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { SCREEN_EDGES } from '@/components/common/safeArea';
+import { ChangeText } from '@/components/market/ChangeText';
+import { Badge } from '@/components/ui/Badge';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
+import { SafeModeNotice } from '@/features/account/components/SafeMode';
+import { useSafeModeOn, useSafeModeRefusalSync } from '@/features/account/hooks';
 import { useStockDetail } from '@/features/market/hooks';
-import { useLiveQuote } from '@/features/market/live';
+import { useLiveness, useLiveQuote } from '@/features/market/live';
+import { usePaperOrders, usePaperPortfolio } from '@/features/paper/hooks';
 import { portfolioKeys } from '@/features/portfolio/keys';
+import { istToday } from '@/features/portfolio/lib/dates';
 import { previewCharges, liveTradingApi, paperApi } from '@/features/trading/api';
 import {
   FieldLabel,
@@ -25,14 +31,21 @@ import {
   SummaryRow,
 } from '@/features/trading/components/OrderInputs';
 import {
+  DetailStack,
+  MoneyCards,
+  QuietDisclosure,
+  TicketOrders,
+} from '@/features/trading/components/TicketMoney';
+import {
   tradingKeys,
+  useLiveOrders,
   useLiveTradingOptions,
   useLiveWallet,
   useOrderIntent,
   usePaperPreview,
 } from '@/features/trading/hooks';
 import { pinnedBrokerReason } from '@/features/trading/lib/availability';
-import { heldQuantity } from '@/features/trading/lib/liveOrders';
+import { findOpenOrder, heldQuantity } from '@/features/trading/lib/liveOrders';
 import {
   MAX_ORDER_QUANTITY,
   needsLimitPrice,
@@ -47,9 +60,27 @@ import {
   type OrderOutcome,
 } from '@/features/trading/lib/orderOutcome';
 import { parseTicketParams } from '@/features/trading/lib/ticket';
+import {
+  detailsSummary,
+  liveAmountCard,
+  liveBalanceCard,
+  liveChargeLines,
+  liveDetailRows,
+  missingWord,
+  openOrderMessage,
+  orderTypeHelp,
+  ordersSummary,
+  paperAmountCard,
+  paperBalanceCard,
+  paperChargeLines,
+  paperDetailRows,
+  todaysLiveOrders,
+  todaysPaperOrders,
+  usablePaperPreview,
+} from '@/features/trading/lib/ticketView';
 import type { LiveBroker, OrderType, PaperOrderInput } from '@/features/trading/types';
 import { useDebounce } from '@/hooks/useDebounce';
-import { formatINR, formatQuantity } from '@/lib/utils/formatters';
+import { formatINR, formatQuantity, formatSignedPercent } from '@/lib/utils/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ApiError, getErrorMessage, isApiError } from '@/types/api';
 
@@ -57,13 +88,15 @@ import { ApiError, getErrorMessage, isApiError } from '@/types/api';
 // would take down the whole signed-in stack.
 export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
+const NUM = { fontVariant: ['tabular-nums' as const] };
+
 type Mode = 'live' | 'paper';
 type Product = 'delivery' | 'intraday';
 type Step = 'form' | 'review' | 'result';
 
 const PRODUCTS: readonly { key: Product; label: string }[] = [
-  { key: 'delivery', label: 'Delivery' },
-  { key: 'intraday', label: 'Intraday' },
+  { key: 'delivery', label: 'Delivery · CNC' },
+  { key: 'intraday', label: 'Intraday · MIS' },
 ];
 
 const ORDER_TYPES: readonly { key: OrderType; label: string }[] = (
@@ -106,7 +139,9 @@ export default function OrderScreen() {
   const { symbol, exchange, side, profileId } = ticket;
   const isBuy = side === 'BUY';
 
-  const detail = useStockDetail(symbol, exchange);
+  // While ticks stream (either broker), the REST quote is only a fallback and slows down.
+  const streaming = useLiveness(exchange, symbol);
+  const detail = useStockDetail(symbol, exchange, { streaming: streaming.live });
   const live = useLiveTradingOptions();
   const intent = useOrderIntent();
 
@@ -121,6 +156,10 @@ export default function OrderScreen() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<OrderOutcome | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+  /** The quiet disclosures: charges & details, its itemised lines, and today's orders. */
+  const [showDetails, setShowDetails] = useState(false);
+  const [showCharges, setShowCharges] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
   /** What the review screen showed — exactly what Confirm places. */
   const [reviewed, setReviewed] = useState<{ mode: Mode; broker: LiveBroker | null } | null>(null);
 
@@ -141,6 +180,11 @@ export default function OrderScreen() {
   // screen opens the ticket in paper mode — it never silently becomes live.
   const mode: Mode = chosenMode ?? (liveAvailable ? 'live' : 'paper');
   const isLive = mode === 'live' && liveAvailable;
+  // Safe Mode (Profile & security) blocks the live mode only — the server refuses it anyway;
+  // this says so before the tap. Paper orders never reach a broker and stay open.
+  const safeMode = useSafeModeOn();
+  const syncSafeMode = useSafeModeRefusalSync();
+  const liveBlocked = isLive && safeMode;
   // Every tick (stream mode): the reference price, the estimate and the LTP line follow the
   // market while the ticket is open, not the last 10-second poll.
   const liveQuote = useLiveQuote(exchange, symbol, { mode: 'stream' });
@@ -154,6 +198,8 @@ export default function OrderScreen() {
     [side, orderType, quantity, limitPrice, triggerPrice],
   );
   const orderQuantity = order?.quantity ?? null;
+  // The typed quantity, for the money card while another field is still incomplete.
+  const parsedQuantity = /^\d+$/.test(quantity.trim()) ? Number(quantity.trim()) : null;
   const orderPrice = order?.price ?? null;
   const orderTrigger = order?.triggerPrice ?? null;
 
@@ -179,12 +225,23 @@ export default function OrderScreen() {
       ? heldQuantity(wallet.data.holdings ?? null, detail.data?.listings ?? [])
       : null;
 
+  // The paper account behind a paper ticket: its free cash and this stock's holding before any
+  // preview lands, and today's orders for the stock. Nothing is read for a live ticket (nor
+  // while it is still unknown whether this one will be live).
+  const segment = product === 'delivery' ? ('equity' as const) : ('intraday' as const);
+  const paperMode = !isLive && (chosenMode === 'paper' || !live.isLoading);
+  const paperAccount = usePaperPortfolio(segment, profileId, paperMode);
+  const paperOrders = usePaperOrders(profileId, 200, paperMode);
+  // Real orders: one working order per stock per broker (the server refuses a second), and
+  // today's orders for the stock.
+  const liveOrders = useLiveOrders(50, isLive);
+
   // Memoised on primitives: a fresh object each render would restart the debounce forever.
   const paperInput = useMemo<PaperOrderInput | null>(
     () =>
       !isLive && symbol && orderQuantity !== null
         ? {
-            segment: product === 'delivery' ? 'equity' : 'intraday',
+            segment,
             ...(profileId ? { profileId } : {}),
             exchange,
             symbol,
@@ -200,7 +257,7 @@ export default function OrderScreen() {
       orderQuantity,
       orderPrice,
       orderTrigger,
-      product,
+      segment,
       profileId,
       exchange,
       symbol,
@@ -208,7 +265,19 @@ export default function OrderScreen() {
       orderType,
     ],
   );
-  const paperPreview = usePaperPreview(useDebounce(paperInput, 300));
+  const debouncedPaper = useDebounce(paperInput, 300);
+  const paperPreview = usePaperPreview(debouncedPaper);
+  // Only a preview of exactly these inputs counts: while typing, the previous order's figures
+  // (kept on screen to avoid flicker) must not be read — or reviewed — as this one's.
+  const previewCurrent =
+    paperInput !== null && debouncedPaper === paperInput && !paperPreview.isPlaceholderData;
+  const rawPreview = previewCurrent ? (paperPreview.data ?? null) : null;
+  const preview = usablePaperPreview(rawPreview);
+  const previewFailed =
+    previewCurrent &&
+    !paperPreview.isFetching &&
+    (paperPreview.isError || (rawPreview !== null && !preview));
+  const previewPending = paperInput !== null && !preview && !previewFailed;
 
   const price = order ? referencePrice(order, orderType, ltp) : null;
   const estimate = order && price !== null ? order.quantity * price : null;
@@ -233,19 +302,84 @@ export default function OrderScreen() {
     retry: false,
     placeholderData: keepPreviousData,
   });
+  const liveCharges =
+    chargesInput !== null && chargesInput === liveChargesInput && !charges.isPlaceholderData
+      ? (charges.data?.breakdown ?? null)
+      : null;
 
-  const chargesTotal = isLive
-    ? (charges.data?.breakdown?.total ?? null)
-    : (paperPreview.data?.charges ?? null);
-  const fundsShown = isLive ? available : (paperPreview.data?.availableCash ?? null);
-  const blockedReason = !isLive && paperInput ? (paperPreview.data?.blockedReason ?? null) : null;
-  const paperNotices = !isLive && paperInput ? (paperPreview.data?.notices ?? []) : [];
+  const chargesTotal = isLive ? (liveCharges?.total ?? null) : (preview?.charges ?? null);
+  const blockedReason = !isLive ? (rawPreview?.blockedReason ?? null) : null;
   // Paper: the server's own margin figure — an intraday buy is leveraged, so it commits only a
   // fraction of its value. Live: the order value against the broker's funds.
-  const paperMargin = !isLive && paperInput ? (paperPreview.data?.marginRequired ?? null) : null;
+  const paperMargin = preview?.marginRequired ?? null;
+  const paperAvailable = preview?.availableCash ?? paperAccount.data?.wallet.availableCash ?? null;
   const shortOfFunds = isLive
-    ? isBuy && estimate !== null && fundsShown !== null && estimate > fundsShown
-    : isBuy && paperMargin !== null && fundsShown !== null && paperMargin > fundsShown;
+    ? isBuy && estimate !== null && available !== null && estimate > available
+    : isBuy && paperMargin !== null && paperAvailable !== null && paperMargin > paperAvailable;
+
+  const openOrder =
+    isLive && broker ? findOpenOrder(liveOrders.data, { broker, exchange, symbol }) : null;
+  const openOrderNote = openOrderMessage(openOrder, displaySymbol, brokerLabel ?? 'your broker');
+
+  // ── The money (web: the ticket's two cards, then "Charges & details") ──
+  const missing = missingWord(errors);
+  const paperHeld =
+    paperAccount.data?.positions.find(
+      (position) => position.exchange === exchange && position.symbol === symbol,
+    )?.quantity ?? null;
+  const amountCard = isLive
+    ? liveAmountCard({ side, quantity: orderQuantity ?? parsedQuantity, price, missing })
+    : paperAmountCard({
+        side,
+        quantity: orderQuantity ?? parsedQuantity,
+        missing,
+        pending: previewPending,
+        failed: previewFailed,
+        preview,
+      });
+  const balanceCard = isLive
+    ? liveBalanceCard({
+        side,
+        product,
+        brokerLabel,
+        available,
+        loading: wallet.isPending,
+        error: wallet.error,
+        held,
+        price: price ?? ltp,
+      })
+    : paperBalanceCard({
+        side,
+        preview,
+        available: paperAccount.data?.wallet.availableCash ?? null,
+        leverage: paperAccount.data?.leverage ?? null,
+        held: paperHeld,
+        price: price ?? ltp,
+      });
+  const detailRows = isLive
+    ? order
+      ? liveDetailRows({ estimate, charges: chargesTotal })
+      : []
+    : preview && !missing && preview.referencePrice > 0
+      ? paperDetailRows(preview, side)
+      : [];
+  const chargeLines = isLive
+    ? liveChargeLines(liveCharges)
+    : paperChargeLines(preview?.chargesBreakdown, side, segment);
+  const today = istToday();
+  const todays = isLive
+    ? todaysLiveOrders(liveOrders.data, { exchange, symbol }, today)
+    : todaysPaperOrders(paperOrders.data, { exchange, symbol }, today);
+
+  const triggerHint = needsTriggerPrice(orderType)
+    ? `Fires at or ${isBuy ? 'above' : 'below'} this price.${preview?.triggered ? ' Already reached — fills now.' : ''}`
+    : null;
+  const limitHint =
+    orderType === 'SL'
+      ? `Keep at or ${isBuy ? 'above' : 'below'} the trigger.`
+      : orderType === 'LIMIT' && preview?.wouldRest
+        ? `Will rest — the market is ${isBuy ? 'above' : 'below'} your limit.`
+        : null;
 
   const refreshAfterOrder = (placedAt: LiveBroker | null) =>
     Promise.all([
@@ -310,6 +444,7 @@ export default function OrderScreen() {
     },
     onError: (error) => {
       intent.settle(error);
+      syncSafeMode(error);
       const retrySafe = isApiError(error) && (error.isNetworkError || error.isServerError);
       setSubmitError(
         retrySafe && reviewed?.mode === 'live'
@@ -319,9 +454,20 @@ export default function OrderScreen() {
     },
   });
 
+  // Paper is priced by the server before it can be reviewed (the web's rule): the review shows
+  // the server's figures, never a stale or missing estimate.
+  const awaitingPrice = !isLive && order !== null && !preview;
+  const canReview =
+    Boolean(detail.data) &&
+    !blockedReason &&
+    !live.isLoading &&
+    !liveBlocked &&
+    !openOrder &&
+    !awaitingPrice;
+
   const openReview = () => {
     setShowErrors(true);
-    if (!order || blockedReason) return;
+    if (!order || !canReview) return;
     const next = {
       mode: isLive ? ('live' as const) : ('paper' as const),
       broker: isLive ? broker : null,
@@ -367,18 +513,42 @@ export default function OrderScreen() {
     );
   }
 
+  const prevClose = liveQuote?.prevClose ?? detail.data?.prevClose ?? null;
+  const changePct =
+    ltp !== null && prevClose !== null && prevClose > 0
+      ? ((ltp - prevClose) / prevClose) * 100
+      : (detail.data?.changePct ?? null);
+  const fixBroker = () => router.push('/brokers');
+  const setMax = (n: number) => edit(setQuantity)(String(Math.min(n, MAX_ORDER_QUANTITY)));
+
   return (
     <SafeAreaView edges={SCREEN_EDGES} style={{ flex: 1, backgroundColor: colors.surface }}>
       <View className="flex-row items-start gap-3 px-5 pb-3 pt-4">
         <View className="flex-1">
+          <View className="flex-row items-center gap-2">
+            <Text
+              accessibilityRole="header"
+              className="flex-shrink text-xl font-bold text-ink dark:text-ink-dark"
+              numberOfLines={1}
+            >
+              {step === 'result' ? 'Order status' : title}
+            </Text>
+            {step === 'result' ? null : (
+              <Badge label={isLive ? 'LIVE' : 'PAPER'} variant={isLive ? 'danger' : 'primary'} />
+            )}
+          </View>
           <Text
-            accessibilityRole="header"
-            className="text-xl font-bold text-ink dark:text-ink-dark"
+            className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted"
+            style={NUM}
+            numberOfLines={1}
           >
-            {step === 'result' ? 'Order status' : title}
-          </Text>
-          <Text className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted">
-            {exchange} · Equity · LTP {formatINR(ltp)}
+            {exchange} · {formatINR(ltp)}
+            {changePct !== null ? (
+              <ChangeText value={changePct} className="text-xs">
+                {'  '}
+                {formatSignedPercent(changePct)}
+              </ChangeText>
+            ) : null}
           </Text>
         </View>
         <Pressable
@@ -400,7 +570,7 @@ export default function OrderScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {step === 'form' ? (
-            <View className="gap-4">
+            <View className="gap-5">
               {detail.error && !detail.data ? (
                 <InlineError
                   what={`${symbol}'s price`}
@@ -409,7 +579,7 @@ export default function OrderScreen() {
                 />
               ) : null}
 
-              <View>
+              <View className="gap-2.5">
                 <SegmentedControl
                   items={modeItems}
                   value={isLive ? 'live' : 'paper'}
@@ -419,30 +589,25 @@ export default function OrderScreen() {
                   }}
                 />
                 {!liveAvailable && liveReason ? (
-                  <Text className="mt-1.5 text-xs text-ink-muted dark:text-ink-dark-muted">
+                  <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
                     Live unavailable: {liveReason}{' '}
                     <Text
                       className="font-semibold text-brand-text dark:text-brand-text-dark"
-                      onPress={() => router.push('/brokers')}
+                      onPress={fixBroker}
                     >
                       Brokers
                     </Text>
                   </Text>
                 ) : null}
-              </View>
-
-              {isLive && !pinned && brokerItems.length > 1 && broker ? (
-                <View>
-                  <FieldLabel>Broker</FieldLabel>
+                {isLive && !pinned && brokerItems.length > 1 && broker ? (
                   <SegmentedControl
                     items={brokerItems}
                     value={broker}
                     onChange={edit(setChosenBroker)}
                   />
-                </View>
-              ) : null}
-
-              <SegmentedControl items={PRODUCTS} value={product} onChange={edit(setProduct)} />
+                ) : null}
+                <SegmentedControl items={PRODUCTS} value={product} onChange={edit(setProduct)} />
+              </View>
 
               <View>
                 <FieldLabel>Quantity</FieldLabel>
@@ -450,6 +615,7 @@ export default function OrderScreen() {
                   value={quantity}
                   onChange={edit(setQuantity)}
                   max={MAX_ORDER_QUANTITY}
+                  size="lg"
                 />
                 {showErrors && errors.quantity ? (
                   <Text className="mt-1 text-xs text-danger-600 dark:text-danger-dark">
@@ -465,19 +631,13 @@ export default function OrderScreen() {
                   value={orderType}
                   onChange={edit(setOrderType)}
                 />
+                <Text className="mt-1.5 text-xs text-ink-faint dark:text-ink-dark-faint">
+                  {orderTypeHelp(orderType, isLive ? 'live' : 'paper')}
+                </Text>
               </View>
 
               {needsLimitPrice(orderType) || needsTriggerPrice(orderType) ? (
                 <View className="flex-row gap-3">
-                  {needsLimitPrice(orderType) ? (
-                    <PriceInput
-                      label="Price"
-                      value={limitPrice}
-                      onChange={edit(setLimitPrice)}
-                      placeholder={ltp !== null ? ltp.toFixed(2) : undefined}
-                      error={showErrors ? errors.limitPrice : null}
-                    />
-                  ) : null}
                   {needsTriggerPrice(orderType) ? (
                     <PriceInput
                       label="Trigger price"
@@ -485,43 +645,57 @@ export default function OrderScreen() {
                       onChange={edit(setTriggerPrice)}
                       placeholder={ltp !== null ? ltp.toFixed(2) : undefined}
                       error={showErrors ? errors.triggerPrice : null}
+                      hint={triggerHint}
+                      size="lg"
+                    />
+                  ) : null}
+                  {needsLimitPrice(orderType) ? (
+                    <PriceInput
+                      label={orderType === 'SL' ? 'Limit price' : 'Price'}
+                      value={limitPrice}
+                      onChange={edit(setLimitPrice)}
+                      placeholder={ltp !== null ? ltp.toFixed(2) : undefined}
+                      error={showErrors ? errors.limitPrice : null}
+                      hint={limitHint}
+                      size="lg"
                     />
                   ) : null}
                 </View>
               ) : null}
 
-              <View className="rounded-xl bg-surface-sunk px-3.5 py-2.5 dark:bg-surface-sunk-dark">
-                <SummaryRow label="Estimated value" value={formatINR(estimate)} strong />
-                <SummaryRow
-                  label="Estimated charges"
-                  value={chargesTotal !== null ? formatINR(chargesTotal) : '—'}
+              <View>
+                <MoneyCards
+                  amount={amountCard}
+                  balance={balanceCard}
+                  onMax={setMax}
+                  onFix={isLive ? fixBroker : undefined}
                 />
-                {!isLive && product === 'intraday' && isBuy && paperMargin !== null ? (
-                  <SummaryRow label="Margin required" value={formatINR(paperMargin)} />
-                ) : null}
-                <SummaryRow
-                  label={isLive ? 'Available funds' : 'Paper wallet balance'}
-                  value={
-                    fundsShown !== null
-                      ? formatINR(fundsShown)
-                      : isLive && wallet.isPending
-                        ? 'Checking…'
-                        : '—'
-                  }
-                />
-                {held !== null ? (
-                  <SummaryRow
-                    label={`Shares held at ${brokerLabel ?? 'your broker'}`}
-                    value={formatQuantity(held)}
-                  />
+                {detailRows.length > 0 ? (
+                  <>
+                    <QuietDisclosure
+                      className="mt-1"
+                      label="Charges & details"
+                      summary={detailsSummary(chargesTotal, showDetails)}
+                      open={showDetails}
+                      onToggle={() => setShowDetails((open) => !open)}
+                    />
+                    {showDetails ? (
+                      <DetailStack
+                        rows={detailRows}
+                        chargeLines={chargeLines}
+                        chargesOpen={showCharges}
+                        onToggleCharges={() => setShowCharges((open) => !open)}
+                        notes={!isLive ? preview?.notices : undefined}
+                      />
+                    ) : null}
+                  </>
                 ) : null}
               </View>
 
+              {liveBlocked ? <SafeModeNotice /> : null}
+              {openOrderNote ? <Banner tone="warning" message={openOrderNote} /> : null}
               {blockedReason ? <Banner tone="warning" message={blockedReason} /> : null}
-              {paperNotices.map((notice, index) => (
-                <Banner key={`${index}-${notice}`} tone="info" message={notice} />
-              ))}
-              {!isLive && paperInput && paperPreview.error && !paperPreview.data ? (
+              {!isLive && previewFailed && paperPreview.error ? (
                 <Banner tone="warning" message={getErrorMessage(paperPreview.error)} />
               ) : null}
               {shortOfFunds && !blockedReason ? (
@@ -529,30 +703,27 @@ export default function OrderScreen() {
                   tone="warning"
                   message={
                     isLive
-                      ? 'The estimated value is more than your available funds.'
-                      : 'This needs more than your paper wallet balance.'
+                      ? 'More than your available balance.'
+                      : 'More than your paper wallet’s available cash.'
                   }
                 />
               ) : null}
               {held !== null && orderQuantity !== null && orderQuantity > held ? (
                 <Banner
                   tone="warning"
-                  message={`You hold ${formatQuantity(held)} at ${brokerLabel ?? 'your broker'} — a delivery sell can't be larger than that.`}
+                  message={`Only ${formatQuantity(held)} held at ${brokerLabel ?? 'your broker'} — a delivery sell can't be larger.`}
                 />
               ) : null}
-              {isLive && wallet.error ? (
-                <Banner tone="warning" message={getErrorMessage(wallet.error)} />
-              ) : null}
 
-              <Banner
-                tone={isLive ? 'warning' : 'info'}
-                title={isLive ? 'Real money' : 'Practice mode'}
-                message={
-                  isLive
-                    ? `This sends a real order to ${brokerLabel ?? 'your broker'}. Pre-trade risk checks run on the server; executed orders can't be undone.`
-                    : 'Paper orders use virtual cash and real prices. Nothing is sent to a broker.'
-                }
-              />
+              <View className="border-t border-line pt-1 dark:border-line-dark">
+                <QuietDisclosure
+                  label="Today’s orders"
+                  summary={ordersSummary(todays.length, showOrders)}
+                  open={showOrders && todays.length > 0}
+                  onToggle={() => setShowOrders((open) => todays.length > 0 && !open)}
+                />
+                {showOrders && todays.length > 0 ? <TicketOrders rows={todays} /> : null}
+              </View>
             </View>
           ) : null}
 
@@ -582,19 +753,26 @@ export default function OrderScreen() {
                 {order.triggerPrice !== null ? (
                   <SummaryRow label="Trigger" value={formatINR(order.triggerPrice)} />
                 ) : null}
-                <SummaryRow label="Estimated value" value={formatINR(estimate)} strong />
                 <SummaryRow
-                  label="Estimated charges"
+                  label="Order value"
+                  value={formatINR(
+                    reviewed.mode === 'paper' ? (preview?.grossValue ?? null) : estimate,
+                  )}
+                />
+                <SummaryRow
+                  label={reviewed.mode === 'paper' ? 'Charges' : 'Estimated charges'}
                   value={chargesTotal !== null ? formatINR(chargesTotal) : '—'}
                 />
+                <SummaryRow label={amountCard.label} value={amountCard.value} strong />
               </View>
               {reviewed.mode === 'live' ? (
                 <Banner
                   tone="warning"
                   title="Confirm a real order"
-                  message={`${isBuy ? 'Buying' : 'Selling'} on ${reviewedBrokerLabel} with real money. Market orders fill at the prevailing price, which can differ from the estimate.`}
+                  message={`${isBuy ? 'Buying' : 'Selling'} on ${reviewedBrokerLabel} with real money. A market order fills at the prevailing price, which can differ from the estimate.`}
                 />
               ) : null}
+              {reviewed.mode === 'live' && safeMode ? <SafeModeNotice /> : null}
               {submitError ? <Banner tone="error" message={submitError} /> : null}
             </View>
           ) : null}
@@ -622,14 +800,33 @@ export default function OrderScreen() {
 
         <View className="gap-2 border-t border-line px-5 pb-2 pt-3 dark:border-line-dark">
           {step === 'form' ? (
-            <Button
-              label={`Review ${isBuy ? 'buy' : 'sell'} order`}
-              size="lg"
-              fullWidth
-              variant={isBuy ? 'primary' : 'danger'}
-              disabled={!detail.data || Boolean(blockedReason) || live.isLoading}
-              onPress={openReview}
-            />
+            <>
+              <Text
+                className={
+                  isLive
+                    ? 'text-center text-xs font-semibold text-warning-600 dark:text-warning-dark'
+                    : 'text-center text-xs text-ink-muted dark:text-ink-dark-muted'
+                }
+              >
+                {isLive
+                  ? `Real money · sent to ${brokerLabel ?? 'your broker'} after a risk check`
+                  : 'Paper · virtual cash, real prices, no broker'}
+              </Text>
+              <Button
+                label={
+                  liveBlocked
+                    ? 'Safe Mode is on'
+                    : openOrder
+                      ? `${displaySymbol} has an open order`
+                      : `Review ${isBuy ? 'buy' : 'sell'}`
+                }
+                size="lg"
+                fullWidth
+                variant={isBuy ? 'primary' : 'danger'}
+                disabled={!canReview}
+                onPress={openReview}
+              />
+            </>
           ) : null}
           {step === 'review' ? (
             <>
@@ -639,6 +836,7 @@ export default function OrderScreen() {
                 fullWidth
                 variant={isBuy ? 'primary' : 'danger'}
                 loading={place.isPending}
+                disabled={reviewed?.mode === 'live' && safeMode}
                 onPress={confirm}
               />
               <Button

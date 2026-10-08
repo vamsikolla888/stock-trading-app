@@ -210,7 +210,7 @@ describe('normalizeBrief', () => {
 });
 
 describe('normalizePreferences', () => {
-  it('appends sections a stored order predates, as the server does', () => {
+  it('keeps the server’s own section list — what it will accept back', () => {
     const prefs = normalizePreferences({
       riskProfile: 'aggressive',
       audioEnabled: false,
@@ -222,8 +222,19 @@ describe('normalizePreferences', () => {
     expect(prefs.riskProfile).toBe('aggressive');
     expect(prefs.audioEnabled).toBe(false);
     expect(prefs.visibleSections).toEqual(['news', 'summary']);
-    expect(prefs.sectionOrder.slice(0, 2)).toEqual(['news', 'summary']);
-    expect(prefs.sectionOrder).toHaveLength(DAILY_BRIEF_SECTIONS.length);
+    expect(prefs.sectionOrder).toEqual(['news', 'summary']);
+  });
+
+  it('never adds the IPO section for a server that does not know it', () => {
+    const older = DAILY_BRIEF_SECTIONS.filter((section) => section !== 'ipo');
+    const prefs = normalizePreferences({ visibleSections: older, sectionOrder: older });
+    expect(prefs.sectionOrder).not.toContain('ipo');
+    expect(prefs.visibleSections).not.toContain('ipo');
+    const current = normalizePreferences({
+      visibleSections: [...DAILY_BRIEF_SECTIONS],
+      sectionOrder: [...DAILY_BRIEF_SECTIONS],
+    });
+    expect(current.sectionOrder.indexOf('ipo')).toBe(current.sectionOrder.indexOf('indices') + 1);
   });
 
   it('ignores unknown sections and never leaves nothing visible', () => {
@@ -252,5 +263,40 @@ describe('small parsers', () => {
     expect(normalizeAudio({ date: 'd', version: 'v', transcript: '  Hi.  ' }).transcript).toBe(
       'Hi.',
     );
+  });
+});
+
+describe('ipoListings', () => {
+  it('reads the day’s listings with their report verdicts, and none on an older brief', () => {
+    const brief = normalizeBrief({
+      date: '2026-10-08',
+      ipoListings: {
+        available: true,
+        items: [
+          {
+            id: 'i1',
+            companyName: 'Acme',
+            issueType: 'sme',
+            exchange: 'NSE',
+            issuePrice: 120,
+            gmpPercent: 12.5,
+            preListing: { status: 'ready', composite: 71, verdict: 'favourable', headline: 'H' },
+            postListing: { status: 'nope' },
+          },
+          { id: 'no-name' },
+        ],
+      },
+    });
+    expect(brief.ipoListings.items).toHaveLength(1);
+    expect(brief.ipoListings.items[0]).toMatchObject({
+      issueType: 'sme',
+      issuePrice: 120,
+      preListing: { composite: 71, verdict: 'favourable' },
+      postListing: null,
+    });
+    expect(normalizeBrief({ date: '2026-09-01' }).ipoListings).toEqual({
+      available: false,
+      items: [],
+    });
   });
 });

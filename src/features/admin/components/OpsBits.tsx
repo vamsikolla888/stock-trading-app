@@ -1,8 +1,13 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
-import { BarChart, type Bar } from '@/components/charts/BarChart';
+import { AreaChart } from '@/components/charts/AreaChart';
+import type { Bar } from '@/components/charts/BarChart';
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { Card } from '@/components/ui/Card';
+import type { Kpi } from '@/components/ui/KpiGrid';
 import { Meter, type MeterTone } from '@/components/ui/Meter';
 import { bucketTone } from '@/features/admin/lib/format';
 import { monoFont } from '@/features/settings/components/JsonBlock';
@@ -49,7 +54,28 @@ export function UptimeStrip({
   );
 }
 
-/** A titled bar chart card with first/middle/last labels and a one-line footnote. */
+/**
+ * Headline numbers for an ops panel, as many per row as the window allows (2 on a phone, up to 6
+ * on a wide window). Takes KpiGrid's items: a negative `trend` marks the tile as a problem.
+ */
+export function KpiTiles({ items }: { items: readonly Kpi[] }) {
+  const layout = useScreenLayout();
+  return (
+    <Grid columns={Math.min(layout.kpiColumns, Math.max(2, items.length))} gap={12}>
+      {items.map((kpi) => (
+        <StatTile
+          key={kpi.label}
+          label={kpi.label}
+          value={kpi.value}
+          sub={kpi.sub}
+          status={kpi.trend != null && kpi.trend < 0 ? 'bad' : undefined}
+        />
+      ))}
+    </Grid>
+  );
+}
+
+/** A titled time-series card (an area chart) with a one-line footnote. */
 export function ChartCard({
   title,
   bars,
@@ -57,6 +83,7 @@ export function ChartCard({
   accessibilityLabel,
   height = 120,
   right,
+  format,
 }: {
   title: string;
   bars: readonly Bar[];
@@ -64,7 +91,9 @@ export function ChartCard({
   accessibilityLabel: string;
   height?: number;
   right?: React.ReactNode;
+  format?: (value: number) => string;
 }) {
+  const { colors } = useTheme();
   const hasData = bars.some((bar) => bar.value > 0);
   return (
     <Card className="gap-3">
@@ -77,7 +106,15 @@ export function ChartCard({
           Nothing recorded in this window.
         </Text>
       ) : (
-        <BarChart bars={bars} height={height} accessibilityLabel={accessibilityLabel} />
+        <AreaChart
+          labels={bars.map((bar) => bar.label)}
+          series={[
+            { key: 'v', label: title, color: colors.accent, values: bars.map((bar) => bar.value) },
+          ]}
+          height={Math.max(height, 130)}
+          format={format}
+          accessibilityLabel={accessibilityLabel}
+        />
       )}
       {footer ? (
         <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">{footer}</Text>
@@ -156,6 +193,52 @@ export function NoticeCard({
       ) : (
         children
       )}
+    </View>
+  );
+}
+
+const NUM = { fontVariant: ['tabular-nums' as const] };
+
+/** Two or three small toggles in a panel header (All · Failed, Spend · Tokens). */
+export function PanelToggle<K extends string>({
+  items,
+  value,
+  onChange,
+}: {
+  items: readonly { key: K; label: string }[];
+  value: K;
+  onChange: (key: K) => void;
+}) {
+  return (
+    <View accessibilityRole="tablist" className="flex-row gap-1">
+      {items.map((item) => {
+        const selected = item.key === value;
+        return (
+          <Pressable
+            key={item.key}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            hitSlop={4}
+            onPress={() => onChange(item.key)}
+            className={cn(
+              'rounded-lg px-2.5 py-1',
+              selected && 'bg-brand-wash dark:bg-brand-wash-dark',
+            )}
+          >
+            <Text
+              className={cn(
+                'text-xs font-semibold',
+                selected
+                  ? 'text-brand-text dark:text-brand-text-dark'
+                  : 'text-ink-muted dark:text-ink-dark-muted',
+              )}
+              style={NUM}
+            >
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

@@ -2,7 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Search from 'lucide-react-native/icons/search';
 import Wallet from 'lucide-react-native/icons/wallet';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -29,7 +29,11 @@ import {
   PAPER_WINDOWS,
   PREFERRED_UNDERLYING,
 } from '@/features/derivatives/lib/book';
-import { paperBookHref, parsePaperChainParams } from '@/features/derivatives/lib/routes';
+import {
+  paperBookHref,
+  paperWalletHref,
+  parsePaperChainParams,
+} from '@/features/derivatives/lib/routes';
 import type { OptionChainLeg, PaperTicketQuote } from '@/features/derivatives/types';
 import {
   ChainGrid,
@@ -61,6 +65,8 @@ const VIEWS: readonly { key: ChainView; label: string }[] = [
   { key: 'greeks', label: 'Greeks' },
 ];
 const DEFAULT_WINDOW = 10;
+/** Past the push animation, so a deep-linked ticket is never presented mid-transition. */
+const DEEP_LINK_DELAY_MS = 400;
 const WINDOW_OPTIONS = PAPER_WINDOWS.map((w) => ({
   key: String(w),
   label: `${w} strikes each side of ATM`,
@@ -78,12 +84,27 @@ const legLtp = (leg: OptionChainLeg) => leg.lastPrice;
  *
  * Params are decoded and validated once at mount: an unknown or stale underlying falls back
  * to NIFTY (said so on screen), and an expiry the chain does not list falls back to the
- * nearest one — the server's own rule.
+ * nearest one — the server's own rule. `contract` (+ kind, strike, lot, cexpiry…) opens the
+ * ticket on that contract on arrival — how a paper screen's search hands over an F&O pick.
  */
 export default function PaperOptionChainScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const raw = useLocalSearchParams<{ underlying?: string; expiry?: string; builder?: string }>();
+  const raw = useLocalSearchParams<{
+    underlying?: string;
+    expiry?: string;
+    builder?: string;
+    contract?: string;
+    ex?: string;
+    kind?: string;
+    strike?: string;
+    lot?: string;
+    cexpiry?: string;
+    tick?: string;
+    freeze?: string;
+    side?: string;
+    lots?: string;
+  }>();
   // Read once: picking another underlying must not fight the URL on every render.
   const [linked] = useState(() => parsePaperChainParams(raw));
   const [picked, setPicked] = useState<string | null>(null);
@@ -92,8 +113,28 @@ export default function PaperOptionChainScreen() {
   const [view, setView] = useState<ChainView>('value');
   const [ticket, setTicket] = useState<{
     target: PaperTicketTarget;
-    seed: PaperTicketQuote;
+    seed: PaperTicketQuote | null;
   } | null>(null);
+  // A deep link (search, the cash paper screen) opens straight into the ticket, once — after
+  // the screen has landed, so the sheet is not presented mid-transition.
+  useEffect(() => {
+    const link = linked.ticket;
+    if (!link) return undefined;
+    const timer = setTimeout(
+      () =>
+        setTicket({
+          target: {
+            ...link.contract,
+            side: link.side,
+            ...(link.lots != null ? { lots: link.lots } : {}),
+            nonce: Date.now(),
+          },
+          seed: null,
+        }),
+      DEEP_LINK_DELAY_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [linked.ticket]);
   const [picking, setPicking] = useState(false);
   const [pickingWindow, setPickingWindow] = useState(false);
   const [building, setBuilding] = useState(linked.builder);
@@ -166,6 +207,8 @@ export default function PaperOptionChainScreen() {
           strike,
           expiry: chainExpiry,
           lotSize: leg.lotSize,
+          tickSize: null,
+          freezeQuantity: null,
           side: 'BUY',
           nonce: Date.now(),
         },
@@ -190,6 +233,8 @@ export default function PaperOptionChainScreen() {
         strike: null,
         expiry: shown.expiry,
         lotSize: future.lotSize,
+        tickSize: null,
+        freezeQuantity: null,
         side: 'BUY',
         nonce: Date.now(),
       },
@@ -401,12 +446,7 @@ export default function PaperOptionChainScreen() {
         variant="secondary"
         onPress={() => setBuilding(true)}
       />
-      <Note>
-        Tap any price to trade it in your paper book, in lots. Prices come from the broker’s quote
-        feed behind a 20-second cache and refresh about every 25 seconds while the market is open.
-        Delta and IV are model outputs, not exchange data — a strike that has not traded shows a
-        dash, never a stale number.
-      </Note>
+      <Note>Tap a price to trade it in lots. Broker quotes · greeks and IV are modelled.</Note>
       {shown.caveats.length > 0 ? (
         <Disclosure
           title="How these greeks were calculated"
@@ -502,6 +542,10 @@ export default function PaperOptionChainScreen() {
         target={ticket?.target ?? null}
         quote={ticketQuote}
         onClose={() => setTicket(null)}
+        onAddFunds={() => {
+          setTicket(null);
+          router.dismissTo(paperWalletHref());
+        }}
       />
       <StrategySheet
         visible={building}

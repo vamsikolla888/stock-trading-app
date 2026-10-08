@@ -1,7 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Search from 'lucide-react-native/icons/search';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -25,6 +25,7 @@ import {
 } from '@/features/fno/components/ChainGrid';
 import { Freshness, GrowwAccessBanner, SourceTag } from '@/features/fno/components/FnoChrome';
 import { FuturesList } from '@/features/fno/components/FuturesList';
+import { InstrumentMark } from '@/features/fno/components/Glyphs';
 import { OrderTicket, type TicketTarget } from '@/features/fno/components/OrderTicket';
 import { Caveats, Disclosure, Note } from '@/features/fno/components/primitives';
 import { SearchSheet } from '@/features/fno/components/SearchSheet';
@@ -46,7 +47,14 @@ import {
   spotMarkerIndex,
   STRIKE_WINDOWS,
 } from '@/features/fno/lib/chain';
-import { parseChainParams } from '@/features/fno/lib/explore';
+import {
+  isCommodityExchange,
+  isMcxSessionOpen,
+  parseChainParams,
+  parseContractParam,
+  splitStreamKey,
+  venueLabel,
+} from '@/features/fno/lib/explore';
 import {
   compactQty,
   DASH,
@@ -78,6 +86,8 @@ export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteEr
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
 const STALE_MS = 60_000;
+/** Past the push animation: a linked contract's chart / ticket never opens mid-transition. */
+const LINK_DELAY_MS = 350;
 
 type Tab = 'options' | 'futures';
 type View_ = 'oi' | 'greeks';
@@ -115,10 +125,24 @@ export default function OptionChainScreen() {
     exchange?: string | string[];
     expiry?: string | string[];
     tab?: string | string[];
+    contract?: string | string[];
   }>();
   // Normalised once: a repeated key arrives as an array, and a malformed expiry would only
   // earn a 422 — it falls back to the nearest listed expiry instead.
   const [sel, setSel] = useState<Selection>(() => parseChainParams(params));
+  // A contract to chart on arrival (a link from search or Explore), resolved once its chain or
+  // futures list has loaded.
+  const pendingContract = useRef<string | null>(parseContractParam(params.contract));
+  const linkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (linkTimer.current) clearTimeout(linkTimer.current);
+    },
+    [],
+  );
+  // MCX / NSE commodity: the same chain and futures, READ-ONLY — Groww's API places no
+  // commodity orders, so a price charts its contract and no ticket ever opens.
+  const commodity = isCommodityExchange(sel.exchange);
   const [strikes, setStrikes] = useState<number | null>(10);
   const [view, setView] = useState<View_>('oi');
   const [ticket, setTicket] = useState<TicketTarget | null>(null);
@@ -136,15 +160,20 @@ export default function OptionChainScreen() {
   }, []);
 
   const universe = useFnoUnderlyings();
+  const expiries = useFnoExpiries(sel.exchange, sel.underlying);
+  // Commodities are not in the F&O universe list; the expiries response carries their details.
+  const expiriesFor = expiries.data?.underlying;
   const meta =
     universe.data?.underlyings.find(
       (u) => u.exchange === sel.exchange && u.underlying === sel.underlying,
-    ) ?? null;
-  // An underlying with no options opens on its futures — derived, so the choice follows the
-  // universe the moment it loads and never costs an extra render.
+    ) ??
+    (expiriesFor?.exchange === sel.exchange && expiriesFor.underlying === sel.underlying
+      ? expiriesFor
+      : null);
+  // An underlying with no options (most of MCX) opens on its futures — derived, so the choice
+  // follows the universe the moment it loads and never costs an extra render.
   const tab: Tab =
     sel.tab === 'options' && meta && !meta.hasOptions && meta.hasFutures ? 'futures' : sel.tab;
-  const expiries = useFnoExpiries(sel.exchange, sel.underlying);
   const optionExpiries = useMemo(
     () => (expiries.data?.expiries ?? []).filter((e) => e.hasOptions),
     [expiries.data],
@@ -175,8 +204,15 @@ export default function OptionChainScreen() {
   /* Live premiums: every contract on screen, and the spot, on the F&O feed (the viewer's Groww
      session), laid over the polled chain or futures. A placeholder chain — the previous
      underlying, shown while the next loads — is not watched. */
-  const spotExchange = sel.exchange === 'BFO' ? 'BSE' : 'NSE';
-  const spotSymbol = meta?.spotSymbol ?? null;
+  // A commodity has no cash listing: its chain names the future the options settle into
+  // (`MCX:GOLD05NOV26FUT`), and that future's price is the spot.
+  const settling = !placeholder ? splitStreamKey(data?.spotInstrument) : null;
+  const spotExchange = meta?.spotSymbol
+    ? sel.exchange === 'BFO'
+      ? 'BSE'
+      : 'NSE'
+    : (settling?.exchange ?? 'NSE');
+  const spotSymbol = meta?.spotSymbol ?? settling?.symbol ?? null;
   // Rebuilt each render on purpose: useLiveQuotes keys on the symbol SET, not the array.
   const fnoTargets: LiveTarget[] = [];
   if (tab === 'options' && data && !placeholder) {
@@ -218,19 +254,22 @@ export default function OptionChainScreen() {
   }, [tab, chain, futures, expiries, status, expiryUnlistedLocally]);
 
   const now = useNow(15_000);
-  const spot = liveSpot ?? data?.spot ?? futures.data?.spot ?? null;
+  // A commodity's futures tab has no chain to name its settling future: the nearest future
+  // stands as its price, and the header says so.
+  const nearFuture = commodity && tab === 'futures' ? (liveFutures?.futures[0] ?? null) : null;
+  const spot = liveSpot ?? data?.spot ?? futures.data?.spot ?? nearFuture?.ltp ?? null;
   const activeQuery = tab === 'options' ? chain : futures;
+  const sessionOpen = commodity ? isMcxSessionOpen(now) : isMarketOpen(new Date(now));
   const priceStale =
     (activeQuery.isError && !!activeQuery.data) ||
-    (isMarketOpen(new Date(now)) &&
-      activeQuery.dataUpdatedAt > 0 &&
-      now - activeQuery.dataUpdatedAt > STALE_MS);
+    (sessionOpen && activeQuery.dataUpdatedAt > 0 && now - activeQuery.dataUpdatedAt > STALE_MS);
 
-  /* Chain cells */
+  /* Chain cells. A commodity chain carries no OI (Groww's LTP has none), so it shows greeks. */
   const maxOi = useMemo(() => (data ? chainMaxOi(data.rows) : 0), [data]);
+  const shownView: View_ = commodity ? 'greeks' : view;
   const outer = useMemo<ChainOuterColumn<FnoChainLeg>>(
     () =>
-      view === 'oi'
+      shownView === 'oi'
         ? {
             label: 'OI',
             main: (leg) => compactQty(leg.openInterest),
@@ -241,7 +280,7 @@ export default function OptionChainScreen() {
             main: (leg) => signedGreek(leg.greeks?.delta, 2),
             sub: (leg) => ivPct(leg.greeks?.iv),
           },
-    [view, maxOi],
+    [shownView, maxOi],
   );
   const ltpOf = useCallback(
     (leg: FnoChainLeg) => (leg.contract ? liveOf(leg.contract)?.ltp : undefined) ?? leg.ltp,
@@ -260,21 +299,86 @@ export default function OptionChainScreen() {
     (leg: FnoChainLeg) => !placeholder && leg.contract != null,
     [placeholder],
   );
+  const scrollRef = useRef<ScrollView>(null);
+  /** Charts a contract and brings the chart into view — a commodity's only action. */
+  const chartContract = useCallback(
+    (contract: FnoContract) => {
+      pickForChart(contract);
+      setChartOpen(true);
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    },
+    [pickForChart],
+  );
   const onPick = useCallback(
     (leg: FnoChainLeg) => {
       if (!leg.contract) return;
+      // A commodity premium charts its contract; it never opens an order ticket.
+      if (isCommodityExchange(leg.contract.exchange)) {
+        chartContract(leg.contract);
+        return;
+      }
       pickForChart(leg.contract);
       setTicket({ contract: leg.contract, leg, side: 'BUY', nonce: Date.now() });
     },
-    [pickForChart],
+    [pickForChart, chartContract],
   );
   const onTradeFuture = useCallback(
     (contract: FnoContract, side: FnoSide) => {
       pickForChart(contract);
-      setTicket({ contract, leg: null, side, nonce: Date.now() });
+      if (!isCommodityExchange(contract.exchange)) {
+        setTicket({ contract, leg: null, side, nonce: Date.now() });
+      }
     },
     [pickForChart],
   );
+
+  // The linked contract, once the list it belongs to is on screen: charted, and on an equity
+  // book its ticket opened on BUY (the web's ?contract= rule). Dropped if it is not listed.
+  // Applied a beat later, so a sheet is never presented mid push-transition.
+  useEffect(() => {
+    const wanted = pendingContract.current;
+    if (!wanted) return undefined;
+    let found: { contract: FnoContract; leg: FnoChainLeg | null } | null = null;
+    let settled = false;
+    if (tab === 'futures') {
+      if (futures.data) {
+        settled = true;
+        const row = futures.data.futures.find((f) => f.contract.tradingSymbol === wanted);
+        if (row) found = { contract: row.contract, leg: null };
+      } else if (futures.isError) settled = true;
+    } else if (data && !placeholder) {
+      settled = true;
+      for (const row of data.rows) {
+        const leg = [row.call, row.put].find((l) => l?.tradingSymbol === wanted);
+        if (leg?.contract) {
+          found = { contract: leg.contract, leg };
+          break;
+        }
+      }
+    } else if (chain.isError || expiryUnlistedLocally) settled = true;
+    if (!settled) return undefined;
+    pendingContract.current = null;
+    const hit = found;
+    if (!hit) return undefined;
+    // Held in a ref and cleared only on unmount: a refetch inside the delay must not drop it.
+    linkTimer.current = setTimeout(() => {
+      linkTimer.current = null;
+      chartContract(hit.contract);
+      if (!isCommodityExchange(hit.contract.exchange)) {
+        setTicket({ contract: hit.contract, leg: hit.leg, side: 'BUY', nonce: Date.now() });
+      }
+    }, LINK_DELAY_MS);
+    return undefined;
+  }, [
+    tab,
+    futures.data,
+    futures.isError,
+    data,
+    placeholder,
+    chain.isError,
+    expiryUnlistedLocally,
+    chartContract,
+  ]);
 
   // A contract's price follows every refresh of the chain or futures list. `undefined`: not on
   // screen; `null`: on screen with no trade yet — which is shown as such, not as a stale price.
@@ -311,7 +415,6 @@ export default function OptionChainScreen() {
   /* Centre the ATM strike once per (underlying, expiry) — never on a refresh, which would yank
      the table away from wherever the user had scrolled. Rows are a fixed height, so the ATM
      row's offset is arithmetic, not a measurement that could lag a re-render. */
-  const scrollRef = useRef<ScrollView>(null);
   const layout = useRef({ viewport: 0, sticky: 0, rows: 0 });
   const centredFor = useRef<string | null>(null);
   const chainId = data ? `${data.underlying}:${data.expiry}` : null;
@@ -342,9 +445,17 @@ export default function OptionChainScreen() {
     <View className="w-full max-w-[720px] self-center px-5 pb-3 pt-4">
       <View className="rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">
         <View className="flex-row items-start justify-between gap-3">
+          <InstrumentMark
+            kind={commodity ? 'commodity' : meta?.isIndex === false ? 'stock' : 'index'}
+            underlying={sel.underlying}
+            logoSymbol={meta?.logoSymbol ?? meta?.spotSymbol}
+            exchange={sel.exchange}
+            size={40}
+          />
           <View className="min-w-0 flex-1">
             <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" numberOfLines={1}>
-              {meta?.name ?? sel.underlying} · spot
+              {meta?.name ?? sel.underlying} ·{' '}
+              {!commodity ? 'spot' : nearFuture ? 'near future' : 'underlying future'}
             </Text>
             <Text
               className="mt-1 text-2xl font-bold text-ink dark:text-ink-dark"
@@ -354,12 +465,19 @@ export default function OptionChainScreen() {
             >
               {spot != null ? formatINR(spot) : DASH}
             </Text>
-            {data?.spotSource ? (
+            {tab === 'options' && data?.spotSource ? (
               <Text
                 className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint"
                 numberOfLines={1}
               >
                 {data.spotSource}
+              </Text>
+            ) : nearFuture ? (
+              <Text
+                className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint"
+                numberOfLines={1}
+              >
+                {nearFuture.contract.tradingSymbol}
               </Text>
             ) : null}
           </View>
@@ -371,10 +489,12 @@ export default function OptionChainScreen() {
               label="ATM"
               value={data?.atmStrike != null ? formatStrike(data.atmStrike) : DASH}
             />
-            <HeaderStat
-              label="PCR (OI)"
-              value={data?.totals.pcr != null ? data.totals.pcr.toFixed(2) : DASH}
-            />
+            {commodity ? null : (
+              <HeaderStat
+                label="PCR (OI)"
+                value={data?.totals.pcr != null ? data.totals.pcr.toFixed(2) : DASH}
+              />
+            )}
             <HeaderStat
               label="Expiry"
               value={data ? `${expiryLabel(data.expiry)} · ${dteLabel(data.daysToExpiry)}` : DASH}
@@ -415,6 +535,11 @@ export default function OptionChainScreen() {
           setSel((s) => ({ ...s, tab }));
         }}
       />
+      {commodity ? (
+        <Note className="mt-2.5">
+          View only — Groww’s API doesn’t place commodity orders. Tap a price to chart it.
+        </Note>
+      ) : null}
     </View>
   );
 
@@ -482,7 +607,11 @@ export default function OptionChainScreen() {
             </Text>
             <ChevronDown size={14} color={colors.textMuted} />
           </Pressable>
-          <SegmentedControl items={VIEWS} value={view} onChange={setView} className="flex-1" />
+          {commodity ? (
+            <View className="flex-1" />
+          ) : (
+            <SegmentedControl items={VIEWS} value={view} onChange={setView} className="flex-1" />
+          )}
         </View>
         <ChainGridHeader outerLabel={outer.label} />
       </View>
@@ -568,7 +697,12 @@ export default function OptionChainScreen() {
   } else if (futures.data) {
     body = (
       <View className="w-full max-w-[720px] self-center px-5">
-        <FuturesList data={liveFutures ?? futures.data} onTrade={onTradeFuture} />
+        <FuturesList
+          data={liveFutures ?? futures.data}
+          onTrade={onTradeFuture}
+          onChart={chartContract}
+          selected={chartTarget === 'contract' ? (picked?.tradingSymbol ?? null) : null}
+        />
       </View>
     );
   }
@@ -593,7 +727,9 @@ export default function OptionChainScreen() {
         </Text>
         {data.sourceNote ? <Note>{data.sourceNote}</Note> : null}
         <Note>
-          Tap any price to buy or sell it. Orders go to your Groww account only after a review step.
+          {commodity
+            ? 'Chart only — no commodity orders via Groww.'
+            : 'Tap a price to buy or sell. Orders reach Groww only after review.'}
         </Note>
         {data.caveats.length > 0 ? (
           <Disclosure
@@ -612,8 +748,10 @@ export default function OptionChainScreen() {
 
   return (
     <StackScreen
-      title={sel.underlying}
-      subtitle={`${venueOf(sel.exchange)} · ${meta ? (meta.isIndex ? 'Index' : 'Stock') : 'F&O'} · Groww`}
+      title={commodity ? (meta?.name ?? sel.underlying) : sel.underlying}
+      subtitle={`${venueLabel(sel.exchange)} · ${
+        commodity ? 'Commodity' : meta ? (meta.isIndex ? 'Index' : 'Stock') : 'F&O'
+      } · Groww`}
       scroll={false}
       right={
         <Pressable
@@ -673,12 +811,14 @@ export default function OptionChainScreen() {
         onClose={() => setSearching(false)}
         onPickUnderlying={(u) => {
           setTicket(null);
+          pendingContract.current = null;
           centredFor.current = null;
           pickForChart(null);
           setSel({ exchange: u.exchange, underlying: u.underlying, expiry: null, tab: 'options' });
         }}
         onPickContract={(c) => {
           centredFor.current = null;
+          pendingContract.current = null;
           pickForChart(c);
           setSel({
             exchange: c.exchange,
@@ -686,7 +826,22 @@ export default function OptionChainScreen() {
             expiry: c.kind === 'FUT' ? null : c.expiry,
             tab: c.kind === 'FUT' ? 'futures' : 'options',
           });
-          setTicket({ contract: c, leg: null, side: 'BUY', nonce: Date.now() });
+          if (!isCommodityExchange(c.exchange)) {
+            setTicket({ contract: c, leg: null, side: 'BUY', nonce: Date.now() });
+          }
+        }}
+        onPickCommodity={(pick) => {
+          // Switched in place: a commodity is this same screen, read-only.
+          setTicket(null);
+          centredFor.current = null;
+          pickForChart(null);
+          pendingContract.current = pick.contract;
+          setSel({
+            exchange: pick.exchange,
+            underlying: pick.underlying,
+            expiry: pick.expiry,
+            tab: pick.tab,
+          });
         }}
       />
       <OrderTicket

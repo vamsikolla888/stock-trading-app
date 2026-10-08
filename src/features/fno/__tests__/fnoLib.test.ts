@@ -5,9 +5,22 @@ import { receiptNotes } from '../lib/chain';
 import {
   calendarEntryHref,
   chainHref,
+  commodityChainHref,
+  commodityContractHref,
+  commodityHref,
+  commodityPollInterval,
+  exploreCommodityHref,
+  isChainExchange,
+  isCommodityExchange,
+  isEquityFnoExchange,
   isExploreSection,
+  isMcxSessionOpen,
   paramString,
   parseChainParams,
+  parseContractParam,
+  parseFnoExchange,
+  splitStreamKey,
+  venueLabel,
 } from '../lib/explore';
 import { lotsLabel } from '../lib/format';
 import {
@@ -83,6 +96,107 @@ describe('calendarEntryHref', () => {
   it('opens the futures tab for a futures-only date (the chain would 422 on it)', () => {
     const href = calendarEntryHref('BFO', 'SENSEX', '2026-10-27', false);
     expect(href.params).toEqual({ exchange: 'BFO', underlying: 'SENSEX', tab: 'futures' });
+  });
+
+  it('opens a commodity on the same screen (read-only)', () => {
+    expect(calendarEntryHref('MCX', 'GOLD', '2026-11-05', false).params).toEqual({
+      exchange: 'MCX',
+      underlying: 'GOLD',
+      tab: 'futures',
+    });
+  });
+});
+
+describe('commodity books (MCX / NCO, read-only)', () => {
+  it('tells the books apart', () => {
+    expect(isCommodityExchange('MCX')).toBe(true);
+    expect(isCommodityExchange('NCO')).toBe(true);
+    expect(isCommodityExchange('NFO')).toBe(false);
+    expect(isEquityFnoExchange('BFO')).toBe(true);
+    expect(isEquityFnoExchange('MCX')).toBe(false);
+    expect(isChainExchange('NCO')).toBe(true);
+    expect(isChainExchange('NSE')).toBe(false);
+    expect(venueLabel('NCO')).toBe('NSE commodity');
+    expect(venueLabel('BFO')).toBe('BSE');
+  });
+
+  it('parses MCX and NCO chain links, and anything else as NFO', () => {
+    expect(parseChainParams({ exchange: 'mcx', underlying: 'gold' })).toMatchObject({
+      exchange: 'MCX',
+      underlying: 'GOLD',
+    });
+    expect(parseFnoExchange('NCO')).toBe('NCO');
+    expect(parseFnoExchange('NSE')).toBe('NFO');
+    expect(parseFnoExchange(undefined)).toBe('NFO');
+  });
+
+  it('keeps only a well-formed contract param', () => {
+    expect(parseContractParam(' gold05nov26fut ')).toBe('GOLD05NOV26FUT');
+    expect(parseContractParam('<script>')).toBeNull();
+    expect(parseContractParam(undefined)).toBeNull();
+  });
+
+  it('links a commodity to its chain or futures (the web’s commodityChainPath)', () => {
+    expect(commodityChainHref('MCX', 'GOLD', 'futures', '2026-11-05', 'GOLD05NOV26FUT')).toEqual({
+      pathname: '/option-chain',
+      params: { exchange: 'MCX', underlying: 'GOLD', tab: 'futures', contract: 'GOLD05NOV26FUT' },
+    });
+    expect(commodityChainHref('NCO', 'GOLD', 'options', '2026-11-03').params).toEqual({
+      exchange: 'NCO',
+      underlying: 'GOLD',
+      expiry: '2026-11-03',
+    });
+    expect(
+      commodityHref({ exchange: 'MCX', underlying: 'COPPER', hasOptions: false }).params,
+    ).toEqual({ exchange: 'MCX', underlying: 'COPPER', tab: 'futures' });
+    expect(
+      commodityContractHref({
+        exchange: 'MCX',
+        underlying: 'CRUDEOIL',
+        kind: 'CE',
+        expiry: '2026-10-15',
+        tradingSymbol: 'CRUDEOIL26OCT5800CE',
+      }).params,
+    ).toEqual({
+      exchange: 'MCX',
+      underlying: 'CRUDEOIL',
+      expiry: '2026-10-15',
+      contract: 'CRUDEOIL26OCT5800CE',
+    });
+  });
+
+  it('opens an Explore commodity future with it charted; never an equity one', () => {
+    expect(
+      exploreCommodityHref({ exchange: 'MCX', underlying: 'GOLD', tradingSymbol: 'GOLD05NOV26FUT' })
+        ?.params,
+    ).toEqual({ exchange: 'MCX', underlying: 'GOLD', tab: 'futures', contract: 'GOLD05NOV26FUT' });
+    expect(
+      exploreCommodityHref({
+        exchange: 'NFO',
+        underlying: 'NIFTY',
+        tradingSymbol: 'NIFTY26OCTFUT',
+      }),
+    ).toBeNull();
+  });
+
+  it('splits a stream key', () => {
+    expect(splitStreamKey('MCX:GOLD05NOV26FUT')).toEqual({
+      exchange: 'MCX',
+      symbol: 'GOLD05NOV26FUT',
+    });
+    expect(splitStreamKey('GOLD')).toBeNull();
+    expect(splitStreamKey(':X')).toBeNull();
+    expect(splitStreamKey(null)).toBeNull();
+  });
+
+  it('polls a commodity screen through MCX’s evening session, not after it', () => {
+    // 2026-10-07 (Wed) 22:00 IST = 16:30 UTC — MCX open, equity closed.
+    expect(isMcxSessionOpen(Date.UTC(2026, 9, 7, 16, 30))).toBe(true);
+    expect(commodityPollInterval(15_000, Date.UTC(2026, 9, 7, 16, 30))).toBe(15_000);
+    // 23:45 IST — closed.
+    expect(isMcxSessionOpen(Date.UTC(2026, 9, 7, 18, 15))).toBe(false);
+    // Saturday.
+    expect(commodityPollInterval(15_000, Date.UTC(2026, 9, 10, 6, 0))).toBe(false);
   });
 });
 

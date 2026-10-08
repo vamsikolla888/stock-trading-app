@@ -3,6 +3,8 @@ import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useScreenLayout } from '@/components/layout/responsive';
+import { usePushedGroup } from '@/components/navigation/groupPlacement';
 import { LiveScope } from '@/features/market/live';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -18,6 +20,11 @@ interface GroupScreenProps {
   footer?: React.ReactNode;
   /** Render children without the built-in ScrollView (FlatList screens). */
   scroll?: boolean;
+  /**
+   * Use the whole window (dashboards, settings) instead of the 640px reading column: the gutter
+   * grows with the width and the screen adds columns itself (components/layout).
+   */
+  fill?: boolean;
 }
 
 /**
@@ -27,7 +34,8 @@ interface GroupScreenProps {
  * focused (LiveScope) — a visited tab left mounted behind another holds no subscriptions.
  *
  * Safe areas: the group's header pads the top and the main tab bar the bottom; this pads the
- * sides, where the notch sits once the phone is turned.
+ * sides, where the notch sits once the phone is turned — and the bottom too in a group pushed
+ * over the tabs (Settings), which has no tab bar under it.
  */
 export function GroupScreen({
   onRefresh,
@@ -36,9 +44,13 @@ export function GroupScreen({
   children,
   footer,
   scroll = true,
+  fill = false,
 }: GroupScreenProps) {
   const { colors } = useTheme();
+  const layout = useScreenLayout();
+  const gutter = fill ? layout.gutter : 20;
   const insets = useSafeAreaInsets();
+  const pushed = usePushedGroup();
   const focused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -66,12 +78,16 @@ export function GroupScreen({
     <LiveScope active={focused}>
       <View
         className="flex-1 bg-canvas dark:bg-canvas-dark"
-        style={{ paddingLeft: insets.left, paddingRight: insets.right }}
+        style={{
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+          paddingBottom: pushed ? insets.bottom : 0,
+        }}
       >
         {scroll ? (
           <ScrollView
             className="flex-1"
-            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}
+            contentContainerStyle={{ paddingHorizontal: gutter, paddingTop: 20, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             refreshControl={
@@ -86,14 +102,18 @@ export function GroupScreen({
               ) : undefined
             }
           >
-            <View className="w-full max-w-[640px] self-center">
+            <View className={fill ? 'w-full' : 'w-full max-w-[640px] self-center'}>
               {introText}
               {children}
             </View>
           </ScrollView>
         ) : (
           <View className="flex-1">
-            {introText ? <View className="px-5 pt-5">{introText}</View> : null}
+            {introText ? (
+              <View className="pt-5" style={{ paddingHorizontal: gutter }}>
+                {introText}
+              </View>
+            ) : null}
             {children}
           </View>
         )}

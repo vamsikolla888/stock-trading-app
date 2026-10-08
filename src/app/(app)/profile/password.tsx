@@ -129,8 +129,7 @@ export default function PasswordScreen() {
         <View className="flex-row gap-2.5 rounded-field bg-warning-wash p-3 dark:bg-warning-wash-dark">
           <ShieldAlert size={18} color={colors.warning} style={{ marginTop: 1 }} />
           <Text className="flex-1 text-[13px] leading-[19px] text-ink dark:text-ink-dark">
-            <Text className="font-semibold">Every device will be signed out</Text>, this one
-            included. You’ll sign in again with the new password.
+            <Text className="font-semibold">Every device will be signed out.</Text>
           </Text>
         </View>
 

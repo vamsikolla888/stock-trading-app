@@ -157,19 +157,15 @@ export default function StockAnalysisScreen() {
       {first ? (
         <Text className="mt-3 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
           {formatNumber(first.total, 0)} shown · {formatNumber(first.totals.analysed, 0)} of{' '}
-          {formatNumber(first.totals.universe, 0)} stocks analysed in the last {first.windowDays}{' '}
-          days
-          {first.schedule?.nextRunAt ? ` · next batch ${istDate(first.schedule.nextRunAt)}` : ''}
+          {formatNumber(first.totals.universe, 0)} analysed, last {first.windowDays} days
+          {first.schedule?.nextRunAt ? ` · next run ${istDate(first.schedule.nextRunAt)}` : ''}
         </Text>
       ) : null}
     </View>
   );
 
   return (
-    <GroupScreen
-      scroll={false}
-      intro="Every stock’s fundamental rating — financials scored weekly against one framework"
-    >
+    <GroupScreen scroll={false} intro="Fundamental ratings, scored weekly">
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}
@@ -187,11 +183,17 @@ export default function StockAnalysisScreen() {
             />
           ) : (
             <InlineEmpty
-              title="No analysed stocks match"
+              title={
+                q || verdict !== 'all' || index !== ALL_INDICES
+                  ? 'No analysed stocks match'
+                  : 'No analyses saved yet'
+              }
               message={
                 q || verdict !== 'all' || index !== ALL_INDICES
                   ? 'Try a wider filter.'
-                  : 'The weekly batch has not produced any analyses yet.'
+                  : first?.schedule?.nextRunAt
+                    ? `Next run ${istDate(first.schedule.nextRunAt)}.`
+                    : 'Weekly run not scheduled.'
               }
             />
           )

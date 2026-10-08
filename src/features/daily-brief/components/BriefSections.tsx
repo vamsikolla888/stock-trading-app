@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { chainHref } from '@/features/fno/lib/explore';
 import { formatIstTime } from '@/features/home/lib/istTime';
+import { gmpPctText, times, verdictOf, type Tone } from '@/features/ipo/lib/format';
 import { openArticleLink } from '@/features/news/lib/openLink';
 import { stockHref } from '@/lib/navigation';
 import { cn } from '@/lib/utils/cn';
@@ -30,7 +31,7 @@ import {
   sectorBarPercent,
   toneOfLabel,
 } from '../lib/brief';
-import type { BriefMover, DailyBrief } from '../types';
+import type { BriefIpoReport, BriefMover, DailyBrief } from '../types';
 
 import {
   BriefEmpty,
@@ -129,25 +130,21 @@ export function OutlookSection({
   const ai = brief.ai;
   if (!ai) {
     return (
-      <BriefSection title="AI market outlook" caption="Probabilistic interpretation">
+      <BriefSection title="AI market outlook">
         <BriefEmpty
           title={
             brief.aiStatus === 'unavailable'
               ? 'AI analysis is temporarily unavailable.'
-              : 'No AI analysis has been generated for this data yet.'
+              : 'No AI analysis for this data yet.'
           }
-          message={
-            canRefresh
-              ? 'Refresh the brief to request an analysis checked against the data. Calculated market data stays visible either way.'
-              : 'Past briefs are stored exactly as they were; the calculated market data below is unchanged.'
-          }
+          message={canRefresh ? 'Refresh to request one.' : 'Past briefs are kept as they were.'}
           action={canRefresh ? { label: 'Analyze now', onPress: onRefresh } : undefined}
         />
       </BriefSection>
     );
   }
   return (
-    <BriefSection title="AI market outlook" caption="Evidence, then interpretation">
+    <BriefSection title="AI market outlook">
       <StatRow>
         <View className="flex-1">
           <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">Bias</Text>
@@ -171,7 +168,7 @@ export function OutlookSection({
         <Banner
           tone="warning"
           className="mt-3"
-          message="This analysis was made on an earlier version of today's data. Live figures have moved since — refresh to analyze the latest evidence."
+          message="Based on earlier data — refresh for the latest."
           action={canRefresh ? { label: 'Refresh analysis', onPress: onRefresh } : undefined}
         />
       ) : null}
@@ -189,7 +186,7 @@ export function OutlookSection({
           </View>
         ))
       ) : (
-        <Caveat className="mt-1">No supporting factor was returned.</Caveat>
+        <Caveat className="mt-1">None returned.</Caveat>
       )}
 
       <Text className="mt-4 text-[13px] font-bold text-ink dark:text-ink-dark">
@@ -205,7 +202,7 @@ export function OutlookSection({
           </View>
         ))
       ) : (
-        <Caveat className="mt-1">No specific risk factor was returned.</Caveat>
+        <Caveat className="mt-1">None returned.</Caveat>
       )}
       <MetaLine
         className="mt-4"
@@ -262,7 +259,7 @@ export function IndicesSection({ brief, preferred }: SectionProps & { preferred:
         </ScrollView>
       ) : (
         <View className="rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark">
-          <BriefEmpty message="The index feed is unavailable. The rest of the brief still works." />
+          <BriefEmpty message="Index feed unavailable." />
         </View>
       )}
     </BriefSection>
@@ -275,7 +272,7 @@ export function PulseSection({ brief }: SectionProps) {
   const { sentiment, breadth } = brief;
   const shares = breadthShares(breadth);
   return (
-    <BriefSection title="Market pulse" caption="Observed market state">
+    <BriefSection title="Market pulse">
       <View className="flex-row items-center gap-3">
         <Text
           className="text-[34px] font-bold text-ink dark:text-ink-dark"
@@ -359,11 +356,11 @@ export function SectorsSection({ brief, preferred }: SectionProps & { preferred:
   return (
     <BriefSection
       title="Sector pulse"
-      caption="Equal-weight constituent moves"
+      caption="Equal-weight"
       action={{ label: 'Heatmap', onPress: () => router.push('/heatmap') }}
     >
       {rows.length === 0 ? (
-        <BriefEmpty message="Sector classification or NIFTY 500 constituent data is unavailable." />
+        <BriefEmpty message="Sector data unavailable." />
       ) : (
         <>
           {shown.map((row, position) => (
@@ -428,7 +425,7 @@ export function MoversSection({ brief }: SectionProps) {
   const rows: BriefMover[] = brief.movers[tab].slice(0, 6);
 
   return (
-    <BriefSection title="Market movers" caption="Ranked facts, not recommendations">
+    <BriefSection title="Market movers" caption="Not recommendations">
       <SegmentedControl items={MOVER_TABS} value={tab} onChange={setTab} />
       <View className="mt-2">
         {rows.length > 0 ? (
@@ -465,7 +462,7 @@ export function MoversSection({ brief }: SectionProps) {
           ))
         ) : (
           <View className="pt-3">
-            <BriefEmpty message="No current-session rows are available for this ranking." />
+            <BriefEmpty message="No data this session." />
           </View>
         )}
       </View>
@@ -484,7 +481,7 @@ export function DerivativesSection({ brief }: SectionProps) {
   return (
     <BriefSection
       title="Derivatives radar"
-      caption={`${underlying} listed contracts`}
+      caption={underlying}
       // Like the web, the chain opens at its own nearest expiry: the brief's expiry comes from
       // the platform feed, whose format the Groww-backed chain screen doesn't promise to share.
       action={{ label: 'Option chain', onPress: () => router.push(chainHref('NFO', underlying)) }}
@@ -516,10 +513,7 @@ export function DerivativesSection({ brief }: SectionProps) {
               detail="Future minus inferred spot"
             />
           </StatRow>
-          <Caveat className="mt-3">
-            Open interest isn't published by the configured broker, so PCR, max pain and OI
-            support/resistance are not shown.
-          </Caveat>
+          <Caveat className="mt-3">No open-interest data — PCR and max pain not shown.</Caveat>
           <MetaLine className="mt-2" {...metaProps(data.meta)} />
         </>
       ) : (
@@ -585,7 +579,7 @@ export function PortfolioSection({ brief }: SectionProps) {
         </>
       ) : (
         <BriefEmpty
-          message="Connect a broker to see how today's market moved your holdings. The market sections work without it."
+          message="Connect a broker to see portfolio impact."
           action={{ label: 'Connect a broker', onPress: () => router.push('/brokers') }}
         />
       )}
@@ -600,7 +594,6 @@ export function WatchlistSection({ brief }: SectionProps) {
   return (
     <BriefSection
       title="Your watchlists today"
-      caption="Personal attention list"
       action={{ label: 'Watchlists', onPress: () => router.push('/trade/watchlists') }}
     >
       {data.available ? (
@@ -659,7 +652,6 @@ export function TechnicalSection({ brief }: SectionProps) {
   return (
     <BriefSection
       title="Technical radar"
-      caption="Measured history and model view, kept separate"
       action={{ label: 'Signals', onPress: () => router.push('/intel/signals') }}
     >
       {radar.available ? (
@@ -711,11 +703,10 @@ export function TechnicalSection({ brief }: SectionProps) {
           </Pressable>
         ))
       ) : (
-        <BriefEmpty message="No technical signals were generated for this session. The brief doesn't invent replacements." />
+        <BriefEmpty message="No signals this session." />
       )}
       <Caveat className="mt-3">
-        Hit rate is a measured past frequency. Model conviction is an ordinal reading, not a
-        probability or an expected return.
+        Hit rate is measured history; conviction is a model rank, not a probability.
       </Caveat>
     </BriefSection>
   );
@@ -734,7 +725,7 @@ export function AttentionSection({ brief }: SectionProps) {
   const router = useRouter();
   const items = useMemo(() => attentionItems(brief), [brief]);
   return (
-    <BriefSection title="What needs your attention?" caption="Noteworthy, not prescriptive">
+    <BriefSection title="What needs your attention?">
       {items.length > 0 ? (
         items.map((item, position) => (
           <View
@@ -773,7 +764,7 @@ export function AttentionSection({ brief }: SectionProps) {
           </View>
         ))
       ) : (
-        <BriefEmpty message="No evidence-backed attention item is available for this brief." />
+        <BriefEmpty message="Nothing flagged today." />
       )}
     </BriefSection>
   );
@@ -799,7 +790,6 @@ export function NewsSection({ brief }: SectionProps) {
   return (
     <BriefSection
       title="News that matters today"
-      caption="Analyzed articles only"
       action={{ label: 'News', onPress: () => router.push('/news') }}
     >
       {brief.news.length > 0 ? (
@@ -828,8 +818,8 @@ export function NewsSection({ brief }: SectionProps) {
               </Text>
               <Text className="mt-1 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
                 {item.analysisAvailable
-                  ? `AI impact score: ${item.effectivenessScore ?? 'unavailable'} / 100. Open the analysis for the evidence and caveats.`
-                  : 'Analysis isn’t complete, so no impact interpretation is shown.'}
+                  ? `AI impact score: ${item.effectivenessScore ?? 'unavailable'} / 100`
+                  : 'Analysis pending.'}
               </Text>
               <View className="mt-2 flex-row gap-4">
                 <Pressable
@@ -861,8 +851,108 @@ export function NewsSection({ brief }: SectionProps) {
           );
         })
       ) : (
-        <BriefEmpty message="No analyzed article was found for this session. News is never made up to fill this space." />
+        <BriefEmpty message="No analyzed news this session." />
       )}
+    </BriefSection>
+  );
+}
+
+const VERDICT_TEXT: Record<Tone, string> = {
+  ok: 'text-brand-text dark:text-brand-text-dark',
+  warn: 'text-warning-600 dark:text-warning-dark',
+  err: 'text-danger-600 dark:text-danger-dark',
+  info: 'text-info dark:text-info-dark',
+  neutral: 'text-ink-muted dark:text-ink-dark-muted',
+};
+
+/** "Pre-listing setup · 72/100 · Favourable setup", or that it is still being prepared. */
+function IpoReportLine({
+  label,
+  kind,
+  report,
+}: {
+  label: string;
+  kind: 'pre-listing' | 'post-listing';
+  report: BriefIpoReport | null;
+}) {
+  if (!report) return null;
+  const busy = report.status === 'queued' || report.status === 'running';
+  const verdict = verdictOf(kind, report.verdict);
+  return (
+    <View className="mt-2">
+      <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
+        {label} ·{' '}
+        <Text
+          className={cn('font-semibold', busy ? VERDICT_TEXT.neutral : VERDICT_TEXT[verdict.tone])}
+        >
+          {busy ? 'Being prepared…' : `${report.composite ?? '—'}/100 · ${verdict.word}`}
+        </Text>
+      </Text>
+      {!busy && report.headline ? (
+        <Text className="mt-0.5 text-xs leading-[17px] text-ink dark:text-ink-dark">
+          {report.headline}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * IPOs whose listing date is the brief's date, with their research verdicts. The IPO call
+ * auction runs 09:00–09:45 IST and trading starts at 10:00. Only rendered on a day something
+ * lists — an empty card every other day is noise.
+ */
+export function IpoListingsSection({ brief, isToday }: SectionProps & { isToday: boolean }) {
+  const router = useRouter();
+  const items = brief.ipoListings.items;
+  return (
+    <BriefSection
+      title={isToday ? 'IPOs listing today' : `IPOs listing on ${brief.date}`}
+      caption="Trading from 10:00 IST"
+      action={{ label: 'IPO centre', onPress: () => router.push('/ipo') }}
+    >
+      {items.map((ipo, position) => (
+        <Pressable
+          key={ipo.id}
+          accessibilityRole="button"
+          accessibilityLabel={`${ipo.companyName}, opens the IPO's research`}
+          onPress={() => router.push({ pathname: '/ipo/[id]', params: { id: ipo.id } })}
+          className={cn(
+            'py-3 active:opacity-70',
+            position > 0 && 'border-t border-line dark:border-line-dark',
+            position === 0 && 'pt-0',
+          )}
+        >
+          <View className="flex-row items-center gap-2">
+            <Text
+              className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark"
+              numberOfLines={1}
+            >
+              {ipo.companyName}
+            </Text>
+            <Tag
+              label={`${ipo.issueType === 'sme' ? 'SME' : 'Mainboard'}${ipo.exchange ? ` · ${ipo.exchange}` : ''}`}
+            />
+          </View>
+          <Text
+            className="mt-1 text-xs text-ink-muted dark:text-ink-dark-muted"
+            style={{ fontVariant: ['tabular-nums'] }}
+          >
+            Issue {formatINR(ipo.issuePrice, 0)} · GMP {gmpPctText(ipo.gmpPercent)} · Implied{' '}
+            {formatINR(ipo.estimatedListingPrice, 0)} · {times(ipo.totalSubscription)} subscribed
+          </Text>
+          <IpoReportLine label="Pre-listing setup" kind="pre-listing" report={ipo.preListing} />
+          <IpoReportLine label="Entry after listing" kind="post-listing" report={ipo.postListing} />
+          {!ipo.preListing && !ipo.postListing ? (
+            <Text className="mt-2 text-xs text-ink-faint dark:text-ink-dark-faint">
+              No research report.
+            </Text>
+          ) : null}
+        </Pressable>
+      ))}
+      <Caveat className="mt-1">
+        Model-assisted research, not advice. Grey-market premiums are unofficial.
+      </Caveat>
     </BriefSection>
   );
 }
@@ -870,7 +960,7 @@ export function NewsSection({ brief }: SectionProps) {
 /** Which external providers the brief can't use yet, and why. */
 export function CalendarSection({ brief }: SectionProps) {
   return (
-    <BriefSection title="Calendar & external cues" caption="Provider status">
+    <BriefSection title="Calendar & external cues">
       {brief.unavailableSources.length > 0 ? (
         brief.unavailableSources.map((item, position) => (
           <View

@@ -1,7 +1,7 @@
 import { ApiError } from '@/types/api';
 
 import { isAdminDenied, isDependencyUnavailable } from '../lib/access';
-import { bucketLabel } from '../lib/format';
+import { bucketLabel, failedCallsLabel, failureTone } from '../lib/format';
 import { usageBucketLabel } from '../lib/usage';
 import { mergeUserUpdate } from '../lib/users';
 import type { PlatformUser } from '../types';
@@ -71,5 +71,28 @@ describe('bucket labels', () => {
     expect(usageBucketLabel('2026-09-27T18:30:00.000Z', 'day')).toMatch(/^28 Sep/);
     expect(usageBucketLabel('2026-09-27T18:30:00.000Z', 'week')).toMatch(/^w\/c 28 Sep/);
     expect(usageBucketLabel('', 'month')).toBe('');
+  });
+});
+
+describe('failureTone', () => {
+  it('stays plain for no failures or noise under 1%', () => {
+    expect(failureTone(0, 7283)).toBeUndefined();
+    expect(failureTone(16, 7283)).toBeUndefined();
+    expect(failureTone(3, 0)).toBeUndefined();
+  });
+
+  it('warns from 1% and alarms from 5%', () => {
+    expect(failureTone(1, 100)).toBe('warn');
+    expect(failureTone(4, 100)).toBe('warn');
+    expect(failureTone(5, 100)).toBe('bad');
+  });
+});
+
+describe('failedCallsLabel', () => {
+  it('gives the count and its share', () => {
+    expect(failedCallsLabel(0, 10)).toBe('All answered');
+    expect(failedCallsLabel(16, 7283)).toBe('16 failed · 0.2%');
+    expect(failedCallsLabel(1, 5000)).toBe('1 failed · <0.1%');
+    expect(failedCallsLabel(30, 100)).toBe('30 failed · 30%');
   });
 });

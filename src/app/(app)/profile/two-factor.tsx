@@ -153,7 +153,7 @@ function Overview({
         <Text className="text-center text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
           {mfa.enabled
             ? `Turned on ${mfa.enabledAt ? new Date(mfa.enabledAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}. ${mfa.recoveryCodesRemaining} recovery code${mfa.recoveryCodesRemaining === 1 ? '' : 's'} left.`
-            : 'After your password, each sign-in asks for a six-digit code from an authenticator app — Google Authenticator, Microsoft Authenticator, Authy or 1Password.'}
+            : 'Adds a six-digit code to every sign-in. Works with any authenticator app.'}
         </Text>
       </View>
 
@@ -220,7 +220,7 @@ function PasswordStep({
       <StepHeading
         step="Step 1 of 3"
         title="Confirm your password"
-        body="So nobody holding your unlocked phone can link their own authenticator to your account."
+        body="Needed before linking an authenticator."
       />
       <Input
         label="Current password"
@@ -567,8 +567,7 @@ function RecoveryCodes({
           {fresh ? 'Two-factor is on — save these codes' : 'Your new recovery codes'}
         </Text>
         <Text className="text-center text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-          If you lose this phone, each code gets you in once. Keep them somewhere other than this
-          phone — they can’t be shown again.
+          Each works once and won’t be shown again — store them safely.
         </Text>
       </View>
 

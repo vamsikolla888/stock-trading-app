@@ -23,6 +23,7 @@ import {
   foldLivePrice,
   toChartCandles,
 } from '../lib/candles';
+import { isCommodityExchange, isMcxSessionOpen } from '../lib/explore';
 import { contractTitle, expiryLabel, venueOf } from '../lib/format';
 import type { ChartTarget, FnoCandleInterval, FnoContract, FnoExchange } from '../types';
 
@@ -136,7 +137,10 @@ function ChainChartBody({
   const contract = target === 'contract' ? picked : anchor;
   const candles = useFnoCandles(exchange, contract, target, interval);
   const now = useNow(15_000);
-  const marketOpen = isMarketOpen(new Date(now));
+  // MCX trades to 23:30: a commodity's forming bar follows its own session.
+  const marketOpen = isCommodityExchange(exchange)
+    ? isMcxSessionOpen(now)
+    : isMarketOpen(new Date(now));
 
   const serverCandles = useMemo(() => toChartCandles(candles.data?.candles ?? []), [candles.data]);
   // Folded only for a live series: a closed market's price belongs to no forming bar.

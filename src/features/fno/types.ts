@@ -13,7 +13,17 @@
  * greek is Groww's or calculated on the server. The UI shows both; it never hides a fallback.
  */
 
-export type FnoExchange = 'NFO' | 'BFO';
+/**
+ * A derivatives book. NFO/BFO = NSE/BSE F&O. MCX and NCO (NSE's commodity segment) are
+ * READ-ONLY books (server 2026-10-07): chain, futures, quotes and candles from Groww's COMMODITY
+ * segment — Groww's API places no commodity orders, so every order type below takes
+ * `EquityFnoExchange`, and the server refuses an MCX/NCO order (422) anyway.
+ */
+export type FnoExchange = 'NFO' | 'BFO' | 'MCX' | 'NCO';
+/** The books orders, margin and exits are placed on. */
+export type EquityFnoExchange = 'NFO' | 'BFO';
+/** MCX, and NSE's commodity segment (app code NCO — Groww: exchange NSE, segment COMMODITY). */
+export type CommodityExchange = 'MCX' | 'NCO';
 export type ContractKind = 'CE' | 'PE' | 'FUT';
 export type MarketDataSource = 'groww' | 'platform';
 export type GreeksSource = 'groww' | 'calculated';
@@ -36,8 +46,8 @@ export interface FnoContract {
   exchangeToken: string;
   buyAllowed: boolean;
   sellAllowed: boolean;
-  /** Added server-side 2026-09-27; absent from older cached rows. */
-  logoKind?: 'stock' | 'index';
+  /** Added server-side 2026-09-27; absent from older cached rows. 'commodity' for MCX/NCO. */
+  logoKind?: 'stock' | 'index' | 'commodity';
   logoSymbol?: string;
   logoPath?: string | null;
 }
@@ -56,7 +66,7 @@ export interface FnoUnderlying {
   hasFutures: boolean;
   lotSize: number | null;
   contractCount: number;
-  logoKind?: 'stock' | 'index';
+  logoKind?: 'stock' | 'index' | 'commodity';
   logoSymbol?: string;
   logoPath?: string | null;
 }
@@ -105,6 +115,9 @@ export interface FnoChain {
   daysToExpiry: number;
   spot: number | null;
   spotSource: string;
+  /** A commodity chain's settling future as a stream key (`MCX:GOLD05NOV26FUT`) — the price
+   *  that IS its spot (a commodity has no cash listing). Absent on equity chains / older servers. */
+  spotInstrument?: string | null;
   atmStrike: number | null;
   rows: FnoChainRow[];
   totals: { callOi: number | null; putOi: number | null; pcr: number | null };
@@ -373,7 +386,7 @@ export interface MarginPreview {
 }
 
 export interface MarginLeg {
-  exchange: FnoExchange;
+  exchange: EquityFnoExchange;
   tradingSymbol: string;
   side: FnoSide;
   lots: number;
@@ -390,7 +403,7 @@ export interface PlaceFnoOrderInput extends MarginLeg {
 }
 
 export interface ExitPositionInput {
-  exchange: FnoExchange;
+  exchange: EquityFnoExchange;
   tradingSymbol: string;
   product: FnoProduct;
   lots: number;
@@ -571,7 +584,8 @@ export interface FnoExploreSectionView<R> {
 
 export interface ExpiryEntry {
   kind: 'index' | 'stocks' | 'commodity';
-  exchange: ExploreExchange;
+  /** The calendar lists NSE/BSE F&O and MCX (NSE's commodity segment is not on it). */
+  exchange: 'NFO' | 'BFO' | 'MCX';
   underlying: string | null;
   label: string;
   count: number;
@@ -585,9 +599,34 @@ export interface ExpiryDay {
   entries: ExpiryEntry[];
 }
 
+export type HolidayMarket = 'NSE' | 'BSE' | 'MCX';
+
+/**
+ * A published holiday (server fno-calendar-holidays.ts): a Government of India gazetted
+ * holiday (`public`, no markets, no session) or an exchange trading holiday (`market`). MCX
+ * often closes only one session — `morning` closed means the evening session trades.
+ */
+export interface CalendarHoliday {
+  date: string;
+  name: string;
+  kind: 'public' | 'market';
+  markets: HolidayMarket[];
+  session: 'full-day' | 'morning' | 'evening' | null;
+  note: string | null;
+}
+
+export interface HolidaySource {
+  label: string;
+  url: string;
+  year: number;
+}
+
+/** GET /fno/expiry-calendar?month=YYYY-MM (server 2026-10-07; replaced the 45-day window). */
 export interface ExpiryCalendar {
+  month: string;
   days: ExpiryDay[];
-  windowDays: number;
+  holidays: CalendarHoliday[];
+  holidaySources: HolidaySource[];
   asOf: string;
 }
 
@@ -604,8 +643,8 @@ export interface CommodityUnderlying {
   contractCount: number;
 }
 
-/** A live MCX / NSE-commodity contract from search (server 2026-09-27). Priced only — Groww's
- *  API places no commodity orders, so it opens the commodity futures list, never a ticket. */
+/** A live MCX / NSE-commodity contract from search (server 2026-09-27). Read-only — Groww's
+ *  API places no commodity orders, so it opens its commodity's chain / futures, never a ticket. */
 export interface CommodityContractSearchResult {
   exchange: 'MCX' | 'NCO';
   tradingSymbol: string;

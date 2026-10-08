@@ -54,7 +54,7 @@ export function PaperSummaryCard({
         ? count === 0
           ? 'No holdings yet'
           : `Invested ${mask(formatINR(portfolio.book.investedValue))} · ${plural(count, 'holding')}`
-        : 'Delivery holdings at the live price'
+        : 'Delivery holdings'
       : scope === 'intraday'
         ? portfolio
           ? count === 0
@@ -118,7 +118,7 @@ export function PaperSummaryCard({
                   ? 'Nothing open'
                   : 'A position has no previous close yet'
                 : scope === 'equity' && kpis.bookedToday
-                  ? `${mask(formatSignedINR(kpis.bookedToday))} booked on sells`
+                  ? `${mask(formatSignedINR(kpis.bookedToday))} booked today`
                   : undefined
             }
           />
@@ -145,9 +145,7 @@ export function PaperSummaryCard({
               className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-dark-faint"
               numberOfLines={2}
             >
-              {walletNotes.length > 0
-                ? walletNotes.join(' · ')
-                : 'Free to trade · delivery and intraday'}
+              {walletNotes.length > 0 ? walletNotes.join(' · ') : 'Free to trade'}
             </Text>
           </View>
           <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">

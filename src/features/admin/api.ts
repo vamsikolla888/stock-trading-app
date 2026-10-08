@@ -2,14 +2,21 @@ import { env } from '@/config/env';
 import type { ChallengeResult, MstockConnectPayload } from '@/features/trading/types';
 import { apiClient } from '@/services/api/client';
 
+import { normalizeApiUsage } from './lib/apiUsage';
+import { normalizeNewsRun, normalizeNewsRuns } from './lib/jobs';
+import { normalizeKillSwitch } from './lib/trading';
 import type {
   AdminJob,
   AdminJobKind,
   AdminJobLog,
   AdminJobRunResult,
+  AdminNewsRun,
+  AdminNewsRunsPage,
+  AiProvider,
   AiUsageReport,
-  BrokerUsageRange,
-  BrokerUsageReport,
+  ApiProvider,
+  ApiUsageRange,
+  ApiUsageReport,
   BrowserResearchConfig,
   BrowserResearchGuardrails,
   BrowserResearchPairing,
@@ -27,6 +34,8 @@ import type {
   PlatformUserUpdate,
   ReadyChecks,
   RecentLogsResponse,
+  RevealCodeSent,
+  RevealResult,
   ServerAnalyticsReport,
   ServiceAccountResult,
   ServiceBrokerConnections,
@@ -90,15 +99,28 @@ export const adminApi = {
   },
 
   // ── Usage ──
-  async aiUsage(period: UsagePeriod): Promise<AiUsageReport> {
-    const { data } = await apiClient.get<AiUsageReport>('/admin/ai-usage', { params: { period } });
-    return data;
-  },
-  async brokerUsage(range: BrokerUsageRange): Promise<BrokerUsageReport> {
-    const { data } = await apiClient.get<BrokerUsageReport>('/admin/broker-usage', {
-      params: { range },
+  /** One provider's calls with `provider`; an older server refuses the parameter (422). */
+  async aiUsage(period: UsagePeriod, provider?: AiProvider): Promise<AiUsageReport> {
+    const { data } = await apiClient.get<AiUsageReport>('/admin/ai-usage', {
+      params: provider ? { period, provider } : { period },
     });
     return data;
+  },
+  /**
+   * One third-party API's calls, limits and live feeds. mStock is asked WITHOUT `broker` — the
+   * server's default — so a server older than Groww measuring (whose strict query schema refuses
+   * the parameter with 422) still answers it; only Groww names the provider.
+   */
+  async apiUsage(
+    range: ApiUsageRange,
+    provider: ApiProvider,
+    signal?: AbortSignal,
+  ): Promise<ApiUsageReport> {
+    const { data } = await apiClient.get<unknown>('/admin/broker-usage', {
+      params: provider === 'mstock' ? { range } : { range, broker: provider },
+      signal,
+    });
+    return normalizeApiUsage(data);
   },
 
   // ── Users ──
@@ -135,6 +157,20 @@ export const adminApi = {
       { pattern },
     );
     return data;
+  },
+
+  // ── News ingestion (any signed-in user may trigger; the admin console shows the timeline) ──
+  async newsRuns(pageSize: number, signal?: AbortSignal): Promise<AdminNewsRunsPage> {
+    const { data } = await apiClient.get<unknown>('/news/runs', {
+      params: { page: 1, pageSize },
+      signal,
+    });
+    return normalizeNewsRuns(data);
+  },
+  /** Starts a batch and returns at once with status RUNNING — it does not wait for providers. */
+  async triggerNewsIngestion(): Promise<AdminNewsRun | null> {
+    const { data } = await apiClient.post<unknown>('/news/ingest');
+    return normalizeNewsRun(data);
   },
 
   // ── Catalog maintenance ──
@@ -197,20 +233,30 @@ export const adminApi = {
     });
     return data;
   },
+  /** Admin only. Refuses every new live order on every broker until released; the reason
+   *  (3–500 characters) is recorded and shown to anyone whose order it refuses. */
   async engageKillSwitch(reason: string): Promise<KillSwitchAdminState> {
-    const { data } = await apiClient.post<KillSwitchAdminState>(
-      '/live-trading/kill-switch/engage',
-      {
-        reason,
-      },
-    );
-    return data;
+    const { data } = await apiClient.post<unknown>('/live-trading/kill-switch/engage', { reason });
+    return normalizeKillSwitch(data);
   },
   async disengageKillSwitch(): Promise<KillSwitchAdminState> {
-    const { data } = await apiClient.post<KillSwitchAdminState>(
-      '/live-trading/kill-switch/disengage',
-    );
+    const { data } = await apiClient.post<unknown>('/live-trading/kill-switch/disengage');
+    return normalizeKillSwitch(data);
+  },
+  /** Emails a single-use 6-digit code (5 minutes) to the signed-in admin's own address. */
+  async requestGrowwTokenCode(): Promise<RevealCodeSent> {
+    const { data } = await apiClient.post<RevealCodeSent>('/admin/broker-tokens/groww/code', {});
     return data;
+  },
+  /**
+   * Shows the admin's OWN Groww connections with their current access token. Read-only: it never
+   * mints or refreshes a token, and every reveal is logged and followed by an alert email.
+   */
+  async revealGrowwToken(code: string): Promise<RevealResult> {
+    const { data } = await apiClient.post<RevealResult>('/admin/broker-tokens/groww/reveal', {
+      code,
+    });
+    return { ...data, connections: Array.isArray(data?.connections) ? data.connections : [] };
   },
 };
 

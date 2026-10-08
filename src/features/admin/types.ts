@@ -154,6 +154,9 @@ export interface RecentLogsResponse {
 
 export type UsagePeriod = 'day' | 'week' | 'month';
 
+/** The ledger's providers. Ollama (the default) has no per-token price, so its usage is tokens. */
+export type AiProvider = 'ollama' | 'openai';
+
 export interface UsageTotals {
   calls: number;
   promptTokens: number;
@@ -178,6 +181,8 @@ export interface UsageGroup extends UsageTotals {
 
 export interface AiUsageReport {
   period: UsagePeriod;
+  /** The provider the report is limited to (GET ?provider=); absent from an older server. */
+  provider?: AiProvider | null;
   from: string;
   to: string;
   totals: UsageTotals;
@@ -187,9 +192,15 @@ export interface AiUsageReport {
   pricing: { asOf: string; usdToInr: number; knownModels: string[] };
 }
 
-// ── Broker (mStock) usage ────────────────────────────────────────────────────────────
+// ── Third-party API usage (mStock, Groww) ────────────────────────────────────────────
+// GET /admin/broker-usage?range=&broker= — parsed by lib/apiUsage.ts into the shape below, where
+// every field exists: a server older than Groww measuring sends none of the provider fields and
+// refuses `broker` (strict query schema → 422), and its report is mStock's whatever was asked.
 
-export type BrokerUsageRange = '24h' | '7d' | '30d' | '90d';
+export type ApiUsageRange = '24h' | '7d' | '30d' | '90d';
+
+/** The third-party APIs the server measures. */
+export type ApiProvider = 'mstock' | 'groww';
 
 export interface MethodCount {
   method: string;
@@ -199,8 +210,10 @@ export interface MethodCount {
   maxLatencyMs: number;
 }
 
-export interface BrokerRouteRow {
+export interface ApiRouteRow {
   route: string;
+  /** Budget (Groww) or purpose (mStock); null from an older server. */
+  group: string | null;
   method: string;
   calls: number;
   failed: number;
@@ -209,11 +222,45 @@ export interface BrokerRouteRow {
   bytesIn: number;
 }
 
-export interface BrokerUsagePoint {
+/** Calls per budget (Groww) or purpose (mStock), largest first. */
+export interface ApiGroupRow {
+  group: string;
+  label: string;
+  calls: number;
+  failed: number;
+  avgLatencyMs: number | null;
+  maxLatencyMs: number;
+}
+
+/** `published` = the provider's documented limit; `self` = this platform's own throttle (mStock
+ *  publishes none); `none` = no known limit. */
+export type BudgetSource = 'published' | 'self' | 'none';
+
+/** One rate limit and how close the busiest hour came to it (server broker-usage.catalog.ts). */
+export interface BudgetUsage {
+  /** A group key, or `all` for a budget every call shares. */
+  group: string;
+  label: string;
+  perSecond: number | null;
+  perMinute: number | null;
+  perDay: number | null;
+  source: BudgetSource;
+  note: string;
+  calls: number;
+  busiestHour: { hourStart: number; calls: number } | null;
+  /** The busiest hour's AVERAGE calls a minute — bursts inside the hour run higher. */
+  busiestPerMinute: number | null;
+  /** `busiestPerMinute` as a share of the per-minute limit; null with no limit or no calls. */
+  utilisationPct: number | null;
+  /** Calls since IST midnight against a per-day limit; null where there is none. */
+  usedToday: number | null;
+}
+
+export interface ApiUsagePoint {
   periodStart: string;
   calls: number;
   failed: number;
-  byMethod: Record<string, number>;
+  /** Null on an empty bucket — 0ms would draw a floor implying instant responses. */
   avgLatencyMs: number | null;
   maxLatencyMs: number;
 }
@@ -240,39 +287,70 @@ export interface SocketScopeTotals {
   series: SocketPoint[];
 }
 
-export interface BrokerTailEntry {
+/** One live connection held to the provider (for mStock's index strip, a poll it fans out). */
+export interface FeedBlock {
+  key: string;
+  label: string;
+  detail: string;
+  totals: SocketScopeTotals;
+}
+
+/** One of this process's token buckets — one for mStock, one per budget for Groww. */
+export interface ApiLimiter {
+  group: string;
+  label: string;
+  queueLength: number;
+  ratePerSecond: number;
+}
+
+export interface ApiTailEntry {
   at: string;
   method: string;
   route: string;
+  /** An HTTP code, or a failure kind when nothing answered (`timeout`, `network`, …). */
   status: string;
   ok: boolean;
   latencyMs: number;
 }
 
-export interface BrokerUsageReport {
-  range: BrokerUsageRange;
+export type BreakerState = 'open' | 'closed' | 'halfOpen';
+
+export interface ApiUsageReport {
+  range: ApiUsageRange;
+  /** The provider every figure describes. */
+  provider: ApiProvider;
+  /** False when the server did not say (an older server: the report is mStock's). */
+  providerReported: boolean;
   bucket: 'hour' | 'day';
   from: string;
   to: string;
   totals: {
     calls: number;
     failed: number;
+    /** Null with no calls — not 100, which would claim a record never tested. */
     successRate: number | null;
     avgLatencyMs: number | null;
     maxLatencyMs: number;
+    /** A floor: some responses carry no size (see bytesUnknownCalls). */
     bytesIn: number;
     bytesUnknownCalls: number;
   };
   byMethod: MethodCount[];
-  byRoute: BrokerRouteRow[];
+  byRoute: ApiRouteRow[];
+  byGroup: ApiGroupRow[];
+  budgets: BudgetUsage[];
+  feeds: FeedBlock[];
   statusCounts: { status: string; count: number }[];
-  series: BrokerUsagePoint[];
-  socket: { equity: SocketScopeTotals; indices: SocketScopeTotals; client: SocketScopeTotals };
+  series: ApiUsagePoint[];
+  /** THIS server process only — never a cluster-wide figure. */
   live: {
+    /** `idle` = no call made in this process yet, `attached` = measuring, `failed` = the mStock
+     *  SDK hook broke and REST counts are structurally zero. */
     instrumentation: 'idle' | 'attached' | 'failed';
-    rateLimit: { queueLength: number; ratePerSecond: number };
+    limiters: ApiLimiter[];
+    /** Groww only: users whose live feed is connected in this process right now. */
+    feedConnections: number | null;
     rateLimitWaits: { waits: number; avgWaitMs: number | null; maxWaitMs: number };
-    clientSockets: number;
     indexFeed: {
       running: boolean;
       subscribers: number;
@@ -280,27 +358,17 @@ export interface BrokerUsageReport {
       consecutiveFailures: number;
       asOf: string | null;
       /** Which broker answered the last successful poll — 'groww' while an mStock failover runs. */
-      source?: 'mstock' | 'groww' | null;
-      /** Index-feed failover status. Optional: an older API omits it. */
-      failover?: {
-        source: 'primary' | 'fallback' | null;
-        failoverUntil: string | null;
-        fallbackBlockedUntil: string | null;
-        lastPrimaryError: string | null;
-        lastFallbackError: string | null;
-      };
+      source: 'mstock' | 'groww' | null;
     };
-    breakers: { name: string; state: 'open' | 'closed' | 'halfOpen' }[];
+    breakers: { name: string; state: BreakerState | string }[];
     ledger: {
       pendingRestCells: number;
-      pendingSocketCells: number;
       lastFlushAt: string | null;
       lastFlushError: string | null;
       droppedFlushes: number;
     };
-    tail: BrokerTailEntry[];
+    tail: ApiTailEntry[];
   };
-  config: { indexFeedPollMs: number };
 }
 
 // ── Users ────────────────────────────────────────────────────────────────────────────
@@ -352,6 +420,41 @@ export interface AdminJobRunResult {
   enqueued: boolean;
   jobId: string | null;
   detail?: string;
+}
+
+// ── News ingestion runs (GET /news/runs, POST /news/ingest) ──────────────────────────
+
+export type NewsRunStatus = 'RUNNING' | 'COMPLETED' | 'FAILED';
+
+/** OK = produced items; EMPTY = ran and returned nothing (the normal case for sites that block
+ *  automated readers); FAILED = the provider's workflow errored or never reported back. */
+export type NewsRunStageStatus = 'PENDING' | 'RUNNING' | 'OK' | 'EMPTY' | 'FAILED';
+
+/** One provider's progress inside a batch. */
+export interface NewsRunStage {
+  key: string;
+  label: string;
+  status: NewsRunStageStatus;
+  detail: string | null;
+  itemCount: number | null;
+}
+
+/** One ingestion batch with its per-provider timeline, parsed by lib/jobs.ts. */
+export interface AdminNewsRun {
+  runId: string;
+  status: NewsRunStatus;
+  trigger: 'MANUAL' | 'SCHEDULED';
+  startedAt: string;
+  finishedAt: string | null;
+  stages: NewsRunStage[];
+  /** Articles written for this run; null when the server did not say. */
+  inserted: number | null;
+  errorMessage: string | null;
+}
+
+export interface AdminNewsRunsPage {
+  runs: AdminNewsRun[];
+  total: number;
 }
 
 // ── Catalog maintenance (/stocks/admin/*) ────────────────────────────────────────────
@@ -470,4 +573,34 @@ export interface GenerateRunResult {
   alreadyRunning?: boolean;
   jobId: string;
   date: string;
+}
+
+/* ── Admin › Groww access token (server: modules/broker-token-reveal) ── */
+
+/** POST /admin/broker-tokens/groww/code — a 6-digit code emailed to the admin's own address. */
+export interface RevealCodeSent {
+  /** Masked address the code went to. */
+  sentTo: string;
+  expiresAt: string;
+  /** Codes left in this 15-minute window. */
+  codesLeft: number;
+}
+
+export interface RevealedConnection {
+  connectionId: string;
+  accountLabel: string | null;
+  status: string;
+  token: string | null;
+  issuedAt: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+  minutesLeft: number | null;
+  note: string | null;
+}
+
+/** POST /admin/broker-tokens/groww/reveal — the caller's OWN Groww connections. Read-only. */
+export interface RevealResult {
+  revealedAt: string;
+  visibleForSeconds: number;
+  connections: RevealedConnection[];
 }

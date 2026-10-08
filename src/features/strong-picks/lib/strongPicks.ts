@@ -5,26 +5,10 @@ import type {
   RejectionStage,
   StrongPick,
   StrongPickRejection,
-  StrongPicksResponse,
 } from '../types';
 
-/**
- * The server sends each pick as it was stored, so a day published before the per-segment
- * verdicts existed (reachable through "Last published") carries no arrays for them. Every
- * list the screen iterates is made an array here, once, at the API boundary.
- */
-export function normalizeStrongPicks(response: StrongPicksResponse): StrongPicksResponse {
-  const list = <T>(value: T[] | null | undefined): T[] => (Array.isArray(value) ? value : []);
-  return {
-    ...response,
-    picks: list(response.picks).map((pick) => ({
-      ...pick,
-      segments: list(pick.segments),
-      segmentVerdicts: list(pick.segmentVerdicts),
-    })),
-    caveats: list(response.caveats),
-  };
-}
+/** The API boundary's parser lives in ./normalize; re-exported for existing callers. */
+export { normalizeStrongPicks } from './normalize';
 
 export const SEGMENT_LABEL: Record<MarketSegment, string> = {
   equity: 'Equity',

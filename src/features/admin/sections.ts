@@ -5,6 +5,7 @@ import Database from 'lucide-react-native/icons/database';
 import Gauge from 'lucide-react-native/icons/gauge';
 import Globe from 'lucide-react-native/icons/globe';
 import HeartPulse from 'lucide-react-native/icons/heart-pulse';
+import KeyRound from 'lucide-react-native/icons/key-round';
 import Power from 'lucide-react-native/icons/power';
 import RadioTower from 'lucide-react-native/icons/radio-tower';
 import ScrollText from 'lucide-react-native/icons/scroll-text';
@@ -20,10 +21,11 @@ export type AdminSectionId =
   | 'jobs'
   | 'browser-research'
   | 'ai'
-  | 'broker-usage'
+  | 'api-usage'
   | 'fundamentals'
   | 'data'
   | 'users'
+  | 'groww-token'
   | 'trading';
 
 export interface AdminSection {
@@ -82,15 +84,15 @@ export const ADMIN_SECTION_GROUPS: readonly { title: string; sections: readonly 
       sections: [
         {
           id: 'ai',
-          title: 'AI usage & cost',
-          subtitle: 'Spend, tokens and models',
+          title: 'AI usage',
+          subtitle: 'Ollama tokens, OpenAI spend, by model',
           Icon: Bot,
           tone: 'amber',
         },
         {
-          id: 'broker-usage',
-          title: 'mStock API usage',
-          subtitle: 'Broker calls, sockets and throttling',
+          id: 'api-usage',
+          title: 'Third-party API usage',
+          subtitle: 'mStock and Groww calls, rate limits, live feeds',
           Icon: RadioTower,
           tone: 'teal',
         },
@@ -121,6 +123,13 @@ export const ADMIN_SECTION_GROUPS: readonly { title: string; sections: readonly 
           tone: 'green',
         },
         {
+          id: 'groww-token',
+          title: 'Groww access token',
+          subtitle: 'Your own token, behind an emailed code',
+          Icon: KeyRound,
+          tone: 'amber',
+        },
+        {
           id: 'trading',
           title: 'Trading controls',
           subtitle: 'Live trading switch and kill switch',
@@ -135,6 +144,19 @@ const BY_ID = new Map(
   ADMIN_SECTION_GROUPS.flatMap((group) => group.sections).map((section) => [section.id, section]),
 );
 
+/**
+ * Sections that were renamed, mapped to where their content went, so an old link (a bookmark, a
+ * notification, a deep link) still opens the right screen.
+ */
+const ALIASES: Readonly<Record<string, AdminSectionId>> = {
+  // mStock-only usage became one screen for every third-party API (mStock and Groww).
+  'broker-usage': 'api-usage',
+};
+
+/** The section a route param names — an alias resolves, case is ignored, anything else is undefined. */
 export function adminSection(id: string | undefined): AdminSection | undefined {
-  return id ? BY_ID.get(id as AdminSectionId) : undefined;
+  if (!id) return undefined;
+  const key = id.toLowerCase();
+  const alias = ALIASES[key];
+  return BY_ID.get(key as AdminSectionId) ?? (alias ? BY_ID.get(alias) : undefined);
 }

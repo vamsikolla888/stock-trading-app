@@ -1,5 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
@@ -11,6 +12,9 @@ import { Card } from '@/components/ui/Card';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { KpiGrid, type Kpi } from '@/components/ui/KpiGrid';
 import { Section } from '@/components/ui/Section';
+import { SegmentedControl } from '@/components/ui/Tabs';
+import { useStrategyDeploy } from '@/features/deployments/components/useStrategyDeploy';
+import { deploymentKeys } from '@/features/deployments/hooks';
 import { EquityCurveCard } from '@/features/strategies/components/EquityCurveCard';
 import {
   RulesPreviewCard,
@@ -91,7 +95,7 @@ export default function StrategyDetailScreen() {
             onSuccess: () => {
               toast.success('Strategy deleted');
               if (router.canGoBack()) router.back();
-              else router.replace('/intel/strategies');
+              else router.replace({ pathname: '/intel/strategies', params: { tab: 'swing' } });
             },
             onError: (error) => toast.error("Couldn't delete the strategy", getErrorMessage(error)),
           }),
@@ -164,7 +168,30 @@ export default function StrategyDetailScreen() {
     });
   }, [editing, form.dirty, navigation]);
 
-  const refresh = useCallback(() => query.refetch(), [query]);
+  // ── Deployment: the strategy on the paper wallet or the live broker, with its own tab ──
+  const [tab, setTab] = useState<'overview' | 'deployment'>('overview');
+  const queryClient = useQueryClient();
+  const deployTarget = useMemo(() => ({ kind: 'strategy' as const, strategyId: id }), [id]);
+  const deploy = useStrategyDeploy(deployTarget, {
+    enabled: Boolean(id) && !notFound,
+    strategyName: strategy?.name,
+    onDeployed: () => setTab('deployment'),
+  });
+  // A finished backtest or edited rules change what live allows (`needsBacktest`) and whether a
+  // running deployment trades the current rules — read the deployments again when they move.
+  const runSignature = `${strategy?.ranAt ?? ''}|${strategy?.resultsStale ? 1 : 0}|${strategy?.updatedAt ?? ''}`;
+  const lastRunSignature = useRef(runSignature);
+  useEffect(() => {
+    if (lastRunSignature.current === runSignature) return;
+    lastRunSignature.current = runSignature;
+    void queryClient.invalidateQueries({ queryKey: deploymentKeys.list(deployTarget) });
+  }, [runSignature, queryClient, deployTarget]);
+
+  const { refresh: refreshDeployments } = deploy;
+  const refresh = useCallback(
+    () => Promise.all([query.refetch(), refreshDeployments()]),
+    [query, refreshDeployments],
+  );
 
   if (editing && strategy) {
     return (
@@ -238,15 +265,24 @@ export default function StrategyDetailScreen() {
       }
       footer={
         strategy && !notFound ? (
-          <View className="border-t border-line bg-canvas px-5 py-3 dark:border-line-dark dark:bg-canvas-dark">
+          <View className="flex-row gap-2.5 border-t border-line bg-canvas px-5 py-3 dark:border-line-dark dark:bg-canvas-dark">
             <Button
               label={
                 running ? 'Backtest running…' : strategy.ranAt ? 'Re-run backtest' : 'Run backtest'
               }
               loading={run.isPending}
               disabled={running}
-              fullWidth
+              className="flex-1"
               onPress={startBacktest}
+            />
+            <Button
+              label={deploy.running.length ? 'Deployment' : 'Deploy'}
+              variant="secondary"
+              disabled={!deploy.ready}
+              className="flex-1"
+              onPress={() =>
+                deploy.running.length ? setTab('deployment') : deploy.openDeploy('paper')
+              }
             />
           </View>
         ) : undefined
@@ -256,7 +292,11 @@ export default function StrategyDetailScreen() {
         <InlineEmpty
           title="Strategy not found"
           message="It may have been deleted, or the link is out of date. Strategies are private, so another account's link won't open here either."
-          action={{ label: 'Go to strategies', onPress: () => router.replace('/intel/strategies') }}
+          action={{
+            label: 'Go to strategies',
+            onPress: () =>
+              router.replace({ pathname: '/intel/strategies', params: { tab: 'swing' } }),
+          }}
         />
       ) : query.isPending ? (
         <ListSkeleton rows={5} />
@@ -267,18 +307,35 @@ export default function StrategyDetailScreen() {
           onRetry={() => void query.refetch()}
         />
       ) : (
-        <StrategyBody
-          strategy={strategy}
-          running={running}
-          stuck={stuck}
-          indexLabels={indices.data ?? []}
-          onRun={startBacktest}
-          onEdit={startEditing}
-          onDelete={confirmDelete}
-          deleting={remove.isPending}
-          onDuplicate={makeCopy}
-          duplicating={duplicate.isPending}
-        />
+        <>
+          <SegmentedControl
+            items={[
+              { key: 'overview', label: 'Overview' },
+              { key: 'deployment', label: deploy.tabLabel },
+            ]}
+            value={tab}
+            onChange={setTab}
+            className="mb-4"
+          />
+          {tab === 'deployment' ? (
+            deploy.tab
+          ) : (
+            <StrategyBody
+              strategy={strategy}
+              running={running}
+              stuck={stuck}
+              indexLabels={indices.data ?? []}
+              deployBadges={deploy.running.length ? deploy.badges : null}
+              onRun={startBacktest}
+              onEdit={startEditing}
+              onDelete={confirmDelete}
+              deleting={remove.isPending}
+              onDuplicate={makeCopy}
+              duplicating={duplicate.isPending}
+            />
+          )}
+          {deploy.sheet}
+        </>
       )}
     </StackScreen>
   );
@@ -306,6 +363,7 @@ function StrategyBody({
   running,
   stuck,
   indexLabels,
+  deployBadges,
   onRun,
   onEdit,
   onDelete,
@@ -318,6 +376,8 @@ function StrategyBody({
   /** Marked queued/running, but the queue no longer holds the job. */
   stuck: boolean;
   indexLabels: Parameters<typeof parameterRows>[2];
+  /** PAPER / LIVE chips while it is deployed. */
+  deployBadges: React.ReactNode;
   onRun: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -389,6 +449,7 @@ function StrategyBody({
 
   return (
     <View>
+      {deployBadges ? <View className="mb-2">{deployBadges}</View> : null}
       {badges.length > 0 ? (
         <View className="mb-3 flex-row flex-wrap gap-1.5">
           {badges.map((badge) => (

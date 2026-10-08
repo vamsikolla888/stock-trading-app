@@ -187,7 +187,7 @@ export function StrategyFormFields({
     <View>
       {templates ? (
         <>
-          <StepTitle step={1} title="Start from" hint="A template, then adjust anything" />
+          <StepTitle step={1} title="Start from a template" />
           {templatesLoading ? (
             <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">
               Loading templates…

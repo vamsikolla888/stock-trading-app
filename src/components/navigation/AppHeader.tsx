@@ -1,11 +1,13 @@
 import { useRouter, useSegments } from 'expo-router';
 import Bell from 'lucide-react-native/icons/bell';
 import Search from 'lucide-react-native/icons/search';
+import Settings from 'lucide-react-native/icons/settings';
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Logo } from '@/components/brand/Logo';
 import { ProfileAvatar } from '@/features/account/components/ProfileAvatar';
+import { SafeModeIndicator } from '@/features/account/components/SafeMode';
 import { useAccountProfile } from '@/features/account/hooks';
 import { profileName } from '@/features/account/lib/account';
 import { useNotifications } from '@/features/alerts/hooks';
@@ -13,7 +15,11 @@ import { getHeaderTitle } from '@/lib/navigation/headerTitle';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme/ThemeProvider';
 
-/** Top bar shared by the signed-in tabs: brand · search · notifications · account. */
+/**
+ * Top bar shared by the signed-in tabs: brand · Safe Mode (only while it is on) · search ·
+ * notifications · settings · account. Settings is a menu group of its own (Preferences,
+ * Automations, Admin), pushed over the tabs from the gear.
+ */
 export function AppHeader({ group }: { group?: string }) {
   const router = useRouter();
   const segments = useSegments();
@@ -28,10 +34,14 @@ export function AppHeader({ group }: { group?: string }) {
     <View className="flex-row items-center gap-1 border-b border-line bg-canvas px-4 pt-2.5 pb-1 dark:border-line-dark dark:bg-canvas-dark">
       <View className="flex-1 flex-row items-center gap-2 ml-1.5">
         <Logo size="sm" showText={false} />
-        <Text className="text-[17px] font-bold tracking-tight text-ink dark:text-ink-dark">
+        <Text
+          className="flex-shrink text-[17px] font-bold tracking-tight text-ink dark:text-ink-dark"
+          numberOfLines={1}
+        >
           {title}
         </Text>
       </View>
+      <SafeModeIndicator />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Search"
@@ -66,6 +76,15 @@ export function AppHeader({ group }: { group?: string }) {
             </Text>
           </View>
         ) : null}
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Settings"
+        hitSlop={4}
+        onPress={() => router.push('/settings')}
+        className="h-10 w-10 items-center justify-center rounded-full active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+      >
+        <Settings size={21} color={colors.text} />
       </Pressable>
       <Pressable
         accessibilityRole="button"

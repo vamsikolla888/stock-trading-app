@@ -1,21 +1,27 @@
 import { env } from '@/config/env';
 import { apiClient } from '@/services/api/client';
+import { isApiError } from '@/types/api';
 
+import { normalizeCircuitResponse, type CircuitResponse } from './lib/circuit';
+import { normalizeSearchResults, oneRowPerCompany } from './lib/search';
 import type {
   AnalyzedArticleListResponse,
   CandlesResponse,
   CapBand,
+  Exchange,
   IndicesResponse,
   MoverKind,
   MoversResponse,
   RecentlyViewedItem,
   ScreenerDetail,
   ScreenerSummary,
-  SearchResponse,
   SearchResult,
   SentimentSummary,
   StockDetail,
 } from './types';
+
+/** Set once a server refuses `group` on /stocks/search (422): it is older than the parameter. */
+let groupRefused = false;
 
 const MOVER_PATHS: Record<MoverKind, string> = {
   gainers: '/stocks/top-gainers',
@@ -54,12 +60,46 @@ export const marketApi = {
     return data.movers;
   },
 
-  async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
-    const { data } = await apiClient.get<SearchResponse>('/stocks/search', {
-      params: { q: query, limit },
+  /**
+   * `group: 'company'` asks for ONE row per company (a stock on NSE and BSE comes back once, as its
+   * NSE listing) — for the search that opens the stock page, which switches listings itself. The
+   * order, watchlist and paper pickers leave it off: there the exchange IS the choice. A server
+   * older than the parameter refuses it (422, strict query schema); then the app asks without it
+   * and folds the rows itself, and stops asking with it for the rest of the session.
+   */
+  async search(
+    query: string,
+    limit: number,
+    signal?: AbortSignal,
+    group?: 'company',
+  ): Promise<SearchResult[]> {
+    const ask = async (params: Record<string, string | number>) => {
+      const { data } = await apiClient.get<unknown>('/stocks/search', { params, signal });
+      return normalizeSearchResults(data);
+    };
+    const folded = async () =>
+      oneRowPerCompany(await ask({ q: query, limit: Math.min(50, limit * 3) })).slice(0, limit);
+    if (!group) return ask({ q: query, limit });
+    if (groupRefused) return folded();
+    try {
+      return await ask({ q: query, limit, group });
+    } catch (error) {
+      if (!isApiError(error) || error.status !== 422) throw error;
+      groupRefused = true;
+      return folded();
+    }
+  },
+
+  async circuit(
+    exchange: Exchange,
+    symbol: string,
+    signal?: AbortSignal,
+  ): Promise<CircuitResponse> {
+    const { data } = await apiClient.get<unknown>('/market/circuit', {
+      params: { exchange, symbol },
       signal,
     });
-    return data.results;
+    return normalizeCircuitResponse(data, { exchange, symbol });
   },
 
   async recentlyViewed(limit = 12): Promise<RecentlyViewedItem[]> {

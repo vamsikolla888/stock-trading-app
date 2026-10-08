@@ -5,6 +5,9 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { InlineEmpty } from '@/components/common/InlineError';
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -41,7 +44,7 @@ import { getErrorMessage } from '@/types/api';
 const PAGE = 40;
 
 const ACCESS_OPTIONS: readonly { key: PlatformUserApproval; label: string }[] = [
-  { key: 'pending', label: 'Pending' },
+  { key: 'pending', label: 'Waiting' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
 ];
@@ -152,9 +155,18 @@ function UserRow({
   );
 }
 
+/** Splits a list into `count` columns, top to bottom then left to right. */
+function columnsOf<T>(items: readonly T[], count: number): T[][] {
+  const size = Math.ceil(items.length / count);
+  return Array.from({ length: count }, (_, i) => items.slice(i * size, (i + 1) * size)).filter(
+    (column) => column.length > 0,
+  );
+}
+
 /** Approve sign-ups and assign roles (web: Users & access). */
 export function UsersPanel() {
   const { colors } = useTheme();
+  const layout = useScreenLayout();
   const selfId = useAuthStore((state) => state.user?.id ?? null);
   const users = usePlatformUsers();
   const update = useUpdatePlatformUser();
@@ -172,7 +184,7 @@ export function UsersPanel() {
   const filterItems = useMemo(
     () => [
       { key: 'all' as const, label: `All · ${counts?.all ?? 0}` },
-      { key: 'pending' as const, label: `Pending · ${counts?.pending ?? 0}` },
+      { key: 'pending' as const, label: `Waiting · ${counts?.pending ?? 0}` },
       { key: 'approved' as const, label: `Approved · ${counts?.approved ?? 0}` },
       { key: 'rejected' as const, label: `Rejected · ${counts?.rejected ?? 0}` },
       { key: 'admins' as const, label: `Admins · ${counts?.admins ?? 0}` },
@@ -216,6 +228,7 @@ export function UsersPanel() {
           : 'Approvals and roles'
       }
       onRefresh={() => users.refetch()}
+      fill
     >
       {users.isPending ? (
         <ListSkeleton rows={6} />
@@ -223,7 +236,37 @@ export function UsersPanel() {
         <AdminQueryError what="users" error={users.error} onRetry={() => void users.refetch()} />
       ) : (
         <>
+          {counts ? (
+            <Grid columns={layout.compact ? 2 : 4} gap={12} className="mb-4">
+              <StatTile
+                label="Accounts"
+                value={String(counts.all)}
+                sub="Everyone"
+                onPress={() => setFilterAndReset('all')}
+              />
+              <StatTile
+                label="Waiting"
+                value={String(counts.pending)}
+                status={counts.pending > 0 ? 'warn' : 'ok'}
+                sub={counts.pending > 0 ? 'Can’t sign in yet' : 'Nobody waiting'}
+                onPress={() => setFilterAndReset('pending')}
+              />
+              <StatTile
+                label="Approved"
+                value={String(counts.approved)}
+                sub={`${counts.rejected} rejected`}
+                onPress={() => setFilterAndReset('approved')}
+              />
+              <StatTile
+                label="Admins"
+                value={String(counts.admins)}
+                sub="Can open this console"
+                onPress={() => setFilterAndReset('admins')}
+              />
+            </Grid>
+          ) : null}
           <Input
+            containerClassName={layout.compact ? undefined : 'max-w-[440px]'}
             placeholder="Search by email"
             value={query}
             onChangeText={(text) => {
@@ -274,24 +317,32 @@ export function UsersPanel() {
               />
             ) : (
               <>
-                <ListCard>
-                  {visible.slice(0, limit).map((user, index) => (
-                    <View key={user.id}>
-                      {index > 0 ? <RowDivider /> : null}
-                      <UserRow
-                        user={user}
-                        isSelf={user.id === selfId}
-                        expanded={expanded === user.id}
-                        busy={update.isPending && update.variables?.userId === user.id}
-                        onToggle={() => {
-                          animateNextLayout();
-                          setExpanded((current) => (current === user.id ? null : user.id));
-                        }}
-                        onChange={(next) => change(user, next)}
-                      />
-                    </View>
+                <Grid
+                  columns={layout.compact ? 1 : 2}
+                  gap={layout.compact ? 12 : 16}
+                  equalHeight={false}
+                >
+                  {columnsOf(visible.slice(0, limit), layout.compact ? 1 : 2).map((column, c) => (
+                    <ListCard key={c}>
+                      {column.map((user, index) => (
+                        <View key={user.id}>
+                          {index > 0 ? <RowDivider /> : null}
+                          <UserRow
+                            user={user}
+                            isSelf={user.id === selfId}
+                            expanded={expanded === user.id}
+                            busy={update.isPending && update.variables?.userId === user.id}
+                            onToggle={() => {
+                              animateNextLayout();
+                              setExpanded((current) => (current === user.id ? null : user.id));
+                            }}
+                            onChange={(next) => change(user, next)}
+                          />
+                        </View>
+                      ))}
+                    </ListCard>
                   ))}
-                </ListCard>
+                </Grid>
                 {visible.length > limit ? (
                   <Button
                     label={`Show ${Math.min(PAGE, visible.length - limit)} more`}
@@ -306,7 +357,7 @@ export function UsersPanel() {
           </View>
 
           <Text className="mt-4 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-            New accounts start as User and Pending, and can’t sign in until approved. Pending
+            New accounts start as User and Waiting, and can’t sign in until approved. Waiting
             accounts are listed first. Tap an account to change its access or role.
           </Text>
         </>

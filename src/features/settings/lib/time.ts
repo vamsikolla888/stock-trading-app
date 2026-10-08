@@ -101,9 +101,13 @@ export function durationBetween(
   if (start === null) return EMPTY;
   const end = endIso ? toTime(endIso) : (now ?? null);
   if (end === null) return EMPTY;
-  const ms = end - start;
+  return formatElapsed(end - start);
+}
+
+/** A span in milliseconds: "850ms", "4.2s", "3m 5s"; a dash when it isn't a real span. */
+export function formatElapsed(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return EMPTY;
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);

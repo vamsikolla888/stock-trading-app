@@ -1,17 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
 import { useAuthFlowStore } from '@/features/auth/authFlowStore';
 import { endSession, startSession } from '@/features/auth/bootstrapAuth';
 import { useAuthStore } from '@/store/authStore';
 
 import { accountApi } from './api';
-import type { AccountProfile, ProfileFields } from './types';
+import { isSafeModeRefusal } from './lib/account';
+import type { AccountProfile, ProfileFields, SafeModeState } from './types';
 
 /** Keyed by user, so a different account signing in on this device never sees a cached profile. */
 export const accountKeys = {
   all: ['account'] as const,
   profile: (userId: string | undefined) => ['account', 'profile', userId ?? ''] as const,
   security: (userId: string | undefined) => ['account', 'security', userId ?? ''] as const,
+  safeModeAll: ['account', 'safe-mode'] as const,
+  safeMode: (userId: string | undefined) => ['account', 'safe-mode', userId ?? ''] as const,
 };
 
 function useUserId() {
@@ -38,6 +42,61 @@ export function useAccountSecurity(enabled = true) {
     enabled: enabled && Boolean(userId),
     staleTime: 0,
   });
+}
+
+/**
+ * Safe Mode — the profile switch, the header pill and every live order ticket read this ONE
+ * query, so they can never disagree. The SERVER is the guard (it refuses each real placement and
+ * modify while it is on); this only says so before anyone presses a button.
+ *
+ * It belongs to the account, not the device: switched on from the web, it has to reach this phone
+ * without a restart — hence the 30 s poll (paused in the background) and the refetch on resume.
+ */
+export function useSafeMode() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: accountKeys.safeMode(userId),
+    queryFn: accountApi.safeMode,
+    enabled: Boolean(userId),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * True only when the server has said Safe Mode is ON. Unknown (loading, failed, a server that
+ * predates the switch) reads as false: the tickets then fall back to the server's own refusal.
+ */
+export function useSafeModeOn(): boolean {
+  return useSafeMode().data?.enabled === true;
+}
+
+/** Nothing optimistic on a safety control: the cache changes only when the server confirms. */
+export function useSetSafeMode() {
+  const queryClient = useQueryClient();
+  const userId = useUserId();
+  return useMutation({
+    mutationFn: (enabled: boolean) => accountApi.setSafeMode(enabled),
+    onSuccess: (state: SafeModeState) =>
+      queryClient.setQueryData(accountKeys.safeMode(userId), state),
+  });
+}
+
+/**
+ * An order refused with SAFE_MODE_ON means this device's copy is stale (switched on elsewhere) —
+ * re-read it so the switch, the pill and the tickets catch up. Pass to a mutation's onError.
+ */
+export function useSafeModeRefusalSync(): (error: unknown) => void {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (error: unknown) => {
+      if (isSafeModeRefusal(error)) {
+        void queryClient.invalidateQueries({ queryKey: accountKeys.safeModeAll });
+      }
+    },
+    [queryClient],
+  );
 }
 
 /** Every profile write answers with the new profile; it replaces the cache in place. */

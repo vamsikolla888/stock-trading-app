@@ -6,13 +6,35 @@ import type {
   EmailChangeResult,
   MfaSetup,
   ProfileFields,
+  SafeModeState,
 } from './types';
+
+function safeModeState(value: unknown): SafeModeState {
+  const raw = (value ?? {}) as Partial<SafeModeState>;
+  return {
+    enabled: raw.enabled === true,
+    changedAt: typeof raw.changedAt === 'string' ? raw.changedAt : null,
+  };
+}
 
 /** /api/v1/account — same paths and bodies as the web client's account.service.ts. */
 export const accountApi = {
   async profile(): Promise<AccountProfile> {
     const { data } = await apiClient.get<{ profile: AccountProfile }>('/account/profile');
     return data.profile;
+  },
+
+  async safeMode(): Promise<SafeModeState> {
+    const { data } = await apiClient.get<{ safeMode: SafeModeState }>('/account/safe-mode');
+    return safeModeState(data.safeMode);
+  },
+
+  /** Setting the value it already has changes nothing server-side (changedAt is kept). */
+  async setSafeMode(enabled: boolean): Promise<SafeModeState> {
+    const { data } = await apiClient.put<{ safeMode: SafeModeState }>('/account/safe-mode', {
+      enabled,
+    });
+    return safeModeState(data.safeMode);
   },
 
   async updateProfile(input: ProfileFields): Promise<AccountProfile> {

@@ -14,7 +14,8 @@ import {
   type SampleTone,
   type SortKey,
 } from '../lib/ranking';
-import type { StrategySummary } from '../types';
+import type { DeploymentModeTag, StrategySummary } from '../types';
+import { ModeChips } from './ModeChips';
 
 const SAMPLE_VARIANT: Record<SampleTone, 'neutral' | 'danger' | 'warning'> = {
   none: 'neutral',
@@ -30,8 +31,12 @@ interface StrategyCardProps {
   /** The auto-trade engine is pointed at this strategy. */
   deployed: boolean;
   engineOn: boolean;
+  /** Where it is deployed right now (paper wallet / live broker) — PAPER / LIVE chips. */
+  modes?: readonly DeploymentModeTag[];
   onPress: () => void;
 }
+
+const NO_MODES: readonly DeploymentModeTag[] = [];
 
 /** One strategy: rule phrase, equity sparkline, the sorted-on headline and the sample verdict. */
 export const StrategyCard = memo(function StrategyCard({
@@ -40,6 +45,7 @@ export const StrategyCard = memo(function StrategyCard({
   duplicated,
   deployed,
   engineOn,
+  modes = NO_MODES,
   onPress,
 }: StrategyCardProps) {
   const m = strategy.metrics;
@@ -83,7 +89,7 @@ export const StrategyCard = memo(function StrategyCard({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${strategy.name}${headline ? `, ${headline.label} ${headline.value}` : ', not backtested'}`}
+      accessibilityLabel={`${strategy.name}${modes.includes('live') ? ', deployed live' : modes.length ? ', deployed on paper' : ''}${headline ? `, ${headline.label} ${headline.value}` : ', not backtested'}`}
       onPress={onPress}
       className="rounded-card border border-line bg-surface p-4 active:bg-surface-sunk dark:border-line-dark dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
     >
@@ -92,6 +98,7 @@ export const StrategyCard = memo(function StrategyCard({
           <Text className="text-[15px] font-bold text-ink dark:text-ink-dark" numberOfLines={2}>
             {strategy.name}
           </Text>
+          <ModeChips chips={modes.map((mode) => ({ mode }))} className="mt-1.5" />
           <Text
             className="mt-0.5 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted"
             numberOfLines={2}

@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import ChartCandlestick from 'lucide-react-native/icons/chart-candlestick';
 import Link2 from 'lucide-react-native/icons/link-2';
 import Search from 'lucide-react-native/icons/search';
@@ -8,12 +8,12 @@ import { Pressable, Text, View } from 'react-native';
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ChangeText } from '@/components/market/ChangeText';
 import { LiveFlash } from '@/components/market/LiveFlash';
-import { StockLogo } from '@/components/market/StockLogo';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { Tabs } from '@/components/ui/Tabs';
 import { useLiveCandles } from '@/features/charts/useLiveCandles';
 import { FuturesList } from '@/features/fno/components/FuturesList';
+import { InstrumentMark } from '@/features/fno/components/Glyphs';
 import { OrderTicket, type TicketTarget } from '@/features/fno/components/OrderTicket';
 import { SearchSheet } from '@/features/fno/components/SearchSheet';
 import { UnderlyingChart, type ChartScrub } from '@/features/fno/components/UnderlyingChart';
@@ -26,14 +26,15 @@ import {
 import { barTimeLabel, chartAnchor } from '@/features/fno/lib/candles';
 import {
   chainHref,
+  commodityChainHref,
   fnoChartHref,
+  isCommodityExchange,
   parseChainParams,
   underlyingHref,
 } from '@/features/fno/lib/explore';
 import { DASH, dteLabel, expiryLabel, formatStrike, venueOf } from '@/features/fno/lib/format';
 import { lastSession, underlyingRange, type UnderlyingRange } from '@/features/fno/lib/underlying';
-import type { FnoContract, FnoSide } from '@/features/fno/types';
-import { stockLogoUrl } from '@/features/market/api';
+import type { EquityFnoExchange, FnoContract, FnoSide } from '@/features/fno/types';
 import { liveKey, overlayQuote } from '@/features/market/lib/liveQuote';
 import { useLiveQuote, useLiveQuotes } from '@/features/market/live';
 import { useNow } from '@/hooks/useNow';
@@ -65,14 +66,35 @@ const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? MINUS : ''}${formatNumber
  * session's last close in the intraday bars — the same baseline Groww uses — so it reads right
  * even where the spot feed carries no change of its own.
  */
-export default function UnderlyingScreen() {
-  const router = useRouter();
-  const { colors } = useTheme();
+export default function UnderlyingRoute() {
   const params = useLocalSearchParams<{
     exchange?: string | string[];
     underlying?: string | string[];
   }>();
   const { exchange, underlying } = parseChainParams(params);
+  // A commodity has no cash listing to give this screen its price: it lives on its chain /
+  // futures screen (read-only).
+  if (isCommodityExchange(exchange)) {
+    return <Redirect href={commodityChainHref(exchange, underlying, 'futures')} />;
+  }
+  return (
+    <UnderlyingScreen
+      key={`${exchange}:${underlying}`}
+      exchange={exchange}
+      underlying={underlying}
+    />
+  );
+}
+
+function UnderlyingScreen({
+  exchange,
+  underlying,
+}: {
+  exchange: EquityFnoExchange;
+  underlying: string;
+}) {
+  const router = useRouter();
+  const { colors } = useTheme();
 
   const [range, setRange] = useState<UnderlyingRange>('1D');
   const [chartType, setChartType] = useState<'candles' | 'line'>('candles');
@@ -242,10 +264,12 @@ export default function UnderlyingScreen() {
         </Pressable>
       }
     >
-      <StockLogo
-        symbol={meta?.logoSymbol ?? underlying}
-        uri={meta?.isIndex ? undefined : stockLogoUrl(meta?.logoSymbol ?? underlying)}
-        size="lg"
+      <InstrumentMark
+        kind={meta?.isIndex === false ? 'stock' : 'index'}
+        underlying={underlying}
+        logoSymbol={meta?.logoSymbol ?? meta?.spotSymbol}
+        exchange={exchange}
+        size={48}
       />
       <Text className="mt-3 text-[17px] text-ink dark:text-ink-dark" numberOfLines={1}>
         {meta?.name ?? underlying}

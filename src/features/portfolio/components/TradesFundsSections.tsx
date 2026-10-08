@@ -137,10 +137,7 @@ export function MstockFundsSection({ funds }: { funds: BrokerFunds | null | unde
           { label: 'Withdrawal requested', value: money(funds.payout), sub: 'payout pending' },
         ]}
       />
-      <Note>
-        Add or withdraw money in the mStock app — this app can read your funds but never moves
-        money.
-      </Note>
+      <Note>Read-only. Move money in the mStock app.</Note>
     </View>
   );
 }
@@ -189,10 +186,7 @@ export function LinkedFundsSection({ snapshot }: { snapshot: LinkedPortfolioSnap
           ))}
         </Card>
       ) : null}
-      <Note>
-        Add or withdraw money in the {snapshot.label} app — this app reads your funds but never
-        moves money.
-      </Note>
+      <Note>Read-only. Move money in the {snapshot.label} app.</Note>
     </View>
   );
 }

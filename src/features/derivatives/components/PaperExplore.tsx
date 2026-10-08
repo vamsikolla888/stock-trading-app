@@ -128,7 +128,7 @@ export function PaperExplore({ onOpenView }: { onOpenView: (view: PaperView) => 
 
       <Section title="Top traded" className="mt-6">
         <Text className="-mt-1.5 mb-3 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-          Indices you can option-trade here, then today’s most active F&amp;O stocks by volume.
+          Indices and most active F&amp;O stocks
         </Text>
         {traded.length === 0 && tradedLoading ? (
           <View className="gap-2.5">
@@ -147,10 +147,7 @@ export function PaperExplore({ onOpenView }: { onOpenView: (view: PaperView) => 
               onRetry={() => void topVolume.refetch()}
             />
           ) : (
-            <InlineEmpty
-              title="Nothing to show yet"
-              message="The price snapshot may still be warming up."
-            />
+            <InlineEmpty title="Nothing to show yet" />
           )
         ) : (
           <View className="gap-2.5">
@@ -170,7 +167,7 @@ export function PaperExplore({ onOpenView }: { onOpenView: (view: PaperView) => 
 
       <Section title="F&O stocks">
         <Text className="-mt-1.5 mb-3 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-          NSE names with listed derivatives, by today’s change.
+          By today’s change
         </Text>
         <SegmentedControl items={MOVE_TABS} value={kind} onChange={setKind} className="mb-3" />
         <MoversList
@@ -186,12 +183,6 @@ export function PaperExplore({ onOpenView }: { onOpenView: (view: PaperView) => 
         onBuilder={() => router.push(paperChainHref({ builder: true }))}
         onOpenView={onOpenView}
       />
-
-      <Text className="mt-6 text-center text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        Simulated futures and options, priced with a Black-Scholes model over the broker’s quotes —
-        greeks and implied volatility are modelled, not exchange data. Orders spend the paper
-        F&amp;O pool, which is separate from delivery and intraday.
-      </Text>
 
       <UnderlyingPickerSheet
         visible={picking}
@@ -395,7 +386,7 @@ function BookCard({ book, onOpen }: { book: ReturnType<typeof usePaperBook>; onO
         </View>
       )}
       <Text className="mt-3 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-        Simulated — paper capital only, in its own F&amp;O pool.
+        Simulated — paper capital only.
       </Text>
     </Pressable>
   );

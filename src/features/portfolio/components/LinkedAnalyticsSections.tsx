@@ -99,10 +99,7 @@ export function PnlStatementSection({ broker, label }: { broker: string; label: 
             trend={data.unrealisedNow}
           />
           {data.days.length === 0 ? (
-            <InlineEmpty
-              title="No days captured yet"
-              message="The first day appears after today's capture."
-            />
+            <InlineEmpty title="No days captured yet" />
           ) : (
             <>
               <Card className="mt-2">
@@ -158,8 +155,8 @@ export function PnlStatementSection({ broker, label }: { broker: string; label: 
             </>
           )}
           <Note>
-            Realised P&L is {label}'s own figure for each day's positions; charges are {label}'s
-            reported figure where available, otherwise estimated per executed order.
+            Recorded each day since this account was connected. Charges are {label}'s where
+            reported, otherwise estimated.
           </Note>
         </View>
       ) : null}
@@ -270,7 +267,7 @@ export function LinkedOverviewSection({
                   totals.chargesTodaySource === 'broker'
                     ? `reported by ${snapshot.label}`
                     : totals.chargesTodaySource === 'estimated'
-                      ? 'estimated per order'
+                      ? 'estimated'
                       : 'unavailable',
               },
             ]}

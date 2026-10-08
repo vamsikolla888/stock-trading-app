@@ -140,10 +140,9 @@ export function FundamentalsSection({
         <Banner
           tone="warning"
           className="mb-3"
-          message={
-            analysis?.message ??
-            'Some of the data was missing, so parts of this analysis are left unscored.'
-          }
+          message={`${
+            analysis?.message ?? 'The qualitative review is not available yet.'
+          } Those rows are left out of the rating until then.`}
         />
       ) : null}
       {analysis?.isStale ? (
@@ -213,9 +212,7 @@ function JobProgress({ job, takingLong }: { job: JobView; takingLong: boolean })
         ) : null}
       </View>
       <Text className="mt-1.5 text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-        {takingLong
-          ? 'This is taking longer than usual. It keeps running — come back to this stock in a little while.'
-          : jobProgressText(job)}
+        {takingLong ? 'Taking longer than usual — it keeps running.' : jobProgressText(job)}
       </Text>
       <View className="mt-3 gap-1.5">
         {STAGES.map((stage, index) => {
@@ -262,8 +259,8 @@ function NoAnalysis({
 }) {
   const copy: Record<string, { title: string; body: string }> = {
     insufficient_data: {
-      title: 'Not enough data to rate',
-      body: 'The company’s published financials don’t cover enough of the framework to score it honestly.',
+      title: 'Financials not yet available',
+      body: 'Re-checked daily.',
     },
     not_applicable: {
       title: 'Not rated by this framework',
@@ -274,8 +271,8 @@ function NoAnalysis({
       body: 'This listing is no longer traded, so it isn’t analysed.',
     },
     rate_limited: {
-      title: 'Try again a little later',
-      body: 'You’ve asked for several analyses in a short time. This one will be available shortly.',
+      title: 'Analysis limit reached',
+      body: 'Too many new analyses this hour — try again later.',
     },
     failed: { title: 'The analysis didn’t finish', body: 'Something went wrong producing it.' },
   };
@@ -289,7 +286,10 @@ function NoAnalysis({
         {entry.title}
       </Text>
       <Text className="text-center text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-        {message ?? entry.body}
+        {/* The server's own reason, and — for missing financials — when it is looked at again. */}
+        {message
+          ? `${message}${state === 'insufficient_data' ? ` ${entry.body}` : ''}`
+          : entry.body}
       </Text>
       {state === 'failed' || state === 'rate_limited' ? (
         <Pressable

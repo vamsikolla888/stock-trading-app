@@ -1,15 +1,17 @@
-import React, { memo } from 'react';
-import { Text, View } from 'react-native';
+import React, { memo, useState } from 'react';
+import { Image, Text, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 
 import { StockLogo } from '@/components/market/StockLogo';
 import { stockLogoUrl } from '@/features/market/api';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { indexLogo, indexLogoKey } from '../lib/indexLogo';
+
 /**
- * Instrument marks for F&O rows and cards: a monogram for an index (indices have no logo
- * file), a small drawn icon per commodity family, and the company logo for a stock.
- * Decorative — the name printed beside each is the accessible label.
+ * Instrument marks for F&O rows and cards: an index's logo (Groww's own icon, or its
+ * exchange's mark — lib/indexLogo.ts), a small drawn icon per commodity family, and the company
+ * logo for a stock. Decorative — the name printed beside each is the accessible label.
  */
 
 const INDEX_CODES: Record<string, string> = {
@@ -22,25 +24,54 @@ const INDEX_CODES: Record<string, string> = {
   BANKEX: 'BKX',
 };
 
+/**
+ * An index's logo on its white tile, clipped to the app's rounded square with a hairline so
+ * the tile edge reads on a white card and in dark mode alike. A bitmap that fails to decode
+ * (never expected — it ships in the bundle) falls back to the old monogram.
+ */
 export const IndexGlyph = memo(function IndexGlyph({
   underlying,
+  exchange,
   size = 36,
 }: {
   underlying: string;
+  /** The book or venue (NFO/BFO, NSE/BSE): picks the exchange mark for an index with no icon. */
+  exchange?: string | null;
   size?: number;
 }) {
+  const key = indexLogoKey(underlying, exchange);
+  const [failedKey, setFailedKey] = useState<string | null>(null);
+  const radius = Math.round(size * 0.3);
+  if (failedKey === key) {
+    return (
+      <View
+        accessible={false}
+        className="items-center justify-center bg-info-wash dark:bg-info-wash-dark"
+        style={{ width: size, height: size, borderRadius: radius }}
+      >
+        <Text
+          className="font-extrabold text-info dark:text-info-dark"
+          style={{ fontSize: Math.round(size * 0.3) }}
+        >
+          {INDEX_CODES[underlying] ?? underlying.slice(0, 3)}
+        </Text>
+      </View>
+    );
+  }
   return (
     <View
       accessible={false}
-      className="items-center justify-center bg-info-wash dark:bg-info-wash-dark"
-      style={{ width: size, height: size, borderRadius: Math.round(size * 0.3) }}
+      importantForAccessibility="no-hide-descendants"
+      className="overflow-hidden border border-line bg-white dark:border-line-dark"
+      style={{ width: size, height: size, borderRadius: radius }}
     >
-      <Text
-        className="font-extrabold text-info dark:text-info-dark"
-        style={{ fontSize: Math.round(size * 0.3) }}
-      >
-        {INDEX_CODES[underlying] ?? underlying.slice(0, 3)}
-      </Text>
+      <Image
+        source={indexLogo(underlying, exchange)}
+        style={{ width: '100%', height: '100%' }}
+        resizeMode="contain"
+        fadeDuration={0}
+        onError={() => setFailedKey(key)}
+      />
     </View>
   );
 });
@@ -136,19 +167,23 @@ export const CommodityGlyph = memo(function CommodityGlyph({
   );
 });
 
-/** The right mark for any F&O instrument: index monogram, commodity icon or company logo. */
+/** The right mark for any F&O instrument: index logo, commodity icon or company logo. */
 export function InstrumentMark({
   kind,
   underlying,
   logoSymbol,
+  exchange,
   size = 36,
 }: {
   kind: 'index' | 'stock' | 'commodity';
   underlying: string;
   logoSymbol?: string | null;
+  /** For an index: which exchange's mark it wears when it has no icon of its own. */
+  exchange?: string | null;
   size?: number;
 }) {
-  if (kind === 'index') return <IndexGlyph underlying={underlying} size={size} />;
+  if (kind === 'index')
+    return <IndexGlyph underlying={underlying} exchange={exchange} size={size} />;
   if (kind === 'commodity') return <CommodityGlyph underlying={underlying} size={size} />;
   const symbol = logoSymbol ?? underlying;
   return <StockLogo symbol={symbol} uri={stockLogoUrl(symbol)} size={size >= 40 ? 'lg' : 'md'} />;

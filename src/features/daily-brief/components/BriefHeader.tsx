@@ -73,11 +73,7 @@ export function BriefHeader({
             ) : null}
           </View>
           <Text className="mt-1 text-[13px] text-ink-muted dark:text-ink-dark-muted">
-            {[
-              'Your AI-powered market briefing',
-              updated ? `updated ${updated} IST` : null,
-              brief?.stale ? 'some data delayed' : null,
-            ]
+            {[updated ? `Updated ${updated} IST` : null, brief?.stale ? 'some data delayed' : null]
               .filter(Boolean)
               .join(' · ')}
           </Text>

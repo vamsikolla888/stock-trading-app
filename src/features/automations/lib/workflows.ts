@@ -1,4 +1,5 @@
 import type { StatusTone } from '@/features/settings/lib/status';
+import { formatDateTime, relativeTime } from '@/features/settings/lib/time';
 
 import type {
   ExecutionStatus,
@@ -6,6 +7,7 @@ import type {
   TriggeredBy,
   UpdateWorkflowConfigInput,
   WorkflowEnvVar,
+  WorkflowsSummary,
   WorkflowSummary,
   WorkflowTriggerType,
 } from '../types';
@@ -242,4 +244,114 @@ export function duplicateEnvKeys(drafts: readonly EnvVarDraft[]): string[] {
     seen.add(key);
   }
   return [...duplicates];
+}
+
+/** How many workflows last ran to each outcome — the status bar above the list. */
+export function runStatusCounts(
+  workflows: readonly WorkflowSummary[],
+): Record<RunStatusKey, number> {
+  const counts: Record<RunStatusKey, number> = { success: 0, error: 0, running: 0, idle: 0 };
+  for (const workflow of workflows) {
+    const key: RunStatusKey =
+      workflow.lastRunStatus && workflow.lastRunStatus in RUN_STATUS
+        ? workflow.lastRunStatus
+        : 'idle';
+    counts[key] += 1;
+  }
+  return counts;
+}
+
+export interface RunStats {
+  /** Runs that reached an outcome (running ones are left out). */
+  finished: number;
+  succeeded: number;
+  /** 0–100, or null before anything finished. */
+  successRate: number | null;
+  avgDurationMs: number | null;
+  /** When the latest successful run ended (or started, if n8n gave no end). */
+  lastSuccessAt: string | null;
+}
+
+/** How the loaded runs went — the at-a-glance line above a workflow's run history. */
+export function runStats(executions: readonly ExecutionSummary[]): RunStats {
+  const finished = executions.filter((execution) => execution.status !== 'running');
+  const succeeded = finished.filter((execution) => execution.status === 'success');
+  const durations = finished
+    .map((execution) =>
+      execution.finishedAt
+        ? Date.parse(execution.finishedAt) - Date.parse(execution.startedAt)
+        : NaN,
+    )
+    .filter((ms) => Number.isFinite(ms) && ms >= 0);
+  let lastSuccessAt: string | null = null;
+  for (const execution of succeeded) {
+    const at = execution.finishedAt ?? execution.startedAt;
+    if (!lastSuccessAt || Date.parse(at) > Date.parse(lastSuccessAt)) lastSuccessAt = at;
+  }
+  return {
+    finished: finished.length,
+    succeeded: succeeded.length,
+    successRate: finished.length > 0 ? (succeeded.length / finished.length) * 100 : null,
+    avgDurationMs:
+      durations.length > 0 ? durations.reduce((sum, ms) => sum + ms, 0) / durations.length : null,
+    lastSuccessAt,
+  };
+}
+
+export interface WorkflowKpi {
+  key: 'total' | 'active' | 'failed' | 'lastSuccess';
+  label: string;
+  value: string;
+  sub: string;
+  status?: StatusTone;
+  /** The list filter a tap on the tile applies; none for "Last success". */
+  filter?: WorkflowFilter;
+}
+
+/**
+ * The headline tiles above the workflow list (web: N8nWorkflows' Kpis strip). Each count is a
+ * tap away from the workflows it counts. Figures a newer or older server leaves out read as a
+ * dash, never zero.
+ */
+export function workflowKpis(summary: WorkflowsSummary, now: number): WorkflowKpi[] {
+  const count = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? n : null);
+  const total = count(summary.total);
+  const active = count(summary.active);
+  const failed = count(summary.failedLast24h);
+  const inactive = total != null && active != null ? Math.max(0, total - active) : null;
+  return [
+    {
+      key: 'total',
+      label: 'Workflows',
+      value: total != null ? String(total) : '—',
+      sub: 'On the shared n8n instance',
+      filter: 'all',
+    },
+    {
+      key: 'active',
+      label: 'Active',
+      value: active != null ? String(active) : '—',
+      sub: inactive != null ? `${inactive} inactive` : 'Listening for a trigger',
+      filter: 'active',
+    },
+    {
+      key: 'failed',
+      label: 'Failed · 24h',
+      value: failed != null ? String(failed) : '—',
+      status: failed == null ? undefined : failed > 0 ? 'bad' : 'ok',
+      sub:
+        failed == null
+          ? 'Not reported'
+          : failed > 0
+            ? 'Show the failing ones'
+            : 'Every run succeeded',
+      filter: failed != null && failed > 0 ? 'failed' : undefined,
+    },
+    {
+      key: 'lastSuccess',
+      label: 'Last success',
+      value: summary.lastSuccessAt ? relativeTime(summary.lastSuccessAt, now) : 'None yet',
+      sub: summary.lastSuccessAt ? `${formatDateTime(summary.lastSuccessAt)} IST` : 'Any workflow',
+    },
+  ];
 }

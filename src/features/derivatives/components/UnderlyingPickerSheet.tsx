@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
+import { InstrumentMark } from '@/features/fno/components/Glyphs';
 import { Tag } from '@/features/fno/components/primitives';
 import { Sheet } from '@/features/fno/components/Sheet';
 import { cn } from '@/lib/utils/cn';
@@ -144,6 +145,11 @@ export function UnderlyingPickerSheet({
             onPress={() => choose(u.underlying)}
             className="min-h-[52px] flex-row items-center gap-3 border-b border-line py-2.5 active:opacity-70 dark:border-line-dark"
           >
+            <InstrumentMark
+              kind={u.isIndex ? 'index' : 'stock'}
+              underlying={u.underlying}
+              size={32}
+            />
             <View className="min-w-0 flex-1">
               <Text
                 className={cn(

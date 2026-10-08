@@ -1,5 +1,6 @@
 import { apiClient } from '@/services/api/client';
 
+import { normalizeBook, normalizeOrder, normalizeOrders, normalizePreview } from './lib/normalize';
 import { paperOrderBody } from './lib/orderBody';
 import type {
   BasketPayoff,
@@ -9,6 +10,7 @@ import type {
   FnoAnalytics,
   FnoBook,
   FnoMover,
+  FnoOrderPreview,
   FnoOrderView,
   FnoWallet,
   OptionChain,
@@ -26,6 +28,13 @@ import type {
  */
 
 const enc = encodeURIComponent;
+
+/** An order the server returned; one it did not shape as an order is refused, not guessed at. */
+function order(raw: unknown): FnoOrderView {
+  const parsed = normalizeOrder(raw);
+  if (!parsed) throw new Error('The server answered with something that is not an order.');
+  return parsed;
+}
 
 export const derivativesApi = {
   async underlyings(signal?: AbortSignal): Promise<UnderlyingSummary[]> {
@@ -62,40 +71,55 @@ export const derivativesApi = {
   },
 
   async book(signal?: AbortSignal): Promise<FnoBook> {
-    const { data } = await apiClient.get<FnoBook>('/derivatives/book', { signal });
-    return data;
+    const { data } = await apiClient.get<unknown>('/derivatives/book', { signal });
+    return normalizeBook(data);
   },
 
   async orders(limit = 100, signal?: AbortSignal): Promise<FnoOrderView[]> {
-    const { data } = await apiClient.get<{ orders: FnoOrderView[] }>('/derivatives/orders', {
+    const { data } = await apiClient.get<{ orders?: unknown }>('/derivatives/orders', {
       params: { limit },
       signal,
     });
-    return data.orders;
+    return normalizeOrders(data?.orders);
   },
 
-  /** Returns the ORDER even when rejected — status REJECTED plus a `note` saying why. */
+  /**
+   * Returns the ORDER even when rejected — status REJECTED plus a `note` saying why — and a
+   * resting one (a LIMIT, or an after-market order placed outside the session) as PENDING.
+   */
   async placeOrder(body: PlacePaperFnoOrderInput): Promise<FnoOrderView> {
-    const { data } = await apiClient.post<FnoOrderView>(
-      '/derivatives/orders',
+    const { data } = await apiClient.post<unknown>('/derivatives/orders', paperOrderBody(body));
+    return order(data);
+  },
+
+  /**
+   * What an order would do, without placing it — computed by placement's own code. A refusal is
+   * a normal answer (`blockedReason`). Writes nothing; 240/min per user, so callers debounce.
+   * Null when the answer is not a preview this app can read.
+   */
+  async previewOrder(
+    body: PlacePaperFnoOrderInput,
+    signal?: AbortSignal,
+  ): Promise<FnoOrderPreview | null> {
+    const { data } = await apiClient.post<unknown>(
+      '/derivatives/orders/preview',
       paperOrderBody(body),
+      { signal },
     );
-    return data;
+    return normalizePreview(data);
   },
 
   async squareOff(exchange: string, tradingsymbol: string): Promise<FnoOrderView> {
-    const { data } = await apiClient.post<FnoOrderView>(
+    const { data } = await apiClient.post<unknown>(
       `/derivatives/positions/${enc(exchange)}/${enc(tradingsymbol)}/square-off`,
     );
-    return data;
+    return order(data);
   },
 
-  /** Withdraws a resting LIMIT order. Only a PENDING order can be cancelled (else 422). */
+  /** Withdraws a resting order. Only a PENDING order can be cancelled (else 422). */
   async cancelOrder(orderId: string): Promise<FnoOrderView> {
-    const { data } = await apiClient.post<FnoOrderView>(
-      `/derivatives/orders/${enc(orderId)}/cancel`,
-    );
-    return data;
+    const { data } = await apiClient.post<unknown>(`/derivatives/orders/${enc(orderId)}/cancel`);
+    return order(data);
   },
 
   /** The F&O sandbox's OWN wallet — separate from the cash paper wallet, not profile-scoped. */
@@ -160,11 +184,14 @@ export const derivativesApi = {
     basketName: string,
     legs: PlacePaperFnoOrderInput[],
   ): Promise<PlaceBasketResult> {
-    const { data } = await apiClient.post<PlaceBasketResult>('/derivatives/basket', {
-      basketName,
-      legs,
-    });
-    return data;
+    const { data } = await apiClient.post<{ basketId?: unknown; orders?: unknown }>(
+      '/derivatives/basket',
+      { basketName, legs },
+    );
+    return {
+      basketId: typeof data?.basketId === 'string' ? data.basketId : '',
+      orders: normalizeOrders(data?.orders),
+    };
   },
 
   /** F&O-eligible NSE movers (the web paper Explore's "F&O Stocks" and "Top traded" shelves). */

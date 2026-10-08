@@ -166,10 +166,11 @@ export function futureTitle(label: string, expiry: string): string {
   return `${label} ${expiryLabel(expiry)} Fut`;
 }
 
-/** "NSE" / "BSE" / "MCX" for an F&O exchange code. */
+/** "NSE" / "BSE" / "MCX" / "NSE commodity" for an F&O exchange code. */
 export function venueOf(exchange: string): string {
   if (exchange === 'BFO') return 'BSE';
   if (exchange === 'MCX') return 'MCX';
+  if (exchange === 'NCO') return 'NSE commodity';
   return 'NSE';
 }
 

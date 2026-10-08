@@ -7,6 +7,8 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
+import { SplitColumns } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
@@ -131,10 +133,6 @@ function RunCard() {
 
   return (
     <Card className="gap-3">
-      <Text className="text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-        Queues a run on the worker and returns as soon as it’s accepted — picks appear once the
-        worker finishes, not when the button returns.
-      </Text>
       <Button
         label="Generate today’s picks"
         fullWidth
@@ -163,7 +161,7 @@ function RunCard() {
         }
       />
       <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">
-        The pre-market picker also runs itself on weekdays at 08:15 IST.
+        Pre-market picker runs weekdays at 08:15 IST.
       </Text>
       {last ? (
         <Banner
@@ -303,14 +301,12 @@ function BorrowSessionCard() {
 
       {warning === 'not-connected' ? (
         <NoticeCard tone="info" title="Not connected to mStock">
-          This user hasn’t connected mStock yet. They need to connect it under Broker connections
-          before the engine can use their session.
+          mStock not connected for this user — connect it under Broker connections first.
         </NoticeCard>
       ) : warning === 'will-go-stale' ? (
         <NoticeCard tone="warn" title="Will go stale">
-          This user connected with an SMS code, not an authenticator app. The daily refresh job can
-          only renew a TOTP connection, so this session stops working at the next mStock expiry
-          unless they reconnect with an authenticator.
+          Connected with SMS OTP — auto-refresh needs TOTP. Reconnect with TOTP before the next
+          mStock expiry.
         </NoticeCard>
       ) : null}
 
@@ -363,14 +359,14 @@ function DedicatedAccountCard() {
     confirmAction({
       title: 'Create the service account?',
       message:
-        'Creates (or finds) a dedicated account nobody signs into. Pick it under “Borrow a user’s session” to make it the engine’s account, then connect mStock to it here.',
+        'Creates (or finds) a dedicated account. Pick it above, save, then connect mStock here.',
       confirmLabel: 'Create',
       onConfirm: () =>
         createAccount.mutate(undefined, {
           onSuccess: (result) =>
             toast.success(
               result.created ? 'Service account created' : 'Service account already exists',
-              'Select it above and save to use it.',
+              'Select it above, save, then connect mStock below.',
             ),
           onError: (err) => toast.error('Couldn’t create it', getErrorMessage(err)),
         }),
@@ -415,8 +411,7 @@ function DedicatedAccountCard() {
         <Text className="text-[13px] text-ink-muted dark:text-ink-dark-muted">Checking…</Text>
       ) : noServiceUser ? (
         <Text className="text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-          No engine account is set yet, so there’s nothing to connect a broker to. Create the
-          dedicated account, pick it above and save — then connect mStock here.
+          No service user yet — create or pick one above, then connect mStock here.
         </Text>
       ) : serviceBroker.error ? (
         <Text className="text-[13px] text-danger-600 dark:text-danger-dark">
@@ -508,7 +503,7 @@ function DedicatedAccountCard() {
                 <SegmentedControl items={MFA_OPTIONS} value={mfaMethod} onChange={setMfaMethod} />
                 <Text className="text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
                   {mfaMethod === 'totp'
-                    ? 'Recommended — only an authenticator connection is renewed by the daily refresh job.'
+                    ? 'Recommended — only TOTP auto-refreshes.'
                     : 'An SMS connection needs someone to retype a code every time mStock expires the session.'}
                 </Text>
               </View>
@@ -547,6 +542,7 @@ function DedicatedAccountCard() {
 
 /** Where the recommendation engine reads market data from, and manual runs (web: Recommendations admin). */
 export function RecommendationsEnginePanel() {
+  const layout = useScreenLayout();
   const now = useNow();
   const options = useServiceUserOptions();
   const status = useRecServiceStatus();
@@ -568,30 +564,29 @@ export function RecommendationsEnginePanel() {
       title="Recommendations engine"
       subtitle="Market-data session and manual runs"
       onRefresh={onRefresh}
+      fill
     >
       <EngineStatusCard now={now} />
 
-      <Section title="Run the engine">
-        <RunCard />
-      </Section>
+      <SplitColumns
+        split={!layout.compact}
+        left={
+          <Section title="Run the engine">
+            <RunCard />
+          </Section>
+        }
+        right={
+          <>
+            <Section title="Borrow a user’s session" note="Simplest">
+              <BorrowSessionCard />
+            </Section>
 
-      <Section title="Borrow a user’s session" note="Simplest">
-        <BorrowSessionCard />
-      </Section>
-
-      <Section title="Dedicated service account" note="No personal session">
-        <DedicatedAccountCard />
-      </Section>
-
-      <Section title="Which option?">
-        <Card>
-          <Text className="text-[13px] leading-5 text-ink-muted dark:text-ink-dark-muted">
-            Borrowing a session is fine while one person uses the app. Once their connection
-            expiring means nobody gets recommendations, the dedicated account is worth the extra
-            setup.
-          </Text>
-        </Card>
-      </Section>
+            <Section title="Dedicated service account" note="Independent of any user">
+              <DedicatedAccountCard />
+            </Section>
+          </>
+        }
+      />
     </StackScreen>
   );
 }

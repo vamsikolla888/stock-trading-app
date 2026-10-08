@@ -6,6 +6,7 @@ import LogOut from 'lucide-react-native/icons/log-out';
 import Mail from 'lucide-react-native/icons/mail';
 import MonitorSmartphone from 'lucide-react-native/icons/monitor-smartphone';
 import Settings2 from 'lucide-react-native/icons/settings-2';
+import ShieldBan from 'lucide-react-native/icons/shield-ban';
 import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import UserRound from 'lucide-react-native/icons/user-round';
 import React, { useEffect, useRef, useState } from 'react';
@@ -24,13 +25,18 @@ import {
   useAccountSecurity,
   useConfirmEmailChange,
   useRemoveAvatar,
+  useSafeMode,
+  useSetSafeMode,
   useUploadAvatar,
 } from '@/features/account/hooks';
-import { memberSince, profileName } from '@/features/account/lib/account';
+import { memberSince, profileName, safeModeCaption } from '@/features/account/lib/account';
 import { pickAvatarImage } from '@/features/account/lib/pickAvatar';
 import { useLogout } from '@/features/auth/hooks/useAuth';
+import { formatIstDateTime } from '@/features/home/lib/istTime';
+import { SwitchRow } from '@/features/settings/components/SwitchRow';
 import { confirmAction } from '@/features/settings/lib/confirm';
 import { toast } from '@/lib/utils/toast';
+import { isServerOutdated } from '@/services/api/contract';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
@@ -41,6 +47,73 @@ interface Notice {
   tone: BannerTone;
   title?: string;
   message: string;
+}
+
+/**
+ * Safe Mode (web: the profile menu's switch). Turning it ON is one tap — it can only make things
+ * safer. Turning it OFF re-arms real orders on every broker, so it asks first. The switch moves
+ * only when the server confirms; nothing optimistic on a safety control. Hidden on a server that
+ * predates it, where there is nothing to switch.
+ */
+function SafeModeSection() {
+  const safeMode = useSafeMode();
+  const setSafeMode = useSetSafeMode();
+  const state = safeMode.data;
+  if (!state && isServerOutdated(safeMode.error)) return null;
+
+  const enabled = state?.enabled === true;
+  const save = (next: boolean) =>
+    setSafeMode.mutate(next, {
+      onSuccess: (saved) =>
+        toast.success(
+          saved.enabled ? 'Safe Mode on' : 'Safe Mode off',
+          saved.enabled
+            ? 'Real orders are blocked on every broker.'
+            : 'Real orders can be placed again.',
+        ),
+      onError: (error) => toast.error('Couldn’t change Safe Mode', getErrorMessage(error)),
+    });
+  const toggle = (next: boolean) => {
+    if (!state || setSafeMode.isPending) return;
+    if (next) {
+      save(true);
+      return;
+    }
+    confirmAction({
+      title: 'Turn Safe Mode off?',
+      message: 'Real orders will be sent to your connected brokers again.',
+      confirmLabel: 'Turn off',
+      cancelLabel: 'Keep on',
+      destructive: true,
+      onConfirm: () => save(false),
+    });
+  };
+
+  return (
+    <Section title="Trading safety">
+      <ListCard>
+        <SwitchRow
+          Icon={ShieldBan}
+          iconTone="amber"
+          title="Safe Mode"
+          subtitle={safeModeCaption({
+            known: Boolean(state),
+            failed: safeMode.isError,
+            saving: setSafeMode.isPending,
+            enabled,
+          })}
+          value={enabled}
+          disabled={!state || setSafeMode.isPending}
+          onValueChange={toggle}
+        />
+      </ListCard>
+      <Text className="mt-2 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
+        Blocks all your real orders, on every broker and device. Cancels and paper trading still
+        work.
+        {state?.changedAt ? ` Last changed ${formatIstDateTime(state.changedAt)} IST.` : ''}
+      </Text>
+    </Section>
+  );
 }
 
 /**
@@ -235,6 +308,8 @@ export default function ProfileScreen() {
           onRetry={() => void profile.refetch()}
         />
       ) : null}
+
+      <SafeModeSection />
 
       {/* ── Account ── */}
       <Section title="Account">

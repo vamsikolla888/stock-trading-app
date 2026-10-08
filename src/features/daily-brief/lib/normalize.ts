@@ -1,5 +1,8 @@
+import { reportSummary } from '@/features/ipo/lib/normalize';
+
 import type {
   AttentionItem,
+  BriefIpoListing,
   BriefIndex,
   BriefMover,
   BriefSector,
@@ -29,6 +32,7 @@ export const DAILY_BRIEF_SECTIONS: readonly DailyBriefSection[] = [
   'summary',
   'outlook',
   'indices',
+  'ipo',
   'breadth',
   'sectors',
   'movers',
@@ -311,6 +315,10 @@ export function normalizeBrief(payload: unknown): DailyBrief {
         analysisAvailable: item.analysisAvailable === true,
       }))
       .filter((item) => item.title !== ''),
+    ipoListings: {
+      available: obj(raw.ipoListings).available === true,
+      items: list(obj(raw.ipoListings).items).map(ipoListing).filter(notNull),
+    },
     ai: ai
       ? {
           marketBias: text(ai.marketBias, 'NEUTRAL'),
@@ -335,6 +343,25 @@ export function normalizeBrief(payload: unknown): DailyBrief {
   };
 }
 
+function ipoListing(value: unknown): BriefIpoListing | null {
+  const raw = obj(value);
+  const id = textOrNull(raw.id);
+  const companyName = textOrNull(raw.companyName);
+  if (!id || !companyName) return null;
+  return {
+    id,
+    companyName,
+    issueType: raw.issueType === 'sme' ? 'sme' : 'mainboard',
+    exchange: textOrNull(raw.exchange),
+    issuePrice: num(raw.issuePrice),
+    gmpPercent: num(raw.gmpPercent),
+    estimatedListingPrice: num(raw.estimatedListingPrice),
+    totalSubscription: num(raw.totalSubscription),
+    preListing: reportSummary(raw.preListing),
+    postListing: reportSummary(raw.postListing),
+  };
+}
+
 function sections(value: unknown): DailyBriefSection[] {
   const seen = new Set<DailyBriefSection>();
   for (const item of strings(value)) {
@@ -355,18 +382,23 @@ export const DEFAULT_PREFERENCES: DailyBriefPreferences = {
   preferredSectors: [],
 };
 
+/**
+ * The server lists every section it knows in `sectionOrder` (getDailyBriefPreferences fills a
+ * stored order up), so that list is also exactly what it will accept back. It is kept as sent: an
+ * older server has no IPO section, and a saved order naming one would be refused. Only an empty or
+ * garbled answer falls back to the app's own list.
+ */
 export function normalizePreferences(payload: unknown): DailyBriefPreferences {
   const raw = obj(payload);
-  const order = sections(raw.sectionOrder);
-  // Any section a stored order predates goes at the end, as the server does.
-  for (const section of DAILY_BRIEF_SECTIONS) if (!order.includes(section)) order.push(section);
-  const visible = Array.isArray(raw.visibleSections)
-    ? sections(raw.visibleSections)
-    : [...DAILY_BRIEF_SECTIONS];
+  const stored = sections(raw.sectionOrder);
+  const order = stored.length > 0 ? stored : [...DAILY_BRIEF_SECTIONS];
+  const visible = (
+    Array.isArray(raw.visibleSections) ? sections(raw.visibleSections) : [...order]
+  ).filter((section) => order.includes(section));
   return {
     riskProfile: oneOf(raw.riskProfile, RISK_PROFILES, 'moderate'),
     audioEnabled: raw.audioEnabled !== false,
-    visibleSections: visible.length > 0 ? visible : [...DAILY_BRIEF_SECTIONS],
+    visibleSections: visible.length > 0 ? visible : [...order],
     sectionOrder: order,
     preferredIndices: strings(raw.preferredIndices),
     preferredSectors: strings(raw.preferredSectors),

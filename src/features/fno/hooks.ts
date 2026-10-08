@@ -10,9 +10,12 @@ import { isApiError } from '@/types/api';
 import { fnoApi } from './api';
 import { candleWindow } from './lib/candles';
 import { orderDetailSettled } from './lib/chain';
+import { commodityPollInterval, isCommodityExchange } from './lib/explore';
 import { candleWindows, toCandles, underlyingRange, type UnderlyingRange } from './lib/underlying';
 import type {
   ChartTarget,
+  CommodityContractSearchResult,
+  CommodityUnderlying,
   ExitPositionInput,
   ExploreSection,
   FnoCandleInterval,
@@ -44,7 +47,8 @@ export const fnoKeys = {
   all: ['fno'] as const,
   explore: () => [...fnoKeys.all, 'explore'] as const,
   exploreSection: (section: ExploreSection) => [...fnoKeys.all, 'explore', section] as const,
-  expiryCalendar: () => [...fnoKeys.all, 'expiry-calendar'] as const,
+  /** v2: one calendar month (server 2026-10-07); the old key held the 45-day window. */
+  expiryCalendar: (month: string) => [...fnoKeys.all, 'expiry-calendar', 'v2', month] as const,
   underlyings: () => [...fnoKeys.all, 'underlyings'] as const,
   search: (q: string) => [...fnoKeys.all, 'search', q] as const,
   status: () => [...fnoKeys.all, 'status'] as const,
@@ -145,12 +149,52 @@ export function useExploreSection(section: ExploreSection | null) {
   });
 }
 
-export function useExpiryCalendar() {
+/**
+ * One month of the expiry calendar. Listed once a day and cached an hour server-side, so it is
+ * never polled. The previous month stays on screen (dimmed) while the next one loads.
+ */
+export function useExpiryCalendar(month: string) {
   return useQuery({
-    queryKey: fnoKeys.expiryCalendar(),
-    queryFn: ({ signal }) => fnoApi.expiryCalendar(signal),
+    queryKey: fnoKeys.expiryCalendar(month),
+    queryFn: ({ signal }) => fnoApi.expiryCalendar(month, signal),
     staleTime: HOUR,
+    placeholderData: keepPreviousData,
+    retry: retryTransient,
   });
+}
+
+export interface CommoditySearchHits {
+  commodities: CommodityUnderlying[];
+  contracts: CommodityContractSearchResult[];
+}
+
+const NO_COMMODITY_HITS: CommoditySearchHits = { commodities: [], contracts: [] };
+
+/**
+ * The commodity half of an F&O search (MCX / NSE commodity underlyings and contracts) — the
+ * same GET /fno/search answer as useFnoSearch (one request, one cache entry), for a search
+ * screen that lists commodities beside stocks and F&O. Each opens its read-only chain.
+ */
+export function useCommoditySearchHits(
+  query: string,
+  enabled = true,
+  limits: { commodities: number; contracts: number } = { commodities: 4, contracts: 4 },
+): CommoditySearchHits {
+  const needle = enabled ? query : '';
+  const remote = useFnoSearch(needle);
+  const trimmed = needle.trim();
+  // keepPreviousData answers a deleted longer query; below the server minimum it is not shown.
+  const answer = trimmed.length >= 3 ? remote.data : undefined;
+  return useMemo(
+    () =>
+      answer
+        ? {
+            commodities: (answer.commodities ?? []).slice(0, limits.commodities),
+            contracts: (answer.commodityContracts ?? []).slice(0, limits.contracts),
+          }
+        : NO_COMMODITY_HITS,
+    [answer, limits.commodities, limits.contracts],
+  );
 }
 
 export function useFnoExpiries(exchange: FnoExchange, underlying: string | null) {
@@ -182,7 +226,13 @@ export function useOptionChain(
     // The previous chain stays on screen while a new expiry or window loads — an unmounting
     // table on every chip tap reads as the screen breaking.
     placeholderData: keepPreviousData,
-    refetchInterval: (q) => livePriceInterval(q.state.data?.source === 'groww' ? 5_000 : 25_000),
+    // A commodity chain is built from Groww LTP calls and its premiums already stream; a 15 s
+    // re-read leaves Groww's live budget to the stream (the web's rule). MCX trades to 23:30,
+    // past equity hours, so it polls on its own session.
+    refetchInterval: (q) =>
+      isCommodityExchange(exchange)
+        ? commodityPollInterval(q.state.data?.source === 'groww' ? 15_000 : 25_000)
+        : livePriceInterval(q.state.data?.source === 'groww' ? 5_000 : 25_000),
     retry: retryTransient,
     subscribed: focused,
   });
@@ -195,7 +245,10 @@ export function useFnoFutures(exchange: FnoExchange, underlying: string | null, 
     queryFn: ({ signal }) => fnoApi.futures(exchange, underlying as string, signal),
     enabled: enabled && !!underlying,
     staleTime: 5_000,
-    refetchInterval: (q) => livePriceInterval(q.state.data?.source === 'groww' ? 10_000 : 25_000),
+    refetchInterval: (q) =>
+      isCommodityExchange(exchange)
+        ? commodityPollInterval(q.state.data?.source === 'groww' ? 15_000 : 25_000)
+        : livePriceInterval(q.state.data?.source === 'groww' ? 10_000 : 25_000),
     retry: retryTransient,
     subscribed: focused,
   });
@@ -241,7 +294,8 @@ export function useFnoCandles(
       previousQuery.queryKey[4] === target
         ? previous
         : undefined,
-    refetchInterval: () => livePriceInterval(60_000),
+    refetchInterval: () =>
+      isCommodityExchange(exchange) ? commodityPollInterval(60_000) : livePriceInterval(60_000),
     retry: retryTransient,
     subscribed: focused,
   });

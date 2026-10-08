@@ -4,12 +4,15 @@ import { Text, View } from 'react-native';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
+import { SafeModeNotice } from '@/features/account/components/SafeMode';
+import { useSafeModeOn, useSafeModeRefusalSync } from '@/features/account/hooks';
 import { formatINR, formatQuantity } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
 import { getErrorMessage, isApiError } from '@/types/api';
 
 import { useExitFnoPosition, useOrderIntent } from '../hooks';
 import { exitPlan } from '../lib/chain';
+import { isEquityFnoExchange } from '../lib/explore';
 import { contractTitle, DASH, lotsLabel, todayIst } from '../lib/format';
 import { checkContractOrder, parsePriceInput, type ContractRuleIssue } from '../lib/orderRules';
 import type { FnoPositionRow, LiveOrder } from '../types';
@@ -90,6 +93,9 @@ function ExitBody({
   const c = position.contract;
   const plan = exitPlan(position);
   const exit = useExitFnoPosition();
+  // An exit is a real order too: Safe Mode blocks it like any other (server-side as well).
+  const safeMode = useSafeModeOn();
+  const syncSafeMode = useSafeModeRefusalSync();
   const intent = useOrderIntent();
   const inFlight = useRef(false);
   const [lots, setLots] = useState(plan.wholeLots ? plan.openLots : 0);
@@ -139,15 +145,18 @@ function ExitBody({
     return out;
   }, [c, plan.side, plan.openLots, orderType, lots, price]);
   const shownIssues = issues.filter((i) => !(i.field === 'price' && !priceStr.trim()));
-  const canReview = issues.length === 0 && lots >= 1 && !exit.isPending;
+  const canReview = issues.length === 0 && lots >= 1 && !safeMode && !exit.isPending;
 
   const confirm = () => {
     // The ref stops a double tap inside one frame, before `isPending` has re-rendered.
     if (exit.isPending || inFlight.current) return;
+    // Groww positions are NSE / BSE F&O only; a commodity book takes no orders (server 422).
+    const exchange = position.exchange;
+    if (!isEquityFnoExchange(exchange)) return;
     inFlight.current = true;
     exit.mutate(
       {
-        exchange: position.exchange,
+        exchange,
         tradingSymbol: position.tradingSymbol,
         product: position.product === 'MIS' ? 'MIS' : 'NRML',
         lots,
@@ -169,6 +178,7 @@ function ExitBody({
         },
         onError: (err) => {
           intent.settle(err);
+          syncSafeMode(err);
           const retrySafe = isApiError(err) && (err.isNetworkError || err.isServerError);
           setSubmitError(
             retrySafe
@@ -228,6 +238,7 @@ function ExitBody({
           title="A real order"
           message={`This ${verb.toLowerCase()}s on your Groww account.${orderType === 'MARKET' ? ' A market order fills at the live price, which can differ from the last price shown.' : ''}`}
         />
+        {safeMode ? <SafeModeNotice action="exit" onLeave={onClose} /> : null}
         {submitError ? <Banner tone="error" message={submitError} /> : null}
         <Button
           label={
@@ -239,6 +250,7 @@ function ExitBody({
           fullWidth
           variant={plan.side === 'SELL' ? 'danger' : 'primary'}
           loading={exit.isPending}
+          disabled={safeMode}
           onPress={confirm}
         />
         <Button
@@ -299,11 +311,12 @@ function ExitBody({
           message={`Groww reports ${formatQuantity(Math.abs(position.netQuantity))} qty, which is not a whole number of ${formatQuantity(c.lotSize)}-unit lots. Orders here are in whole lots — exit any remainder from the Groww app.`}
         />
       ) : null}
+      {safeMode ? <SafeModeNotice action="exit" onLeave={onClose} /> : null}
       <Note>
         An exit is placed on the opposite side of the position and never exceeds what you hold.
       </Note>
       <Button
-        label="Review exit"
+        label={safeMode ? 'Safe Mode is on' : 'Review exit'}
         size="lg"
         fullWidth
         variant={plan.side === 'SELL' ? 'danger' : 'primary'}

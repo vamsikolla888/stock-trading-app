@@ -40,10 +40,12 @@ export function mergeUserUpdate(user: PlatformUser, saved: Partial<PlatformUser>
   return { ...user, ...defined };
 }
 
+/** Waiting accounts can't sign in until approved; a rejected one is a decision, not a fault —
+ *  grey, never red. */
 export const APPROVAL: Record<PlatformUserApproval, { label: string; tone: StatusTone }> = {
-  pending: { label: 'Pending', tone: 'warn' },
+  pending: { label: 'Waiting', tone: 'warn' },
   approved: { label: 'Approved', tone: 'ok' },
-  rejected: { label: 'Rejected', tone: 'bad' },
+  rejected: { label: 'Rejected', tone: 'neutral' },
 };
 
 /** Pending first (they are waiting on someone), then newest. */
@@ -100,6 +102,15 @@ export function describeUserChange(
         destructive: false,
       };
     }
+    if (update.approvalStatus === 'rejected' && user.approvalStatus === 'approved') {
+      // Revoking signs a working account out of the platform.
+      return {
+        title: 'Revoke access?',
+        message: `${user.email} won’t be able to sign in until approved again.`,
+        confirmLabel: 'Revoke',
+        destructive: true,
+      };
+    }
     if (update.approvalStatus === 'rejected') {
       return {
         title: 'Reject this account?',
@@ -109,9 +120,9 @@ export function describeUserChange(
       };
     }
     return {
-      title: 'Move back to pending?',
+      title: 'Move back to waiting?',
       message: `${user.email} can’t sign in until an administrator approves the account again.`,
-      confirmLabel: 'Set pending',
+      confirmLabel: 'Set waiting',
       destructive: true,
     };
   }

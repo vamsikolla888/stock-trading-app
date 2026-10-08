@@ -16,8 +16,13 @@ export const appConfig = {
      * app reads changes shape: a restored cache bypasses the API layer's checks and goes straight
      * to the screens, and neither a dev reload nor an OTA update changes the app version.
      * 2 — one paper wallet, strategy runState, screener scan state (2026-10-01).
+     * 3 — Daily Brief `ipoListings` and the IPO section in its preferences (2026-10-03).
+     * 4 — strong picks v2 (categories, outcomes), the paper F&O book's funds, third-party API
+     *     usage per provider, the Agents screens (2026-10-05).
+     * 5 — IPO `valuation`, platform strategy cards (kind, worksOn, deployments), the index bot's
+     *     AI readiness and stop-loss cap, portfolio review across Groww + mStock (2026-10-08).
      */
-    cacheSchema: 2,
+    cacheSchema: 5,
   },
   market: {
     /** Quote/index refresh while the exchange is open; polling stops outside hours. */

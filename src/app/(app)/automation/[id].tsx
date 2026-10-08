@@ -7,6 +7,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Share, Text, View } from 'react-native';
 
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid, GridItem, SplitColumns } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
@@ -33,6 +36,7 @@ import {
   isTerminal,
   resolvePendingRun,
   runBlockedReason,
+  runStats,
   runStatus,
   TRIGGER_LABEL,
   triggerKind,
@@ -45,7 +49,7 @@ import { JsonBlock, monoFont } from '@/features/settings/components/JsonBlock';
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { SwitchRow } from '@/features/settings/components/SwitchRow';
 import { confirmAction } from '@/features/settings/lib/confirm';
-import { formatDateTime, relativeTime } from '@/features/settings/lib/time';
+import { formatDateTime, formatElapsed, relativeTime } from '@/features/settings/lib/time';
 import { useNow } from '@/hooks/useNow';
 import { animateNextLayout } from '@/lib/animation';
 import { toast } from '@/lib/utils/toast';
@@ -134,6 +138,19 @@ function TestResultCard({
   );
 }
 
+/** A pane's quiet label when Activity and Settings sit side by side. */
+function PaneTitle({ label }: { label: string }) {
+  return (
+    <Text
+      accessibilityRole="header"
+      className="mb-1 text-xs font-semibold uppercase text-ink-faint dark:text-ink-dark-faint"
+      style={{ letterSpacing: 0.6 }}
+    >
+      {label}
+    </Text>
+  );
+}
+
 export default function AutomationDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   // A deep link or stale route can arrive without an id (or with it repeated); without one
@@ -141,6 +158,7 @@ export default function AutomationDetailScreen() {
   const id = typeof params.id === 'string' && params.id.trim() ? params.id : undefined;
   const router = useRouter();
   const { colors } = useTheme();
+  const layout = useScreenLayout();
   const now = useNow();
   const queryClient = useQueryClient();
   const workflow = useWorkflow(id);
@@ -167,6 +185,7 @@ export default function AutomationDetailScreen() {
   const retry = useRetryExecution();
 
   const items = useMemo(() => uniqueExecutions(executions.data?.pages), [executions.data]);
+  const stats = useMemo(() => runStats(items), [items]);
   const resolved = pendingRun ? resolvePendingRun(pendingRun, items) : null;
   const runFinished = resolved ? isTerminal(resolved.status) : false;
   const watching = watchedRun !== null && !runFinished;
@@ -272,6 +291,173 @@ export default function AutomationDetailScreen() {
   const showRunPanel = pendingRun !== null;
   const runMeta = resolved ? runStatus(resolved.status) : null;
 
+  // Wide windows show Activity and Settings side by side (web: SPLIT_DETAIL_AT); narrower
+  // ones keep them behind the switch, and Activity splits into two columns on a tablet.
+  const sideBySide = layout.columns === 3;
+
+  const monitor = detail ? (
+    <SplitColumns
+      split={!layout.compact && !sideBySide}
+      left={
+        <>
+          <Text className="mt-4 text-[13px] leading-5 text-ink-muted dark:text-ink-dark-muted">
+            {detail.notes || 'No description yet — add one under Settings.'}
+          </Text>
+
+          {stats.finished > 0 ? (
+            <Grid columns={layout.compact ? 2 : 3} gap={10} className="mt-4">
+              <StatTile
+                label="Success"
+                value={`${Math.round(stats.successRate ?? 0)}%`}
+                status={stats.succeeded === stats.finished ? 'ok' : 'warn'}
+                sub={`${stats.succeeded} of ${stats.finished} runs`}
+              />
+              <StatTile
+                label="Avg run"
+                value={stats.avgDurationMs != null ? formatElapsed(stats.avgDurationMs) : '—'}
+                sub="Start to finish"
+              />
+              {/* Its relative time needs a full row on a phone. */}
+              <GridItem span={layout.compact ? 2 : 1}>
+                <StatTile
+                  label="Last success"
+                  value={stats.lastSuccessAt ? relativeTime(stats.lastSuccessAt, now) : 'None'}
+                  status={stats.lastSuccessAt ? undefined : 'bad'}
+                  sub={stats.lastSuccessAt ? formatDateTime(stats.lastSuccessAt) : 'In these runs'}
+                />
+              </GridItem>
+            </Grid>
+          ) : null}
+
+          <View className="mt-4">
+            <TriggerCard workflow={detail} />
+          </View>
+
+          <View className="mt-3 flex-row gap-2.5">
+            <Button
+              label="Run now"
+              className="flex-1"
+              leftIcon={<Play size={16} color={colors.primaryText} />}
+              disabled={Boolean(blocked) || watching}
+              loading={run.isPending}
+              onPress={startRun}
+            />
+            <Button
+              label="Send test"
+              variant="outline"
+              className="flex-1"
+              leftIcon={<Send size={16} color={colors.text} />}
+              disabled={Boolean(blocked)}
+              loading={test.isPending}
+              onPress={sendTest}
+            />
+          </View>
+          {blocked ? (
+            <Text className="mt-2 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
+              {blocked}
+            </Text>
+          ) : null}
+
+          {runError ? <Banner tone="error" message={runError} className="mt-3" /> : null}
+
+          {showRunPanel && runMeta && resolved ? (
+            <Card className="mt-3 gap-2">
+              <View className="flex-row items-center gap-2.5">
+                {resolved.status === 'running' ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : null}
+                <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
+                  {resolved.status === 'running'
+                    ? 'Running…'
+                    : resolved.status === 'success'
+                      ? 'Run succeeded'
+                      : 'Run failed'}
+                </Text>
+                <StatusPill tone={runMeta.tone} label={runMeta.label} />
+              </View>
+              <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
+                Started {formatDateTime(pendingRun?.startedAt)} IST
+                {resolved.executionId
+                  ? ` · execution ${resolved.executionId}`
+                  : ' · waiting for n8n to report it'}
+              </Text>
+              {watchExpired && resolved.status === 'running' ? (
+                <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">
+                  Still no result — pull to refresh the history below.
+                </Text>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {testResult || testError ? (
+            <TestResultCard result={testResult} error={testError} />
+          ) : null}
+        </>
+      }
+      right={
+        <Section title="Recent runs" className={layout.compact || sideBySide ? undefined : 'mt-4'}>
+          {executions.isPending ? (
+            <ListSkeleton rows={3} />
+          ) : executions.error && items.length === 0 ? (
+            <InlineError
+              what="run history"
+              error={executions.error}
+              onRetry={() => void executions.refetch()}
+            />
+          ) : items.length === 0 ? (
+            <InlineEmpty
+              title="No runs yet"
+              message={
+                detail.triggerType === 'webhook'
+                  ? 'Start the first one with Run now, or wait for its webhook to be called.'
+                  : detail.triggerType === 'cron'
+                    ? 'It runs on its own schedule — runs appear here once it fires.'
+                    : 'Start it from n8n’s editor; runs appear here afterwards.'
+              }
+            />
+          ) : (
+            <>
+              <ListCard>
+                {items.map((execution, index) => (
+                  <View key={execution.id}>
+                    {index > 0 ? <RowDivider /> : null}
+                    <ExecutionRow
+                      workflowId={detail.id}
+                      execution={execution}
+                      now={now}
+                      expanded={expanded === execution.id}
+                      onToggle={() => {
+                        animateNextLayout();
+                        setExpanded((current) => (current === execution.id ? null : execution.id));
+                      }}
+                      onRetry={blocked ? undefined : () => retryExecution(execution.id)}
+                      retrying={retry.isPending}
+                    />
+                  </View>
+                ))}
+              </ListCard>
+              {executions.hasNextPage ? (
+                <Button
+                  label="Load older runs"
+                  variant="outline"
+                  className="mt-3"
+                  fullWidth
+                  loading={executions.isFetchingNextPage}
+                  onPress={() => void executions.fetchNextPage()}
+                />
+              ) : null}
+              {executions.isFetchNextPageError ? (
+                <Text className="mt-2 text-[13px] text-danger-600 dark:text-danger-dark">
+                  Couldn’t load older runs. Try again.
+                </Text>
+              ) : null}
+            </>
+          )}
+        </Section>
+      }
+    />
+  ) : null;
+
   return (
     <StackScreen
       title={detail?.name ?? 'Automation'}
@@ -281,6 +467,7 @@ export default function AutomationDetailScreen() {
           : undefined
       }
       onRefresh={id ? onRefresh : undefined}
+      fill
     >
       {!id ? (
         <InlineEmpty
@@ -345,141 +532,29 @@ export default function AutomationDetailScreen() {
             />
           </ListCard>
 
-          <Tabs items={PANELS} value={panel} onChange={setPanel} className="mt-4" />
-
-          {panel === 'configure' ? (
-            <WorkflowConfigForm workflow={detail} />
+          {sideBySide ? (
+            // Wide enough: Activity and Settings side by side, no switch between them.
+            <View className="mt-6 flex-row items-start" style={{ columnGap: 32 }}>
+              <View className="flex-1">
+                <PaneTitle label="Activity" />
+                {monitor}
+              </View>
+              <View className="flex-1 border-l border-line pl-8 dark:border-line-dark">
+                <PaneTitle label="Settings" />
+                <WorkflowConfigForm workflow={detail} />
+              </View>
+            </View>
           ) : (
             <>
-              <Text className="mt-4 text-[13px] leading-5 text-ink-muted dark:text-ink-dark-muted">
-                {detail.notes || 'No description yet — add one under Settings.'}
-              </Text>
-
-              <View className="mt-4">
-                <TriggerCard workflow={detail} />
-              </View>
-
-              <View className="mt-3 flex-row gap-2.5">
-                <Button
-                  label="Run now"
-                  className="flex-1"
-                  leftIcon={<Play size={16} color={colors.primaryText} />}
-                  disabled={Boolean(blocked) || watching}
-                  loading={run.isPending}
-                  onPress={startRun}
-                />
-                <Button
-                  label="Send test"
-                  variant="outline"
-                  className="flex-1"
-                  leftIcon={<Send size={16} color={colors.text} />}
-                  disabled={Boolean(blocked)}
-                  loading={test.isPending}
-                  onPress={sendTest}
-                />
-              </View>
-              {blocked ? (
-                <Text className="mt-2 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-                  {blocked}
-                </Text>
-              ) : null}
-
-              {runError ? <Banner tone="error" message={runError} className="mt-3" /> : null}
-
-              {showRunPanel && runMeta && resolved ? (
-                <Card className="mt-3 gap-2">
-                  <View className="flex-row items-center gap-2.5">
-                    {resolved.status === 'running' ? (
-                      <ActivityIndicator size="small" color={colors.accent} />
-                    ) : null}
-                    <Text className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark">
-                      {resolved.status === 'running'
-                        ? 'Running…'
-                        : resolved.status === 'success'
-                          ? 'Run succeeded'
-                          : 'Run failed'}
-                    </Text>
-                    <StatusPill tone={runMeta.tone} label={runMeta.label} />
-                  </View>
-                  <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
-                    Started {formatDateTime(pendingRun?.startedAt)} IST
-                    {resolved.executionId
-                      ? ` · execution ${resolved.executionId}`
-                      : ' · waiting for n8n to report it'}
-                  </Text>
-                  {watchExpired && resolved.status === 'running' ? (
-                    <Text className="text-xs text-ink-faint dark:text-ink-dark-faint">
-                      Still no result — pull to refresh the history below.
-                    </Text>
-                  ) : null}
-                </Card>
-              ) : null}
-
-              {testResult || testError ? (
-                <TestResultCard result={testResult} error={testError} />
-              ) : null}
-
-              <Section title="Recent runs">
-                {executions.isPending ? (
-                  <ListSkeleton rows={3} />
-                ) : executions.error && items.length === 0 ? (
-                  <InlineError
-                    what="run history"
-                    error={executions.error}
-                    onRetry={() => void executions.refetch()}
-                  />
-                ) : items.length === 0 ? (
-                  <InlineEmpty
-                    title="No runs yet"
-                    message={
-                      detail.triggerType === 'webhook'
-                        ? 'Start the first one with Run now, or wait for its webhook to be called.'
-                        : detail.triggerType === 'cron'
-                          ? 'It runs on its own schedule — runs appear here once it fires.'
-                          : 'Start it from n8n’s editor; runs appear here afterwards.'
-                    }
-                  />
-                ) : (
-                  <>
-                    <ListCard>
-                      {items.map((execution, index) => (
-                        <View key={execution.id}>
-                          {index > 0 ? <RowDivider /> : null}
-                          <ExecutionRow
-                            workflowId={detail.id}
-                            execution={execution}
-                            now={now}
-                            expanded={expanded === execution.id}
-                            onToggle={() => {
-                              animateNextLayout();
-                              setExpanded((current) =>
-                                current === execution.id ? null : execution.id,
-                              );
-                            }}
-                            onRetry={blocked ? undefined : () => retryExecution(execution.id)}
-                            retrying={retry.isPending}
-                          />
-                        </View>
-                      ))}
-                    </ListCard>
-                    {executions.hasNextPage ? (
-                      <Button
-                        label="Load older runs"
-                        variant="outline"
-                        className="mt-3"
-                        fullWidth
-                        loading={executions.isFetchingNextPage}
-                        onPress={() => void executions.fetchNextPage()}
-                      />
-                    ) : null}
-                    {executions.isFetchNextPageError ? (
-                      <Text className="mt-2 text-[13px] text-danger-600 dark:text-danger-dark">
-                        Couldn’t load older runs. Try again.
-                      </Text>
-                    ) : null}
-                  </>
-                )}
-              </Section>
+              <Tabs items={PANELS} value={panel} onChange={setPanel} className="mt-4" />
+              {panel === 'configure' ? (
+                // A form reads best at a line length, not stretched across a wide window.
+                <View style={layout.compact ? undefined : { maxWidth: 720 }}>
+                  <WorkflowConfigForm workflow={detail} />
+                </View>
+              ) : (
+                monitor
+              )}
             </>
           )}
         </>

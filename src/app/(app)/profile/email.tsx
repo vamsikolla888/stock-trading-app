@@ -148,8 +148,7 @@ export default function EmailScreen() {
             onPress={submit}
           />
           <Text className="text-center text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
-            We verify the new address before moving your account. Other devices are signed out once
-            the change is confirmed.
+            Confirmation link valid for 1 hour; other devices are then signed out.
           </Text>
         </View>
       )}

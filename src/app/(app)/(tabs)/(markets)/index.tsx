@@ -11,40 +11,34 @@ import { ProductsAndTools } from '@/features/home/components/ProductsAndTools';
 import { StocksInNews } from '@/features/home/components/StocksInNews';
 import { TodaysPicks } from '@/features/home/components/TodaysPicks';
 import { TopMovers } from '@/features/home/components/TopMovers';
+import { UpcomingIpos } from '@/features/home/components/UpcomingIpos';
 import { WatchlistPreview } from '@/features/home/components/WatchlistPreview';
 import { insightKeys } from '@/features/insights/api';
+import { ipoKeys } from '@/features/ipo/hooks';
 import { marketKeys, useLiveIndices } from '@/features/market/hooks';
 import { newsKeys } from '@/features/news/hooks';
-import {
-  useGrowwPortfolioOverview,
-  useMstockPortfolioOverview,
-  usePortfolioOverview,
-} from '@/features/portfolio/hooks';
-import { useLiveOverview } from '@/features/portfolio/useLiveHoldings';
+import { useHomeBooks } from '@/features/portfolio/hooks';
 import { strongPickKeys } from '@/features/strong-picks/hooks';
 import { tradingKeys } from '@/features/trading/hooks';
 import { watchlistKeys } from '@/features/watchlists/hooks';
 
 /**
  * Today — the Groww-style home: index ticker with the session's status, holdings, top
- * movers, today's picks (or the screeners that fired), tools, watchlist, the paper book,
- * stocks in the news and what ran behind the scenes. Each section loads and fails on its
+ * movers, today's picks (or the screeners that fired), the next few days of IPOs, tools,
+ * watchlist, the paper book, stocks in the news and what ran behind the scenes. Each section loads and fails on its
  * own, so one slow endpoint never blanks the screen.
  */
 export default function HomeScreen() {
   const queryClient = useQueryClient();
-  // Each card's holdings, totals and day move follow the live feed.
-  const overview = useLiveOverview(usePortfolioOverview());
-  const mstockOverview = useLiveOverview(useMstockPortfolioOverview());
-  const growwOverview = useLiveOverview(useGrowwPortfolioOverview());
+  // One card per book (Groww, mStock, added by hand); figures follow the live feed.
+  const holdings = useHomeBooks();
+  const refetchHoldings = holdings.refetch;
   const indices = useLiveIndices();
 
   const onRefresh = useCallback(
     () =>
       Promise.all([
-        overview.refetch(),
-        mstockOverview.refetch(),
-        growwOverview.refetch(),
+        refetchHoldings(),
         indices.refetch(),
         queryClient.invalidateQueries({ queryKey: [...marketKeys.all, 'movers'] }),
         queryClient.invalidateQueries({ queryKey: marketKeys.news() }),
@@ -55,8 +49,9 @@ export default function HomeScreen() {
         queryClient.invalidateQueries({ queryKey: strongPickKeys.today, exact: true }),
         queryClient.invalidateQueries({ queryKey: newsKeys.runs(3) }),
         queryClient.invalidateQueries({ queryKey: tradingKeys.paperSegments }),
+        queryClient.invalidateQueries({ queryKey: ipoKeys.list('all') }),
       ]),
-    [overview, mstockOverview, growwOverview, indices, queryClient],
+    [refetchHoldings, indices, queryClient],
   );
 
   return (
@@ -69,12 +64,13 @@ export default function HomeScreen() {
         onRetry={() => void indices.refetch()}
       />
       <HoldingsCard
-        overview={overview}
-        mstockOverview={mstockOverview}
-        growwOverview={growwOverview}
+        books={holdings.books}
+        isLoading={holdings.isLoading}
+        onRetry={() => void refetchHoldings()}
       />
       <TopMovers />
       <TodaysPicks />
+      <UpcomingIpos />
       <ProductsAndTools />
       <WatchlistPreview />
       <PaperAccountCard />

@@ -85,6 +85,12 @@ export interface FnoPositionView {
   quantity: number;
   avgPrice: number;
   ltp: number | null;
+  /** Where `ltp` came from, and when. Null on an older server (and when nothing priced it). */
+  ltpSource: PaperPriceSource | null;
+  ltpAsOf: string | null;
+  /** In Groww's master under this symbol, so the screen can stream it (`fno:watch`). False on an
+   *  older server — such a position keeps its polled price. */
+  streamable: boolean;
   marginBlocked: number;
   realisedPnl: number;
   totalCharges: number;
@@ -96,10 +102,16 @@ export interface FnoPositionView {
   underlyingSpot: number | null;
 }
 
+/** Where a paper price came from: the user's own live stream, Groww REST, or the platform feed. */
+export type PaperPriceSource = 'stream' | 'groww' | 'platform';
+
 export interface FnoBookTotals {
   marginBlocked: number;
   unrealisedPnl: number;
+  /** GROSS realised P&L of every closed and settled trade since the last reset (a current
+   *  server); an older one summed it over the OPEN positions only. */
   realisedPnl: number;
+  /** Every charge paid since the last reset. */
   totalCharges: number;
   /** Null when nothing in the book could be greeked — "0" would claim a measured flat book. */
   netDelta: number | null;
@@ -108,11 +120,27 @@ export interface FnoBookTotals {
   netVega: number | null;
 }
 
+/** The F&O wallet, read in the same request as the book (so one poll keeps it current). */
+export interface FnoFunds {
+  startingCapital: number;
+  cash: number;
+  /** Held back by PENDING orders. */
+  reserved: number;
+  /** cash − reserved — what a new order may draw on. */
+  available: number;
+  pendingOrders: number;
+}
+
 export interface FnoBook {
   positions: FnoPositionView[];
   totals: FnoBookTotals;
+  /** Null on an older server — the screen reads the wallet endpoint instead. */
+  funds: FnoFunds | null;
   ungreekedCount: number;
+  /** The exchange session as the server sees it (09:15–15:30 IST, weekdays). Null when unsaid. */
+  sessionOpen: boolean | null;
   caveats: string[];
+  asOf: string | null;
 }
 
 export interface FnoCharges {
@@ -162,7 +190,73 @@ export interface FnoOrderView {
   note: string | null;
   basketId: string | null;
   basketName: string | null;
+  /** Where the fill price came from ('stream' | 'groww' | 'platform' | 'settlement'). */
+  priceSource: string | null;
+  /** A MARKET order placed outside the session — rests PENDING until the next open. */
+  afterHours: boolean;
+  /** The cash this fill moved (+ credit / − debit). Null while resting and on older orders. */
+  cashDelta: number | null;
+  /** An expiry settlement row the book wrote itself — no order was placed. */
+  settlement: boolean;
   createdAt: string;
+}
+
+/** POST /derivatives/orders/preview — what an order would do, from placement's own code. */
+export type FnoPreviewOutcome = 'fill' | 'rest' | 'after-hours' | 'rejected' | 'invalid';
+
+export interface FnoOrderPreview {
+  contract: {
+    exchange: string;
+    tradingsymbol: string;
+    underlying: string;
+    kind: DerivativeKind;
+    /** Null for a future. */
+    strike: number | null;
+    expiry: string;
+    daysToExpiry: number | null;
+    lotSize: number;
+    tickSize: number | null;
+    freezeQuantity: number | null;
+    /** The most lots one order may carry here (the exchange freeze limit, capped at 100). */
+    maxLots: number | null;
+    isIndex: boolean;
+  };
+  side: 'BUY' | 'SELL';
+  lots: number;
+  quantity: number;
+  type: FnoOrderType;
+  limitPrice: number | null;
+  sessionOpen: boolean;
+  outcome: FnoPreviewOutcome;
+  /** The price it would fill at, where that came from and when. */
+  price: { ltp: number; source: string; label: string; asOf: string } | null;
+  priceNote: string | null;
+  /** The price the money below is computed at: the fill price, or a resting order's basis. */
+  basisPrice: number | null;
+  orderValue: number | null;
+  marginRequired: number;
+  marginReleased: number;
+  premiumFlow: number;
+  charges: FnoCharges | null;
+  /** Cash this order would move now (+ credit / − debit). Null when it would rest. */
+  cashDelta: number | null;
+  /** What a resting order would hold back. */
+  reservedAmount: number;
+  realisedPnl: number | null;
+  closingLots: number;
+  openingLots: number;
+  availableCash: number | null;
+  cashAfter: number | null;
+  marginBasis: string | null;
+  spot: number | null;
+  spotSource: string | null;
+  breakEven: number | null;
+  /** The most an opening LONG option can lose; null otherwise (see `maxLossLabel`). */
+  maxLoss: number | null;
+  position: { lots: number; avgPrice: number } | null;
+  /** A refusal — a normal answer, not an error. Place is disabled while it stands. */
+  blockedReason: string | null;
+  note: string | null;
 }
 
 export interface ExpirySettlementResult {

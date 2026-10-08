@@ -8,6 +8,7 @@ import { PriceChart } from '@/components/market/PriceChart';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Card } from '@/components/ui/Card';
+import { KeyValueRow } from '@/components/ui/KeyValueRow';
 import { KpiGrid } from '@/components/ui/KpiGrid';
 import { ListCard, RowDivider, Section } from '@/components/ui/Section';
 import { Note, Pager, SideTag } from '@/features/trading/components/Sheet';
@@ -22,7 +23,7 @@ import {
 
 import { useLifetimeOverview, useLifetimeStatement } from '../hooks';
 import { dayToMs, formatAsOf, formatDay, monthLabel, plural } from '../lib/dates';
-import type { LifetimeOverview } from '../types';
+import type { LifetimeOverview, ReportSummary } from '../types';
 
 import { useMask } from './BookSummaryCard';
 
@@ -67,8 +68,65 @@ function MoneyCharts({ overview }: { overview: LifetimeOverview }) {
           height={100}
           accessibilityLabel="Net profit and loss by month"
         />
-        <Note>Unrealised returns on holdings are excluded. Sales proceeds are not profit.</Note>
+        <Note>Realised only — unrealised returns are excluded.</Note>
       </Card>
+    </Section>
+  );
+}
+
+/** The broker's own totals from the latest uploaded report — its figures, not the replay's. */
+function ReportTotals({ report }: { report: ReportSummary }) {
+  const mask = useMask();
+  const [open, setOpen] = useState(false);
+  const signed = (value: number | null) => (value === null ? '—' : mask(formatSignedINR(value, 0)));
+
+  return (
+    <Section
+      title="Broker-reported P&L"
+      note={`${formatDay(report.from)} – ${formatDay(report.to)}`}
+    >
+      <KpiGrid
+        items={[
+          { label: 'Realised profit', value: signed(report.realised), trend: report.realised },
+          {
+            label: 'Report charges',
+            value: report.charges === null ? '—' : mask(formatINR(report.charges, 0)),
+            sub: 'this period only',
+          },
+          {
+            label: 'Net realised',
+            value: signed(report.netRealised),
+            trend: report.netRealised,
+          },
+        ]}
+      />
+      {report.breakdown.length > 0 ? (
+        <Card className="mt-3">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: open }}
+            onPress={() => setOpen((value) => !value)}
+            className="flex-row items-center justify-between active:opacity-60"
+          >
+            <Text className="text-[13px] font-semibold text-ink dark:text-ink-dark">
+              Charge breakdown
+            </Text>
+            <Text className="text-[13px] font-semibold text-brand-text dark:text-brand-text-dark">
+              {open ? 'Hide' : 'Show'}
+            </Text>
+          </Pressable>
+          {open
+            ? report.breakdown.map((line, index) => (
+                <KeyValueRow
+                  key={line.label}
+                  label={line.label}
+                  value={mask(formatINR(line.amount))}
+                  divider={index > 0}
+                />
+              ))
+            : null}
+        </Card>
+      ) : null}
     </Section>
   );
 }
@@ -198,17 +256,19 @@ export function LifetimeSection({
   if (!overview) return null;
 
   const hasHistory = overview.totals.trades > 0;
-  const syncLine = overview.sync?.succeededAt
-    ? `Last automatic capture ${formatAsOf(overview.sync.succeededAt)} IST.`
-    : 'No automatic capture recorded yet.';
+  const syncLine = `Last auto-capture: ${
+    overview.sync?.succeededAt ? `${formatAsOf(overview.sync.succeededAt)} IST` : 'not recorded yet'
+  }.${overview.sync?.error ? ` ${overview.sync.error}` : ''}`;
+  const charges = overview.totals;
 
   if (!hasHistory) {
     return (
       <View>
         <InlineEmpty
           title="No statement yet"
-          message={`${label} doesn't share past trades through its API. Import your ${label} order history or P&L report from the web app (Portfolio → ${label} → Statement) to build the statement since you started.`}
+          message={`Import your ${label} reports on the web to build your history.`}
         />
+        {overview.latestReport ? <ReportTotals report={overview.latestReport} /> : null}
         <Note>{syncLine}</Note>
       </View>
     );
@@ -220,9 +280,7 @@ export function LifetimeSection({
   return (
     <View>
       <Text className="mb-3 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
-        Since your first trade on {formatDay(overview.firstTrade)} ·{' '}
-        {plural(overview.totals.trades, 'trade')} ({overview.sources.imported} from reports,{' '}
-        {overview.sources.captured} captured live)
+        {`Since ${formatDay(overview.firstTrade)} · ${plural(overview.totals.trades, 'trade')} (${overview.sources.imported} imported, ${overview.sources.captured} live)`}
       </Text>
       <KpiGrid
         items={[
@@ -239,6 +297,7 @@ export function LifetimeSection({
             label: 'Net realised',
             value: mask(formatSignedINR(overview.totals.netRealised, 0)),
             trend: overview.totals.netRealised,
+            sub: `${mask(formatSignedINR(overview.totals.realised, 0))} before charges`,
           },
           {
             label: 'Unrealised',
@@ -246,7 +305,21 @@ export function LifetimeSection({
             trend: overview.live.unrealised,
             sub: overview.live.available ? 'on holdings now' : 'live holdings unavailable',
           },
-          { label: 'Trade charges', value: mask(formatINR(overview.totals.charges, 0)) },
+          {
+            label: 'Trade charges',
+            value: mask(formatINR(charges.charges, 0)),
+            sub:
+              [
+                charges.chargesAllocated
+                  ? `${mask(formatINR(charges.chargesAllocated, 0))} actual`
+                  : null,
+                charges.chargesEstimated
+                  ? `${mask(formatINR(charges.chargesEstimated, 0))} est.`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'from your reports',
+          },
           {
             label: 'Short-term (STCG)',
             value: mask(formatSignedINR(overview.totals.stcg, 0)),
@@ -265,7 +338,7 @@ export function LifetimeSection({
           {
             label: 'Buy turnover',
             value: mask(formatINR(overview.totals.boughtValue, 0)),
-            sub: 'not deposits',
+            sub: 'recorded buys, not deposits',
           },
         ]}
       />
@@ -277,7 +350,7 @@ export function LifetimeSection({
           title="Your history looks incomplete"
           message={[
             overview.totals.unmatchedSells > 0
-              ? `${formatQuantity(overview.totals.unmatchedSells)} shares were sold with no earlier buy in the reports — they're left out of realised P&L.`
+              ? `${formatQuantity(overview.totals.unmatchedSells)} shares sold with no recorded buy — import the report covering the buy. Left out of realised P&L.`
               : null,
             ...overview.reconciliation
               .slice(0, 5)
@@ -290,6 +363,8 @@ export function LifetimeSection({
             .join(' ')}
         />
       ) : null}
+
+      {overview.latestReport ? <ReportTotals report={overview.latestReport} /> : null}
 
       <MoneyCharts overview={overview} />
 
@@ -409,9 +484,7 @@ export function LifetimeSection({
       <Statement key={sym ?? 'all'} broker={broker} sym={sym} onClear={() => setSym(null)} />
 
       <Note>
-        {syncLine} Import newer reports from the web app. Realised P&L is first-in-first-out, with
-        holdings over 12 months counted as long-term; for tax filing, rely on {label}'s own tax P&L
-        report.
+        {syncLine} FIFO. For tax filing, use {label}'s own tax P&L report.
       </Note>
     </View>
   );

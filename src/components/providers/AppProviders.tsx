@@ -15,7 +15,7 @@ import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 
 function ThemedStatusBar() {
   const { isDark } = useTheme();
-  return <StatusBar style={isDark ? 'light' : 'dark'} />;
+  return <StatusBar animated style={isDark ? 'light' : 'dark'} />;
 }
 
 export function AppProviders({ children }: { children: React.ReactNode }) {

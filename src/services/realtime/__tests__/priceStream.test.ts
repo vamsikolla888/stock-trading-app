@@ -192,8 +192,9 @@ describe('PriceStream subscriptions', () => {
     expect(socket.events('watch:batch')).toEqual([
       { key: 'app', targets: [{ exchange: 'NSE', symbol: 'TCS' }] },
     ]);
+    // The detail screen's stock rides the F&O feed too, after the F&O instruments.
     expect(socket.events('fno:watch')).toEqual([
-      { key: 'app', instruments: ['NFO:NIFTY25OCT25100CE'] },
+      { key: 'app', instruments: ['NFO:NIFTY25OCT25100CE', 'NSE:INFY'] },
     ]);
   });
 });

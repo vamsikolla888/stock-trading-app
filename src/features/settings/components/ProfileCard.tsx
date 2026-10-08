@@ -6,14 +6,24 @@ import { Badge } from '@/components/ui/Badge';
 import { ProfileAvatar } from '@/features/account/components/ProfileAvatar';
 import { useAccountProfile } from '@/features/account/hooks';
 import { profileName } from '@/features/account/lib/account';
+import { cn } from '@/lib/utils/cn';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { AuthUser } from '@/types/auth';
 
 /**
  * Groww-style account header: photo (or initials), name, email and role. Opens Profile &
- * security. Paints from the stored user at once, then fills in the name and photo.
+ * security. Paints from the stored user at once, then fills in the name and photo. `bare` drops
+ * the card around it, for the top of a panel that already draws one.
  */
-export function ProfileCard({ user, onPress }: { user: AuthUser | null; onPress: () => void }) {
+export function ProfileCard({
+  user,
+  onPress,
+  bare = false,
+}: {
+  user: AuthUser | null;
+  onPress: () => void;
+  bare?: boolean;
+}) {
   const { colors } = useTheme();
   const profile = useAccountProfile();
   const name = profileName(profile.data, user?.email);
@@ -26,7 +36,12 @@ export function ProfileCard({ user, onPress }: { user: AuthUser | null; onPress:
       accessibilityLabel={`${name}, ${email ?? 'signed in'}, ${isAdmin ? 'administrator' : 'member'}`}
       accessibilityHint="Opens profile and security"
       onPress={onPress}
-      className="flex-row items-center gap-3.5 rounded-card border border-line bg-surface p-4 active:bg-surface-sunk dark:border-line-dark dark:bg-surface-dark dark:active:bg-surface-sunk-dark"
+      className={cn(
+        'flex-row items-center gap-3.5 active:bg-surface-sunk dark:active:bg-surface-sunk-dark',
+        bare
+          ? 'px-4 py-3.5'
+          : 'rounded-card border border-line bg-surface p-4 dark:border-line-dark dark:bg-surface-dark',
+      )}
     >
       <ProfileAvatar name={name} avatarUrl={profile.data?.avatarUrl} size="md" />
       <View className="flex-1 gap-0.5">

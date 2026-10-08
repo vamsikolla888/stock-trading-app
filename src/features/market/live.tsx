@@ -4,10 +4,17 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useState,
   useSyncExternalStore,
 } from 'react';
 
-import { priceStream, type StreamStatus, type WatchMode } from '@/services/realtime/priceStream';
+import {
+  priceStream,
+  type FeedStatus,
+  type StreamStatus,
+  type TickOrigin,
+  type WatchMode,
+} from '@/services/realtime/priceStream';
 
 import { liveKey, type LiveQuote } from './lib/liveQuote';
 
@@ -139,4 +146,60 @@ export function useStreamStatus(): StreamStatus {
     () => priceStream.getStatus(),
     () => priceStream.getStatus(),
   );
+}
+
+/** The F&O feed's heartbeat (Groww or the platform, pushed or polled), or null before one. */
+export function useFeedStatus(): FeedStatus | null {
+  return useSyncExternalStore(
+    (onChange) => priceStream.subscribeFeed(onChange),
+    () => priceStream.getFeedStatus(),
+    () => priceStream.getFeedStatus(),
+  );
+}
+
+/** A symbol counts as live this long after its last tick — a quiet stock still trades rarely. */
+export const LIVE_WINDOW_MS = 60_000;
+
+export interface Liveness {
+  /** A broker feed delivered this symbol within LIVE_WINDOW_MS. */
+  live: boolean;
+  /** Which broker it streams from, for "Live · Groww". Null when not live. */
+  via: 'mStock' | 'Groww' | null;
+}
+
+/** Pure: whether a symbol's last tick still makes it live at `now`. */
+export function livenessOf(
+  last: { origin: TickOrigin; at: number } | undefined,
+  now: number,
+): Liveness {
+  if (!last || now - last.at > LIVE_WINDOW_MS) return { live: false, via: null };
+  return { live: true, via: last.origin === 'fno' ? 'Groww' : 'mStock' };
+}
+
+/**
+ * Whether one symbol is streaming right now, and from which broker — for the "Live" marker on a
+ * detail screen. Re-checked every 2 s (a tick wakes it sooner), so it turns "refreshing" by itself
+ * when the feed goes quiet.
+ */
+export function useLiveness(
+  exchange: string | null | undefined,
+  symbol: string | null | undefined,
+): Liveness {
+  const key = symbol ? liveKey(exchange, symbol) : null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 2_000);
+    return () => clearInterval(timer);
+  }, []);
+  // Re-render on this symbol's ticks too, so "Live" appears with the first one.
+  useSyncExternalStore(
+    useCallback(
+      (onChange: () => void) => (key ? priceStream.subscribeKey(key, onChange) : noopUnsubscribe),
+      [key],
+    ),
+    useCallback(() => (key ? priceStream.getQuote(key) : undefined), [key]),
+    useCallback(() => (key ? priceStream.getQuote(key) : undefined), [key]),
+  );
+  const last = key ? priceStream.getLastTick(key) : undefined;
+  return livenessOf(last, Math.max(now, last?.at ?? 0));
 }

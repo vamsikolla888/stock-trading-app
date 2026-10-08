@@ -7,6 +7,7 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { InlineEmpty, InlineError } from '@/components/common/InlineError';
 import { ListSkeleton } from '@/components/navigation/StackScreen';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { ListCard, RowDivider } from '@/components/ui/Section';
 import { Chips } from '@/components/ui/Tabs';
 import { SideTag, SummaryBox, SummaryLine } from '@/features/fno/components/primitives';
@@ -29,13 +30,12 @@ import {
   chargeLines,
   countPaperOrders,
   filterPaperOrders,
-  ORDER_STATUS_LABEL,
-  ORDER_STATUS_TONE,
   PAPER_ORDER_FILTERS,
   PAPER_ORDERS_LIMIT,
   premiumFlow,
   type PaperOrderFilter,
 } from '../lib/book';
+import { orderStatusView, priceSourceWord } from '../lib/paperFno';
 import { paperChainHref } from '../lib/routes';
 import type { FnoOrderView } from '../types';
 
@@ -44,10 +44,19 @@ const NUM = { fontVariant: ['tabular-nums' as const] };
 /**
  * The paper F&O order log — the web's /fno/paper/orders: every order this account placed
  * against the paper book, newest first. A rejection is a normal outcome (not enough margin, no
- * live price) carrying its reason, so it is listed, not hidden; a resting LIMIT order can be
- * cancelled here. Tap an order for its contract-note breakdown and what it did to the account.
+ * live price) carrying its reason, so it is listed, not hidden. A resting order — a LIMIT not yet
+ * reached, or an AFTER-MARKET order placed outside the session — can be cancelled here, and the
+ * list polls while one rests, so the minute sweep's fill shows up without a pull. Each fill says
+ * where its price came from and the cash it moved; an expiry settlement row reads as Settled.
+ * Tap an order for its contract-note breakdown; `onOpen` re-opens the ticket on its contract.
  */
-export function PaperOrders() {
+export function PaperOrders({
+  onOpen,
+  compact = false,
+}: {
+  onOpen?: (order: FnoOrderView) => void;
+  compact?: boolean;
+} = {}) {
   const router = useRouter();
   const orders = usePaperOrders(PAPER_ORDERS_LIMIT);
   const [filter, setFilter] = useState<PaperOrderFilter>('all');
@@ -69,7 +78,7 @@ export function PaperOrders() {
   const cancel = useCallback(
     (o: FnoOrderView) =>
       confirmAction({
-        title: 'Cancel this limit order?',
+        title: o.afterHours ? 'Cancel this after-market order?' : 'Cancel this limit order?',
         message: `${o.side} ${lotsLabel(o.lots)} of ${o.tradingsymbol}${o.limitPrice != null ? ` at ${formatINR(o.limitPrice)}` : ''}. What it holds goes back to your F&O wallet.`,
         confirmLabel: 'Cancel order',
         cancelLabel: 'Keep it',
@@ -124,6 +133,7 @@ export function PaperOrders() {
                   open={expanded === o.id}
                   onToggle={toggle}
                   onCancel={cancel}
+                  onTrade={onOpen}
                   cancelling={cancelling && cancellingId === o.id}
                 />
               </React.Fragment>
@@ -131,10 +141,13 @@ export function PaperOrders() {
           </ListCard>
         )}
       </View>
-      <Text className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        The last {PAPER_ORDERS_LIMIT} orders on your paper F&amp;O book. A resting limit order is
-        checked once a minute. Simulated — nothing reached a broker.
-      </Text>
+      {compact ? null : (
+        <Text className="mt-3 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
+          The last {PAPER_ORDERS_LIMIT} orders on your paper F&amp;O book. A resting order is
+          checked once a minute; an after-market order fills at the first price after 09:15 IST.
+          Simulated — nothing reached a broker.
+        </Text>
+      )}
     </View>
   );
 }
@@ -144,12 +157,14 @@ const OrderRow = memo(function OrderRow({
   open,
   onToggle,
   onCancel,
+  onTrade,
   cancelling,
 }: {
   order: FnoOrderView;
   open: boolean;
   onToggle: (id: string) => void;
   onCancel: (order: FnoOrderView) => void;
+  onTrade?: (order: FnoOrderView) => void;
   cancelling: boolean;
 }) {
   const { colors } = useTheme();
@@ -160,9 +175,16 @@ const OrderRow = memo(function OrderRow({
       ? pending
         ? `resting at ${formatINR(o.limitPrice)}`
         : `limit ${formatINR(o.limitPrice)}`
-      : null;
-  const title = contractTitle({ underlying: o.underlying, kind: o.kind, strike: o.strike });
+      : pending && o.afterHours
+        ? 'at the open'
+        : null;
+  const title = contractTitle({
+    underlying: o.underlying,
+    kind: o.kind,
+    strike: o.kind === 'FUT' ? null : o.strike,
+  });
   const flow = premiumFlow(o.premiumFlow);
+  const status = orderStatusView(o);
   const Chevron = open ? ChevronUp : ChevronDown;
 
   return (
@@ -184,7 +206,7 @@ const OrderRow = memo(function OrderRow({
           >
             {title}
           </Text>
-          <Badge label={ORDER_STATUS_LABEL[o.status]} variant={ORDER_STATUS_TONE[o.status]} />
+          <Badge label={status.label} variant={status.tone} />
         </View>
         <View className="flex-row items-center gap-2">
           <Text
@@ -204,8 +226,14 @@ const OrderRow = memo(function OrderRow({
             numberOfLines={2}
           >
             {lotsLabel(o.lots)} · {filled ? formatINR(o.price) : (limit ?? DASH)}
-            {filled && o.premiumFlow !== 0
-              ? ` · premium ${flow.word} ${formatINR(flow.amount)}`
+            {filled && o.priceSource ? ` via ${priceSourceWord(o.priceSource)}` : ''}
+            {filled && o.cashDelta != null
+              ? ` · cash ${formatSignedINR(o.cashDelta)}`
+              : filled && o.premiumFlow !== 0
+                ? ` · premium ${flow.word} ${formatINR(flow.amount)}`
+                : ''}
+            {pending && (o.reservedAmount ?? 0) > 0
+              ? ` · holds ${formatINR(o.reservedAmount)}`
               : ''}
             {o.charges.total > 0 ? ` · charges ${formatINR(o.charges.total)}` : ''}
           </Text>
@@ -259,14 +287,19 @@ const OrderRow = memo(function OrderRow({
                   value={formatINR(o.reservedAmount ?? 0)}
                   strong
                 />
-                <SummaryLine
-                  label="Limit"
-                  value={`${o.side === 'BUY' ? 'At or below' : 'At or above'} ${formatINR(o.limitPrice ?? 0)}`}
-                />
+                {o.type === 'LIMIT' && o.limitPrice != null ? (
+                  <SummaryLine
+                    label="Limit"
+                    value={`${o.side === 'BUY' ? 'At or below' : 'At or above'} ${formatINR(o.limitPrice)}`}
+                  />
+                ) : null}
+                {o.afterHours ? (
+                  <SummaryLine label="Fills" value="At the first price after 09:15 IST" />
+                ) : null}
               </SummaryBox>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Cancel the limit order for ${o.tradingsymbol}`}
+                accessibilityLabel={`Cancel the resting order for ${o.tradingsymbol}`}
                 disabled={cancelling}
                 onPress={() => onCancel(o)}
                 className="mt-3 h-10 flex-row items-center justify-center gap-2 rounded-field border border-line-strong active:bg-surface-sunk disabled:opacity-50 dark:border-line-dark-strong dark:active:bg-surface-sunk-dark"
@@ -309,6 +342,15 @@ const OrderRow = memo(function OrderRow({
                     label={o.marginDelta >= 0 ? 'Margin blocked' : 'Margin released'}
                     value={formatINR(Math.abs(o.marginDelta), 0)}
                   />
+                  {o.cashDelta != null ? (
+                    <SummaryLine label="Cash moved" value={formatSignedINR(o.cashDelta)} strong />
+                  ) : null}
+                  {o.priceSource ? (
+                    <SummaryLine
+                      label={o.settlement ? 'Settled against' : 'Price from'}
+                      value={priceSourceWord(o.priceSource)}
+                    />
+                  ) : null}
                 </>
               ) : null}
               <SummaryLine
@@ -320,6 +362,15 @@ const OrderRow = memo(function OrderRow({
               ) : null}
             </SummaryBox>
           </View>
+          {onTrade && !o.settlement ? (
+            <Button
+              label="Trade this contract"
+              variant="outline"
+              size="sm"
+              onPress={() => onTrade(o)}
+              accessibilityLabel={`Open the ticket for ${title}`}
+            />
+          ) : null}
         </View>
       ) : null}
     </View>

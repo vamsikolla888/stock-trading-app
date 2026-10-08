@@ -61,8 +61,9 @@ in that repo at `server/src/docs/specs/*.routes.yaml` (served as Swagger by the 
 src/
 ├── app/                     # Expo Router routes (file-based)
 │   ├── auth/                # signed-out stack — welcome, login, register, forgot/reset password
-│   ├── (app)/(tabs)/        # the five main menus — (markets), trade, fno, intel, settings —
+│   ├── (app)/(tabs)/        # the five bottom menus — (markets), fno, trade, intel, agents —
 │   │                        #   each a folder whose files are that menu's sub-tabs
+│   ├── (app)/settings/      # the Settings menu, pushed from the app bar's gear
 │   ├── (app)/               # drill-in screens pushed over the tabs (stock, order, article…)
 │   ├── _layout.tsx          # root providers, cold-start bootstrap, brand splash
 │   └── +not-found.tsx
@@ -92,17 +93,22 @@ src/
 The menu mirrors the web client's `NAV_GROUPS` (`client/src/shared/constants/nav.ts`), declared
 once in `src/config/navigation.ts`:
 
-| Bottom tab   | Sub-tabs (top row)                                                         |
-| ------------ | -------------------------------------------------------------------------- |
-| Markets      | Today · Strong picks · Explore · Market heatmap · News                     |
-| Trade        | Trade · mStock portfolio · Groww portfolio · Watchlists · Paper trading    |
-| F&O          | Explore · Positions · Orders · Paper trading                               |
-| Intelligence | Recommendations · Strategies · Screeners · Signals · Live · Matrix · Build |
-| Settings     | Preferences · Automations · Admin (administrators only)                    |
+| Menu               | Sub-tabs (top row)                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| Markets            | Today · Daily Brief · Strong picks · Explore · IPOs · Market heatmap · News                 |
+| Trade              | Trade · mStock portfolio · Groww portfolio · Watchlists · Paper trading                     |
+| F&O                | Explore · Positions · Orders · Paper trading                                                |
+| Intelligence       | Recommendations · Stock analysis · Strategies · Screeners · Signals · Live · Matrix · Build |
+| Agents             | Overview · Index trading\* · Portfolio review · Web research\* · Docs                       |
+| Settings (app bar) | Preferences · Automations · Admin\*                                                         |
 
-Each bottom tab is a folder under `src/app/(app)/(tabs)/` whose layout (`GroupTabs`) renders the
-app bar plus a Groww-style scrollable sub-tab row (`GroupTabBar`); sub-screens use `GroupScreen`
-and stay mounted after their first visit. Markets is the route group `(markets)`, so Today is `/`.
+\* administrators only.
+
+The first five are bottom tabs (Trade raised in the centre). Each is a folder under
+`src/app/(app)/(tabs)/` whose layout (`GroupTabs`) renders the app bar plus a Groww-style scrollable
+sub-tab row (`GroupTabBar`); sub-screens use `GroupScreen` and stay mounted after their first visit.
+Markets is the route group `(markets)`, so Today is `/`. Settings (`placement: 'header'`) opens from
+the app bar's gear: the same sub-tabs, pushed over the tabs with a back button, at `src/app/(app)/settings/`.
 Drill-ins (a stock, an article, the option chain, a strategy…) are stack screens under
 `src/app/(app)/` using `StackScreen`. A test (`src/config/__tests__/navigation.test.ts`) fails if a
 menu entry has no route file.

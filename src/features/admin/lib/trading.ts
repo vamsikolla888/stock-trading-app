@@ -1,8 +1,10 @@
 import type { StatusTone } from '@/features/settings/lib/status';
 
-// Trading controls (web: AdminConsole → Feature flags → Live trading, plus the kill switch the
-// web only shows read-only). Both are global Redis settings that fail CLOSED on the server:
-// an unreadable switch reads as off / engaged.
+import type { KillSwitchAdminState } from '../types';
+
+// Trading controls (web: Admin › Trading controls) — the two platform switches every real order
+// passes through. Both are global Redis settings that fail CLOSED on the server: an unreadable
+// switch reads as off / engaged. A real order also needs its own user's Safe Mode off.
 
 /** The server's rule for an engage reason (engageKillSwitchBodySchema): 3–500 characters. */
 export const KILL_REASON_MIN = 3;
@@ -50,7 +52,8 @@ export function liveOrderGate(
   return {
     tone: 'ok',
     title: 'Live orders accepted',
-    detail: 'Real orders reach the broker after the per-order risk checks.',
+    detail:
+      'Real orders reach the broker after the per-order risk checks, unless the user’s own Safe Mode is on.',
   };
 }
 
@@ -69,4 +72,23 @@ export function stringField(value: object | null | undefined, key: string): stri
   if (!value || !(key in value)) return null;
   const field = (value as Record<string, unknown>)[key];
   return typeof field === 'string' ? field : null;
+}
+
+/**
+ * The kill-switch state an engage/disengage reply carries, ready to put in the shared
+ * kill-switch query. Anything unreadable is treated as ENGAGED — the server fails closed, and
+ * the screen must never show "clear" for a state it could not read.
+ */
+export function normalizeKillSwitch(raw: unknown): KillSwitchAdminState {
+  const value =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const str = (field: unknown) => (typeof field === 'string' && field.trim() ? field : null);
+  return {
+    engaged: value.engaged !== false,
+    reason: str(value.reason),
+    engagedAt: str(value.engagedAt),
+    engagedBy: str(value.engagedBy),
+  };
 }

@@ -36,6 +36,8 @@ import {
 import type { PaperOrder } from '../types';
 
 const NUM = { fontVariant: ['tabular-nums' as const] };
+/** The paper screen loads the server's ceiling of orders; past it, older ones aren't here. */
+const ORDERS_LOADED = 200;
 
 const FILTERS: readonly { key: PaperOrderFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -130,10 +132,7 @@ export function PaperOrdersSection({
     return <InlineError what="your paper orders" error={error} onRetry={onRetry} />;
   if (rows.length === 0) {
     return (
-      <InlineEmpty
-        title="No paper orders yet"
-        message="Every paper order you place — filled, resting or rejected — is listed here with its charges."
-      />
+      <InlineEmpty title="No orders yet" message="Paper orders show here with their charges." />
     );
   }
 
@@ -185,6 +184,11 @@ export function PaperOrdersSection({
           Export as CSV
         </Text>
       </Pressable>
+      {rows.length >= ORDERS_LOADED ? (
+        <Text className="mt-2 text-[11px] text-ink-faint dark:text-ink-dark-faint">
+          Newest {ORDERS_LOADED} orders only — every fill is in Analytics.
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -302,14 +306,14 @@ const OrderRow = memo(function OrderRow({
               </View>
               {!order.chargesBreakdown ? (
                 <Text className="mt-1 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-                  Booked before charges were itemised — the total is exact.
+                  Not itemised — total only.
                 </Text>
               ) : null}
             </View>
           ) : (
             <Text className="text-xs text-ink-muted dark:text-ink-dark-muted">
               {order.status === 'PENDING'
-                ? 'Resting — it fills when the price reaches your level. Nothing is charged until it does.'
+                ? `Waiting for its ${order.triggerPrice != null ? 'trigger' : 'price'}${order.side === 'BUY' ? ' · cost held from available cash' : ''}.`
                 : 'Nothing was filled, so nothing was charged.'}
             </Text>
           )}

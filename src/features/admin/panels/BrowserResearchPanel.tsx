@@ -3,6 +3,9 @@ import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { InlineEmpty } from '@/components/common/InlineError';
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid, SplitColumns } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
@@ -27,13 +30,18 @@ import {
   LIMIT_RULES,
   parseDomains,
   pairingWarning,
+  researchSummary,
   RUN_OUTCOME,
   SCHEDULE_MODES,
   validateGuardrails,
   type GuardrailsDraft,
   type LimitKey,
 } from '@/features/admin/lib/browserResearch';
-import type { BrowserResearchConfig, BrowserResearchScheduleMode } from '@/features/admin/types';
+import type {
+  BrowserResearchConfig,
+  BrowserResearchRun,
+  BrowserResearchScheduleMode,
+} from '@/features/admin/types';
 import { monoFont } from '@/features/settings/components/JsonBlock';
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { TextArea } from '@/features/settings/components/TextArea';
@@ -394,8 +402,51 @@ function ActivityList({ now }: { now: number }) {
   );
 }
 
+/** The page's headline numbers: the connection, the allowlist, and the recent runs. */
+function ResearchTiles({
+  config,
+  runs,
+  now,
+}: {
+  config: BrowserResearchConfig;
+  runs: readonly BrowserResearchRun[] | undefined;
+  now: number;
+}) {
+  const layout = useScreenLayout();
+  const status = CONNECTION_STATUS[config.connectionStatus] ?? CONNECTION_STATUS.disconnected;
+  const summary = runs ? researchSummary(runs) : null;
+  return (
+    <Grid columns={layout.compact ? 2 : 4} gap={12} className="mb-4">
+      <StatTile
+        label="Connection"
+        value={status.label}
+        status={status.tone}
+        sub={config.lastSeenAt ? `Seen ${relativeTime(config.lastSeenAt, now)}` : 'No browser yet'}
+      />
+      <StatTile
+        label="Allowed domains"
+        value={String(config.allowedDomains.length)}
+        sub="Everything else is blocked"
+      />
+      <StatTile
+        label="Recent runs"
+        value={summary ? String(summary.runs) : '—'}
+        sub={
+          summary ? (summary.runs ? `${summary.succeeded} succeeded` : 'None recorded') : undefined
+        }
+      />
+      <StatTile
+        label="Pages read"
+        value={summary ? summary.pages.toLocaleString('en-IN') : '—'}
+        sub="Across recent runs"
+      />
+    </Grid>
+  );
+}
+
 /** The admin-owned Chrome research connection, its guardrails and runs (web: Browser research). */
 export function BrowserResearchPanel() {
+  const layout = useScreenLayout();
   const config = useBrowserResearch();
   const runs = useBrowserResearchRuns();
   const now = useNow(15_000);
@@ -405,6 +456,7 @@ export function BrowserResearchPanel() {
       title="Browser research"
       subtitle="Paired Chrome · read-only tools"
       onRefresh={() => Promise.all([config.refetch(), runs.refetch()])}
+      fill
     >
       {config.isPending ? (
         <ListSkeleton rows={3} />
@@ -416,15 +468,22 @@ export function BrowserResearchPanel() {
         />
       ) : (
         <>
+          <ResearchTiles config={config.data} runs={runs.data} now={now} />
           <ConnectionCard config={config.data} now={now} />
 
-          <Section title="Guardrails" note="Enforced by server and browser">
-            <GuardrailsForm config={config.data} />
-          </Section>
-
-          <Section title="Activity" note="Latest 30">
-            <ActivityList now={now} />
-          </Section>
+          <SplitColumns
+            split={!layout.compact}
+            left={
+              <Section title="Guardrails" note="Enforced by server and browser">
+                <GuardrailsForm config={config.data} />
+              </Section>
+            }
+            right={
+              <Section title="Activity" note="Latest 30">
+                <ActivityList now={now} />
+              </Section>
+            }
+          />
 
           <Text className="mt-4 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
             All browser activity is read-only. Research signals are informational, not investment

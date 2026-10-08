@@ -4,6 +4,8 @@ import { Text, View } from 'react-native';
 
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
+import { SafeModeNotice } from '@/features/account/components/SafeMode';
+import { useSafeModeOn, useSafeModeRefusalSync } from '@/features/account/hooks';
 import { formatINR, formatQuantity } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -69,6 +71,10 @@ function ModifyBody({
 }) {
   const { colors } = useTheme();
   const modify = useModifyFnoOrder();
+  // A modify can raise the size or move a price into the market: Safe Mode blocks it. A cancel
+  // only removes exposure and stays available.
+  const safeMode = useSafeModeOn();
+  const syncSafeMode = useSafeModeRefusalSync();
   // Without Groww's lot count the size cannot be shown or changed here — only prices.
   const sizable = order.lots != null && order.contract != null;
   const [lots, setLots] = useState(order.lots ?? 0);
@@ -176,6 +182,7 @@ function ModifyBody({
       ) : (
         <Note>Only what you change is sent. Whatever has already filled stays filled.</Note>
       )}
+      {safeMode ? <SafeModeNotice action="modify" onLeave={onClose} /> : null}
       {modify.isError ? <Banner tone="error" message={getErrorMessage(modify.error)} /> : null}
       {reviewing ? (
         <>
@@ -184,10 +191,14 @@ function ModifyBody({
             size="lg"
             fullWidth
             loading={modify.isPending}
+            disabled={safeMode}
             onPress={() =>
               modify.mutate(
                 { id: order.growwOrderId, body },
-                { onSuccess: () => toast.success('Modification sent to Groww') },
+                {
+                  onSuccess: () => toast.success('Modification sent to Groww'),
+                  onError: syncSafeMode,
+                },
               )
             }
           />
@@ -204,7 +215,7 @@ function ModifyBody({
           label="Review change"
           size="lg"
           fullWidth
-          disabled={!changed || issues.length > 0}
+          disabled={!changed || issues.length > 0 || safeMode}
           onPress={() => setReviewing(true)}
         />
       )}

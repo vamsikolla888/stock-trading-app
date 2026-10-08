@@ -1,5 +1,10 @@
 import { dayMove, markRows, paiseSumOrNull, paperKpis, rowMark } from '@/features/paper/lib/book';
-import { walletDraft } from '@/features/paper/lib/wallet';
+import {
+  CASH_WALLET_PRESETS,
+  FNO_WALLET_PRESETS,
+  presetLabel,
+  walletDraft,
+} from '@/features/paper/lib/wallet';
 import type {
   PaperPortfolio,
   PaperPosition,
@@ -247,5 +252,26 @@ describe('walletDraft', () => {
   it('does nothing for an unchanged or empty amount', () => {
     expect(walletDraft(limits, '1000000').canSave).toBe(false);
     expect(walletDraft(limits, '').amount).toBeNull();
+  });
+});
+
+describe('wallet presets', () => {
+  it('match the web’s chips and read in lakhs', () => {
+    expect(CASH_WALLET_PRESETS).toEqual([500_000, 1_000_000, 2_500_000, 5_000_000]);
+    expect(FNO_WALLET_PRESETS).toEqual([250_000, 500_000, 1_000_000, 2_500_000]);
+    expect(FNO_WALLET_PRESETS.map(presetLabel)).toEqual(['₹2.5L', '₹5L', '₹10L', '₹25L']);
+    expect(presetLabel(10_000_000)).toBe('₹1Cr');
+  });
+
+  it('explain the rule when nothing would change', () => {
+    const limits = {
+      capital: 1_000_000,
+      cash: 900_000,
+      minCapital: 600_000,
+      maxCapital: 100_000_000,
+    };
+    expect(walletDraft(limits, '1000000').message).toBe(
+      'Between ₹6,00,000 and ₹10,00,00,000. Raising deposits the difference; lowering withdraws free cash.',
+    );
   });
 });

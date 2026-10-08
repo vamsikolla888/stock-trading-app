@@ -1,9 +1,9 @@
 import React from 'react';
-import { Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import type { IconComponent } from '@/components/ui/icon';
 import { IconTile, type IconTone } from '@/components/ui/IconTile';
-import { useTheme } from '@/theme/ThemeProvider';
+import { Toggle } from '@/components/ui/Toggle';
 
 interface SwitchRowProps {
   Icon?: IconComponent;
@@ -28,8 +28,6 @@ export function SwitchRow({
   onValueChange,
   disabled = false,
 }: SwitchRowProps) {
-  const { colors } = useTheme();
-
   return (
     <Pressable
       accessibilityRole="switch"
@@ -49,16 +47,7 @@ export function SwitchRow({
           </Text>
         ) : null}
       </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        disabled={disabled}
-        trackColor={{ true: colors.primary, false: colors.borderStrong }}
-        thumbColor={colors.primaryText}
-        ios_backgroundColor={colors.borderStrong}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-      />
+      <Toggle value={value} disabled={disabled} />
     </Pressable>
   );
 }

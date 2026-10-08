@@ -5,6 +5,8 @@ import { Text, View } from 'react-native';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/Tabs';
+import { SafeModeNotice } from '@/features/account/components/SafeMode';
+import { useSafeModeOn, useSafeModeRefusalSync } from '@/features/account/hooks';
 import { cn } from '@/lib/utils/cn';
 import { formatINR, formatQuantity } from '@/lib/utils/formatters';
 import { toast } from '@/lib/utils/toast';
@@ -29,6 +31,7 @@ import {
   unitsOf,
   valueLabel,
 } from '../lib/chain';
+import { isEquityFnoExchange } from '../lib/explore';
 import {
   contractTitle,
   daysUntil,
@@ -47,6 +50,7 @@ import {
   requestLimitIssues,
 } from '../lib/orderRules';
 import type {
+  EquityFnoExchange,
   FnoChainLeg,
   FnoContract,
   FnoOrderType,
@@ -153,15 +157,27 @@ export function OrderTicket({
         ) : null
       }
     >
-      {target ? (
+      {target && isEquityFnoExchange(target.contract.exchange) ? (
         <TicketBody
           key={`${target.contract.exchange}:${target.contract.tradingSymbol}:${target.nonce}`}
           target={target}
+          exchange={target.contract.exchange}
           ltp={ltp}
           priceStale={priceStale}
           onBusy={setBusy}
           onClose={onClose}
         />
+      ) : target ? (
+        // Defence in depth: no screen opens a ticket on a commodity, and the server refuses an
+        // MCX / NCO order (422) — Groww's API places no commodity orders.
+        <View className="gap-4 pb-1">
+          <Banner
+            tone="info"
+            title="Orders aren’t available"
+            message="Groww doesn’t place commodity orders through its API. Prices and charts only."
+          />
+          <Button label="Close" variant="outline" fullWidth onPress={onClose} />
+        </View>
       ) : null}
     </Sheet>
   );
@@ -169,12 +185,15 @@ export function OrderTicket({
 
 function TicketBody({
   target,
+  exchange,
   ltp,
   priceStale,
   onBusy,
   onClose,
 }: {
   target: TicketTarget;
+  /** The contract's book, narrowed: orders go to NSE / BSE F&O only. */
+  exchange: EquityFnoExchange;
   ltp: number | null;
   priceStale: boolean;
   onBusy: (busy: boolean) => void;
@@ -184,6 +203,9 @@ function TicketBody({
   const { contract } = target;
   const status = useFnoStatus();
   const blockedReason = ordersBlockedReason(status.data?.groww);
+  // Safe Mode (Profile & security): the server refuses the order anyway — this says so first.
+  const safeMode = useSafeModeOn();
+  const syncSafeMode = useSafeModeRefusalSync();
   const place = usePlaceFnoOrder();
   const intent = useOrderIntent();
   const inFlight = useRef(false);
@@ -247,7 +269,7 @@ function TicketBody({
       valid
         ? [
             {
-              exchange: contract.exchange,
+              exchange,
               tradingSymbol: contract.tradingSymbol,
               side,
               lots,
@@ -257,7 +279,7 @@ function TicketBody({
             },
           ]
         : null,
-    [valid, contract.exchange, contract.tradingSymbol, side, lots, orderType, product, price],
+    [valid, exchange, contract.tradingSymbol, side, lots, orderType, product, price],
   );
   const margin = useMarginPreview(marginLegs, valid && !blockedReason && step !== 'result');
   const available = availableFor(margin.data?.funds, contract.kind, side);
@@ -288,7 +310,7 @@ function TicketBody({
 
   const openReview = () => {
     setAttempted(true);
-    if (!valid || blockedReason || units === 0) return;
+    if (!valid || blockedReason || safeMode || units === 0) return;
     intent.begin();
     setSubmitError(null);
     setStep('review');
@@ -301,7 +323,7 @@ function TicketBody({
     inFlight.current = true;
     place.mutate(
       {
-        exchange: contract.exchange,
+        exchange,
         tradingSymbol: contract.tradingSymbol,
         side,
         lots,
@@ -327,6 +349,7 @@ function TicketBody({
         },
         onError: (error) => {
           intent.settle(error);
+          syncSafeMode(error);
           // No answer (network, 5xx): the key is kept, so retrying is the SAME order.
           const retrySafe = isApiError(error) && (error.isNetworkError || error.isServerError);
           setSubmitError(
@@ -427,10 +450,7 @@ function TicketBody({
             message={`You are writing a call. Its loss is unlimited if ${contract.underlying} rises.`}
           />
         ) : null}
-        <Note>
-          The risk engine checks this order again on the server before it reaches Groww; Groww then
-          applies its own checks.
-        </Note>
+        {safeMode ? <SafeModeNotice onLeave={onClose} /> : null}
         {submitError ? <Banner tone="error" message={submitError} /> : null}
         <Button
           label={place.isPending ? 'Placing with Groww…' : `Confirm ${verb} · ${lotsLabel(lots)}`}
@@ -438,6 +458,7 @@ function TicketBody({
           fullWidth
           variant={isBuy ? 'primary' : 'danger'}
           loading={place.isPending}
+          disabled={safeMode}
           onPress={confirm}
           accessibilityLabel={`Confirm ${verb} ${lotsLabel(lots)} of ${contractTitle(contract)}`}
         />
@@ -522,6 +543,7 @@ function TicketBody({
       </SummaryBox>
 
       <IssueList issues={shownIssues} />
+      {safeMode ? <SafeModeNotice onLeave={onClose} /> : null}
       {blockedReason ? (
         <Banner
           tone="warning"
@@ -544,7 +566,7 @@ function TicketBody({
       {priceStale && orderType === 'MARKET' ? (
         <Banner
           tone="warning"
-          message="Prices may be old. A market order fills at the current price, whatever this screen shows."
+          message="Prices are stale — a market order fills at the current price, not the one shown."
         />
       ) : null}
       {margin.isError && !blockedReason ? (
@@ -557,12 +579,14 @@ function TicketBody({
         label={
           blockedReason
             ? 'Orders unavailable'
-            : `Review ${verb} · ${lotsLabel(lots > 0 ? lots : 0)}`
+            : safeMode
+              ? 'Safe Mode is on'
+              : `Review ${verb} · ${lotsLabel(lots > 0 ? lots : 0)}`
         }
         size="lg"
         fullWidth
         variant={isBuy ? 'primary' : 'danger'}
-        disabled={Boolean(blockedReason) || place.isPending}
+        disabled={Boolean(blockedReason) || safeMode || place.isPending}
         onPress={openReview}
       />
 

@@ -180,7 +180,7 @@ export default function LiveScreen() {
             <Banner
               tone="warning"
               title="Halted"
-              message={`${engine.haltedReason} New entries are blocked; exits keep running, so a halt never traps an open position.`}
+              message={`${engine.haltedReason} New entries are blocked. Exits keep running.`}
               action={{ label: 'Engine settings', onPress: () => router.push('/trade/paper') }}
               className="mt-4"
             />
@@ -190,7 +190,7 @@ export default function LiveScreen() {
             <View className="mt-4">
               <InlineEmpty
                 title="The engine has never been switched on"
-                message="There is no auto-trade configuration for this account, so nothing can run it."
+                message="No auto-trade set up on this account."
                 action={{
                   label: 'Set it up on the paper screen',
                   onPress: () => router.push('/trade/paper'),
@@ -224,7 +224,7 @@ export default function LiveScreen() {
           {watchedGone ? (
             <InlineEmpty
               title="That strategy is no longer in your library"
-              message="The engine is still pointed at it, so it has nothing to scan and places no new entries. Choose another strategy, or the recommendations batch, in the engine settings."
+              message="The engine has nothing to scan and places no new entries. Choose another source."
               action={{ label: 'Engine settings', onPress: () => router.push('/trade/paper') }}
             />
           ) : matchesQuery.isPending ? (
@@ -253,9 +253,9 @@ export default function LiveScreen() {
                 <Text className="mt-2 text-xs leading-[17px] text-ink-faint dark:text-ink-dark-faint">
                   Evaluated on the {barDate(matches.asOfBarTime)} close
                   {matches.skippedForInsufficientBars > 0
-                    ? ` · ${formatNumber(matches.skippedForInsufficientBars, 0)} stocks had too little history to judge`
+                    ? ` · ${formatNumber(matches.skippedForInsufficientBars, 0)} skipped (short history)`
                     : ''}
-                  . A fill would happen at the next open, not at the price shown.
+                  . Fills at the next open, not this price.
                 </Text>
               ) : null}
             </>
@@ -278,9 +278,11 @@ export default function LiveScreen() {
         ) : events.length === 0 ? (
           <InlineEmpty
             title="No orders yet"
-            message={`The engine has not placed an order on this account.${
-              engine.configured && !engine.enabled ? ' It is switched off.' : ''
-            }`}
+            message={
+              engine.enabled
+                ? 'Nothing traded yet. Runs hourly 10:05–14:05 IST.'
+                : 'No auto-trades yet.'
+            }
           />
         ) : (
           <ListCard>
@@ -299,10 +301,6 @@ export default function LiveScreen() {
           title="Declined today"
           note={`${tally.declined} candidate${tally.declined === 1 ? '' : 's'}`}
         >
-          <Text className="mb-3 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted">
-            What the rules turned away. A strategy passing on signals because the position cap was
-            full is telling you something about the risk settings.
-          </Text>
           <ListCard>
             {declined.map((item, index) => (
               <View key={item.reason}>
@@ -354,8 +352,7 @@ export default function LiveScreen() {
       ) : null}
 
       <Text className="mt-6 text-center text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        Paper trading only — order routing is off, so nothing here reaches your broker. Not
-        investment advice.
+        Paper only — nothing here reaches your broker. Not investment advice.
       </Text>
     </GroupScreen>
   );

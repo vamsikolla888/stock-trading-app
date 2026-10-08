@@ -8,15 +8,18 @@ import { InlineError } from '@/components/common/InlineError';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { useFnoSearch, useFnoUnderlyings } from '../hooks';
-import { contractTitle, expiryLabel } from '../lib/format';
+import { commodityChainHref } from '../lib/explore';
+import { contractTitle, expiryLabel, venueOf } from '../lib/format';
+import { rankUnderlyings } from '../lib/underlyingSearch';
 import type {
   CommodityContractSearchResult,
+  CommodityExchange,
   CommodityUnderlying,
   FnoContract,
   FnoUnderlying,
 } from '../types';
 
-import { Tag } from './primitives';
+import { InstrumentMark } from './Glyphs';
 import { Sheet } from './Sheet';
 
 type Item =
@@ -37,23 +40,56 @@ const keyOf = (it: Item) =>
 /** Server-side search needs three characters (the hook's own gate). */
 const REMOTE_MIN = 3;
 
+/** Where a commodity pick goes: its chain (or futures), read-only, optionally one contract charted. */
+export interface CommodityPick {
+  exchange: CommodityExchange;
+  underlying: string;
+  tab: 'options' | 'futures';
+  expiry: string | null;
+  contract: string | null;
+}
+
+function commodityPickOf(it: Extract<Item, { type: 'm' | 'mc' }>): CommodityPick {
+  if (it.type === 'm') {
+    return {
+      exchange: it.m.exchange,
+      underlying: it.m.underlying,
+      tab: it.m.hasOptions ? 'options' : 'futures',
+      expiry: null,
+      contract: null,
+    };
+  }
+  const future = it.mc.kind === 'FUT';
+  return {
+    exchange: it.mc.exchange,
+    underlying: it.mc.underlying,
+    tab: future ? 'futures' : 'options',
+    expiry: future ? null : it.mc.expiry,
+    contract: it.mc.tradingSymbol,
+  };
+}
+
 /**
  * Find an underlying (NIFTY, RELIANCE…), a commodity (GOLD, CRUDEOIL), or jump straight to a
  * contract by trading symbol or "NIFTY 25000 CE". Underlyings filter locally from the cached
- * universe (instant); contracts and commodities come from the server once three characters
- * are typed. A commodity (or commodity contract) opens the commodity futures list filtered to
- * it — commodities have no option chain here, and Groww's API places no commodity orders.
+ * universe (instant), word by word with the spoken index names ("bank nifty", "fin nifty",
+ * "index" — lib/underlyingSearch.ts); with nothing typed it lists every index. Contracts and
+ * commodities come from the server once three characters are typed. A commodity opens its own
+ * chain / futures, read-only — Groww's API places no commodity orders.
  */
 export function SearchSheet({
   visible,
   onClose,
   onPickUnderlying,
   onPickContract,
+  onPickCommodity,
 }: {
   visible: boolean;
   onClose: () => void;
   onPickUnderlying: (u: FnoUnderlying) => void;
   onPickContract?: (c: FnoContract) => void;
+  /** A commodity pick; by default it opens the commodity's chain screen. */
+  onPickCommodity?: (pick: CommodityPick) => void;
 }) {
   const router = useRouter();
   const { colors, isDark } = useTheme();
@@ -65,20 +101,9 @@ export function SearchSheet({
   const items = useMemo((): Item[] => {
     const all = universe.data?.underlyings ?? [];
     if (!needle) {
-      return all
-        .filter((u) => u.isIndex)
-        .slice(0, 8)
-        .map((u) => ({ type: 'u' as const, u }));
+      return all.filter((u) => u.isIndex).map((u) => ({ type: 'u' as const, u }));
     }
-    const us = all
-      .filter((u) => u.underlying.includes(needle) || (u.name ?? '').toUpperCase().includes(needle))
-      .sort(
-        (a, b) =>
-          Number(!a.underlying.startsWith(needle)) - Number(!b.underlying.startsWith(needle)) ||
-          Number(!a.isIndex) - Number(!b.isIndex),
-      )
-      .slice(0, 8)
-      .map((u) => ({ type: 'u' as const, u }));
+    const us = rankUnderlyings(all, needle, 8).map((u) => ({ type: 'u' as const, u }));
     // The query keeps its previous answer while the next one loads; below the server's minimum
     // that answer belongs to a longer query the user has since deleted, so it is not shown.
     const answer = needle.length >= REMOTE_MIN ? remote.data : undefined;
@@ -112,13 +137,18 @@ export function SearchSheet({
     const action = () => {
       if (it.type === 'u') onPickUnderlying(it.u);
       else if (it.type === 'm' || it.type === 'mc') {
-        router.push({
-          pathname: '/fno-list/[section]',
-          params: {
-            section: 'commodity-futures',
-            q: it.type === 'm' ? it.m.underlying : it.mc.underlying,
-          },
-        });
+        const pick = commodityPickOf(it);
+        if (onPickCommodity) onPickCommodity(pick);
+        else
+          router.push(
+            commodityChainHref(
+              pick.exchange,
+              pick.underlying,
+              pick.tab,
+              pick.expiry,
+              pick.contract,
+            ),
+          );
       } else onPickContract?.(it.c);
     };
     close();
@@ -188,22 +218,36 @@ export function SearchSheet({
                 : contractTitle(it.c);
         const sub =
           it.type === 'u'
-            ? `${it.u.name ?? it.u.underlying} · ${it.u.exchange === 'BFO' ? 'BSE' : 'NSE'}`
+            ? `${it.u.isIndex ? 'Index' : 'Stock'} · ${it.u.name ?? it.u.underlying} · ${venueOf(it.u.exchange)}`
             : it.type === 'm'
-              ? `${it.m.underlying} · ${it.m.exchange === 'NCO' ? 'NSE' : 'MCX'} · futures list`
+              ? `Commodity · ${venueOf(it.m.exchange)} · ${it.m.expiryCount} expir${it.m.expiryCount === 1 ? 'y' : 'ies'}`
               : it.type === 'mc'
-                ? `${it.mc.tradingSymbol} · ${expiryLabel(it.mc.expiry)} · ${it.mc.exchange === 'NCO' ? 'NSE' : 'MCX'}`
-                : `${it.c.tradingSymbol} · ${expiryLabel(it.c.expiry)}`;
-        const tag =
-          it.type === 'u'
-            ? it.u.isIndex
-              ? 'Index'
-              : 'Stock'
-            : it.type === 'm'
-              ? 'Commodity'
-              : it.type === 'mc'
-                ? it.mc.kind
-                : it.c.kind;
+                ? `${it.mc.kind} · ${expiryLabel(it.mc.expiry)} · ${venueOf(it.mc.exchange)} · view only`
+                : `${it.c.kind} · ${expiryLabel(it.c.expiry)} · ${it.c.tradingSymbol}`;
+        const mark =
+          it.type === 'u' ? (
+            <InstrumentMark
+              kind={it.u.isIndex ? 'index' : 'stock'}
+              underlying={it.u.underlying}
+              logoSymbol={it.u.logoSymbol ?? it.u.spotSymbol}
+              exchange={it.u.exchange}
+              size={32}
+            />
+          ) : it.type === 'm' || it.type === 'mc' ? (
+            <InstrumentMark
+              kind="commodity"
+              underlying={it.type === 'm' ? it.m.underlying : it.mc.underlying}
+              size={32}
+            />
+          ) : (
+            <InstrumentMark
+              kind={it.c.logoKind === 'index' ? 'index' : 'stock'}
+              underlying={it.c.underlying}
+              logoSymbol={it.c.logoSymbol}
+              exchange={it.c.exchange}
+              size={32}
+            />
+          );
         const lot =
           it.type === 'u'
             ? it.u.lotSize
@@ -220,7 +264,7 @@ export function SearchSheet({
             onPress={() => choose(it)}
             className="min-h-[56px] flex-row items-center gap-3 border-b border-line py-2.5 active:opacity-70 dark:border-line-dark"
           >
-            <Tag label={tag} tone={it.type === 'u' && it.u.isIndex ? 'info' : 'neutral'} />
+            {mark}
             <View className="min-w-0 flex-1">
               <Text className="text-sm font-semibold text-ink dark:text-ink-dark" numberOfLines={1}>
                 {title}
@@ -245,7 +289,7 @@ export function SearchSheet({
       ) : null}
       {needle.length > 0 && needle.length < REMOTE_MIN && onPickContract ? (
         <Text className="pt-3 text-[11px] text-ink-faint dark:text-ink-dark-faint">
-          Type three or more characters to search contracts and commodities too.
+          Type 3+ characters to also search contracts and commodities.
         </Text>
       ) : null}
     </Sheet>

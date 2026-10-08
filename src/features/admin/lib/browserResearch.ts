@@ -160,3 +160,20 @@ export function pairingWarning(config: Pick<BrowserResearchConfig, 'tokenConfigu
     ? 'A new code replaces any unused one. The browser paired now keeps working until another one pairs with this code, or you revoke it.'
     : 'The code is valid for 10 minutes. Enter it in the Chrome extension to pair.';
 }
+
+export interface ResearchSummary {
+  runs: number;
+  succeeded: number;
+  pages: number;
+}
+
+/** The headline numbers over the recent runs the server keeps (web: Browser research KPIs). */
+export function researchSummary(
+  runs: readonly Pick<BrowserResearchRun, 'outcome' | 'pagesVisited'>[],
+): ResearchSummary {
+  return {
+    runs: runs.length,
+    succeeded: runs.filter((run) => run.outcome === 'success').length,
+    pages: runs.reduce((sum, run) => sum + Math.max(0, run.pagesVisited || 0), 0),
+  };
+}

@@ -35,13 +35,38 @@ import { getValidAccessToken } from '@/services/api/client';
  * per-socket state is rebuilt from this registry. Socket.IO multiplexes this namespace over the
  * same WebSocket as the index feed (indicesSocket.ts), so it costs no extra connection.
  *
- * Ticks come from the VIEWER's own broker session (the server subscribes each symbol on that
- * user's mStock ticker). Without one nothing arrives, and every screen simply keeps its REST
- * price — polled as before — which is why nothing here is ever an error state.
+ * Ticks come from the VIEWER's own broker sessions: equities from their mStock ticker
+ * (`watch:symbol` / `watch:batch`), F&O and — for a detail screen — the same stock again from
+ * their Groww live feed (`fno:watch`, which carries NSE/BSE cash listings too). Without either,
+ * nothing arrives and every screen keeps its REST price, polled as before — which is why nothing
+ * here is ever an error state.
+ *
+ * TWO FEEDS, ONE PRICE. A detail screen's stock is watched on both feeds so it streams whichever
+ * broker the viewer has connected. Interleaving two feeds would make the price stutter between
+ * two slightly different prints, so each symbol is OWNED by the feed that last delivered it and
+ * the other feed's ticks are ignored until the owner has been silent for SOURCE_HOLD_MS. A
+ * platform-sourced F&O frame (the server's snapshot fallback, not a broker feed) never stands in
+ * for a stock's live price — only for the F&O instruments a screen asked the F&O feed for.
  */
 
 export type WatchMode = 'list' | 'stream' | 'fno';
 export type StreamStatus = 'idle' | 'connecting' | 'live' | 'offline';
+/** Which feed a tick came from: the broker ticker (mStock) or the F&O feed (Groww). */
+export type TickOrigin = 'broker' | 'fno';
+
+/** The F&O feed's own heartbeat (`fno:status`) and the source of its latest frame. */
+export interface FeedStatus {
+  state: 'live' | 'degraded' | 'closed';
+  /** 'groww' = the viewer's Groww session; 'platform' = the server's fallback data. */
+  source: 'groww' | 'platform' | null;
+  /** 'stream' = pushed from Groww's live feed as trades print; 'poll' = its last-price API. */
+  transport: 'stream' | 'poll' | null;
+  note: string | null;
+  /** The server's cadence for this feed; no frame for 3× this means stale. */
+  intervalMs: number;
+  /** When this device last heard from the feed. */
+  at: number;
+}
 
 /** The server's per-batch ceiling (MAX_BATCH_SYMBOLS); beyond it rows keep their REST price. */
 export const MAX_BATCH_SYMBOLS = 60;
@@ -56,6 +81,12 @@ const IDLE_DISCONNECT_MS = 10_000;
 const QUOTE_RETAIN_MS = 30_000;
 const RETRY_START_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
+/** A symbol's feed keeps it this long after its last tick before the other feed may take over. */
+export const SOURCE_HOLD_MS = 5_000;
+/** The server's instrument grammar (fno-stream.service.ts INSTRUMENT_RE): anything else is dropped. */
+const FNO_INSTRUMENT_RE = /^(NFO|BFO|NSE|BSE|MCX|NCO):[A-Z0-9&_-]{1,40}$/;
+/** Cash listings Groww's feed carries — a detail screen's stock rides it too. */
+const isCashKey = (key: string) => key.startsWith('NSE:') || key.startsWith('BSE:');
 
 /** The part of a Socket.IO client this store uses — narrow, so tests can fake it. */
 export interface StreamSocket {
@@ -89,17 +120,39 @@ interface FnoWireTick {
 /** F&O ticks carry no move of their own; it is measured against the close when there is one. */
 export function fromFnoTick(tick: FnoWireTick): LiveTick {
   const { exchange, symbol } = splitLiveKey(String(tick?.i ?? ''));
+  const ltp = tick?.ltp;
+  const prevClose = typeof tick?.c === 'number' && tick.c > 0 ? tick.c : null;
+  const measurable = prevClose != null && typeof ltp === 'number' && Number.isFinite(ltp);
   return {
     exchange,
     symbol,
-    ltp: tick?.ltp,
-    change: null,
-    changePct: null,
-    prevClose: typeof tick?.c === 'number' ? tick.c : null,
+    ltp,
+    change: measurable ? ltp - prevClose : null,
+    changePct: measurable ? ((ltp - prevClose) / prevClose) * 100 : null,
+    prevClose,
     direction: null,
     volume: typeof tick?.v === 'number' ? tick.v : null,
     ohlc: null,
   };
+}
+
+const positiveNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+/** An `fno:status` / `fno:ticks` frame's feed fields, or null when it carries none. */
+function feedFields(
+  frame: unknown,
+): Partial<Pick<FeedStatus, 'state' | 'source' | 'transport' | 'note' | 'intervalMs'>> {
+  if (!frame || typeof frame !== 'object') return {};
+  const f = frame as Record<string, unknown>;
+  const out: Partial<Pick<FeedStatus, 'state' | 'source' | 'transport' | 'note' | 'intervalMs'>> =
+    {};
+  if (f.state === 'live' || f.state === 'degraded' || f.state === 'closed') out.state = f.state;
+  if (f.source === 'groww' || f.source === 'platform') out.source = f.source;
+  if (f.transport === 'stream' || f.transport === 'poll') out.transport = f.transport;
+  if (typeof f.note === 'string' || f.note === null) out.note = (f.note as string | null) || null;
+  if (typeof f.intervalMs === 'number' && f.intervalMs > 0) out.intervalMs = f.intervalMs;
+  return out;
 }
 
 export class PriceStream {
@@ -110,8 +163,12 @@ export class PriceStream {
     fno: new Map(),
   };
   private readonly quotes = new Map<string, LiveQuote>();
+  /** Which feed owns each symbol, and when it last delivered (any tick, changed or not). */
+  private readonly owners = new Map<string, { origin: TickOrigin; at: number }>();
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly statusListeners = new Set<Listener>();
+  private feed: FeedStatus | null = null;
+  private readonly feedListeners = new Set<Listener>();
   private readonly dirty = new Set<string>();
   private readonly evictTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private frameQueued = false;
@@ -186,9 +243,22 @@ export class PriceStream {
     return out;
   }
 
-  /** The F&O instruments the app-wide `fno:watch` carries, in watch order. */
+  /**
+   * The instruments the app-wide `fno:watch` carries: what F&O screens asked for, in watch order,
+   * then each detail screen's stock (an NSE/BSE listing), so it streams from Groww's feed for a
+   * viewer whose mStock ticker isn't live.
+   */
   fnoTargets(): string[] {
-    return [...this.refs.fno.keys()].slice(0, MAX_FNO_INSTRUMENTS);
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const add = (key: string) => {
+      if (seen.has(key) || !FNO_INSTRUMENT_RE.test(key)) return;
+      seen.add(key);
+      out.push(key);
+    };
+    for (const key of this.refs.fno.keys()) add(key);
+    for (const key of this.refs.stream.keys()) if (isCashKey(key)) add(key);
+    return out.slice(0, MAX_FNO_INSTRUMENTS);
   }
 
   private scheduleBatchSync(): void {
@@ -257,6 +327,38 @@ export class PriceStream {
     };
   }
 
+  /**
+   * The feed that last delivered `key` and when — any tick, changed or not — so a screen can
+   * say "Live" while a quiet stock is still being confirmed, and which broker it streams from.
+   */
+  getLastTick(key: string): { origin: TickOrigin; at: number } | undefined {
+    return this.owners.get(key);
+  }
+
+  getFeedStatus(): FeedStatus | null {
+    return this.feed;
+  }
+
+  subscribeFeed(listener: Listener): () => void {
+    this.feedListeners.add(listener);
+    return () => this.feedListeners.delete(listener);
+  }
+
+  private updateFeed(frame: unknown): void {
+    const fields = feedFields(frame);
+    const prev = this.feed;
+    const next: FeedStatus = {
+      state: fields.state ?? prev?.state ?? 'live',
+      source: fields.source ?? prev?.source ?? null,
+      transport: fields.transport ?? prev?.transport ?? null,
+      note: 'note' in fields ? (fields.note ?? null) : (prev?.note ?? null),
+      intervalMs: fields.intervalMs ?? prev?.intervalMs ?? 5_000,
+      at: this.deps.now(),
+    };
+    this.feed = next;
+    this.feedListeners.forEach((listener) => listener());
+  }
+
   getStatus(): StreamStatus {
     return this.status;
   }
@@ -274,8 +376,15 @@ export class PriceStream {
 
   /* ── Ticks ───────────────────────────────────────────────────────────────────────── */
 
-  /** Folds ticks into the store; subscribers hear about it once, before the next frame. */
-  ingest(ticks: readonly LiveTick[]): void {
+  /**
+   * Folds ticks into the store; subscribers hear about it once, before the next frame.
+   * `platform`: the F&O frame came from the server's fallback data, not a broker feed.
+   */
+  ingest(
+    ticks: readonly LiveTick[],
+    origin: TickOrigin = 'broker',
+    options: { platform?: boolean } = {},
+  ): void {
     const now = this.deps.now();
     for (const tick of ticks) {
       if (!tick || typeof tick.symbol !== 'string') continue;
@@ -283,6 +392,14 @@ export class PriceStream {
       // A late frame for a symbol nothing watches any more is not stored: it would outlive
       // the screen and resurface as a stale "live" price.
       if (!this.isWatched(key)) continue;
+      // The platform's fallback is a saved snapshot, not a feed: fine for an F&O screen that
+      // asked for it (and says so), never a stand-in for a stock's live price.
+      if (origin === 'fno' && options.platform && !this.refs.fno.has(key)) continue;
+      // One feed per symbol: the other feed waits until the owner has gone quiet.
+      const owner = this.owners.get(key);
+      if (owner && owner.origin !== origin && now - owner.at < SOURCE_HOLD_MS) continue;
+      if (!positiveNumber(tick.ltp)) continue;
+      this.owners.set(key, { origin, at: now });
       const prev = this.quotes.get(key);
       const next = toLiveQuote(prev, tick, now);
       if (!next || next === prev) continue;
@@ -312,7 +429,9 @@ export class PriceStream {
       key,
       setTimeout(() => {
         this.evictTimers.delete(key);
-        if (this.isWatched(key) || !this.quotes.delete(key)) return;
+        if (this.isWatched(key)) return;
+        this.owners.delete(key);
+        if (!this.quotes.delete(key)) return;
         this.notify(key); // readers fall back to their REST price
       }, QUOTE_RETAIN_MS),
     );
@@ -369,13 +488,20 @@ export class PriceStream {
       }, this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, RETRY_MAX_MS);
     });
-    socket.on('price:update', (tick: LiveTick) => this.ingest([tick]));
+    socket.on('price:update', (tick: LiveTick) => this.ingest([tick], 'broker'));
     socket.on('prices:batch', (frame: { ticks?: LiveTick[] }) => {
-      if (Array.isArray(frame?.ticks)) this.ingest(frame.ticks);
+      if (Array.isArray(frame?.ticks)) this.ingest(frame.ticks, 'broker');
     });
-    socket.on('fno:ticks', (frame: { ticks?: FnoWireTick[] }) => {
-      if (Array.isArray(frame?.ticks)) this.ingest(frame.ticks.map(fromFnoTick));
+    socket.on('fno:ticks', (frame: { ticks?: FnoWireTick[]; source?: unknown }) => {
+      this.updateFeed(frame);
+      if (Array.isArray(frame?.ticks)) {
+        this.ingest(frame.ticks.map(fromFnoTick), 'fno', {
+          platform: frame.source === 'platform',
+        });
+      }
     });
+    // The F&O feed's heartbeat: live / degraded / closed, Groww or the platform, pushed or polled.
+    socket.on('fno:status', (frame: unknown) => this.updateFeed(frame));
     return socket;
   }
 
@@ -416,7 +542,10 @@ export class PriceStream {
     this.refs.fno.clear();
     const keys = [...this.quotes.keys()];
     this.quotes.clear();
+    this.owners.clear();
     this.dirty.clear();
+    this.feed = null;
+    this.feedListeners.forEach((listener) => listener());
     this.sentBatch = '';
     this.sentFno = '';
     this.retryDelay = RETRY_START_MS;

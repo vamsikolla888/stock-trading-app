@@ -69,8 +69,8 @@ export default function SessionsScreen() {
       confirmAction({
         title: session.current ? 'Sign out of this device?' : `Sign out ${title}?`,
         message: session.current
-          ? 'You’ll return to the sign-in screen. Other devices stay signed in.'
-          : 'That device will need your password to get back in. Other devices stay signed in.',
+          ? 'You will return to the sign-in screen.'
+          : 'That device is signed out at once.',
         confirmLabel: 'Sign out',
         destructive: true,
         onConfirm: () =>
@@ -107,8 +107,7 @@ export default function SessionsScreen() {
             No tracked sessions yet
           </Text>
           <Text className="text-center text-[13px] leading-[19px] text-ink-muted dark:text-ink-dark-muted">
-            This sign-in predates session tracking. It will appear here after its next refresh or
-            your next sign-in.
+            Shown after your next sign-in.
           </Text>
         </View>
       ) : (

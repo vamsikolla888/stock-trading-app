@@ -22,10 +22,12 @@ import { useFnoPositions, useFnoStatus } from '../hooks';
 import { summarisePositions } from '../lib/chain';
 import {
   chainHref,
-  isChainExchange,
+  exploreCommodityHref,
+  isEquityFnoExchange,
   liveMove,
   periodBase,
   PERIODS,
+  streamedLtp,
   underlyingHref,
 } from '../lib/explore';
 import { daysUntil, dteLabel, expiryLabel, futureTitle } from '../lib/format';
@@ -172,10 +174,13 @@ const MOVE_TABS = [
 export function FnoStocksShelf({
   stocks,
   loading = false,
+  live,
 }: {
   stocks: FnoExploreSummary['stocks'] | undefined;
   /** Placeholder rows only while the first answer is on its way — never after a failure. */
   loading?: boolean;
+  /** Streamed prices by `EXCHANGE:SYMBOL` (the rows' `spotKey`), folded over the REST price. */
+  live?: ReadonlyMap<string, { ltp: number }>;
 }) {
   const router = useRouter();
   const [period, setPeriod] = useState<ExplorePeriod>('d1');
@@ -227,7 +232,8 @@ export function FnoStocksShelf({
       ) : (
         <ListCard>
           {rows.map((r, index) => {
-            const m = liveMove(r.ltp, periodBase(r, period));
+            const ltp = streamedLtp(live, r.spotKey, r.ltp);
+            const m = liveMove(ltp, periodBase(r, period));
             return (
               <React.Fragment key={`${r.exchange}:${r.underlying}`}>
                 {index > 0 ? <RowDivider /> : null}
@@ -241,7 +247,7 @@ export function FnoStocksShelf({
                   }
                   title={r.label}
                   meta={`${r.underlying} · lot ${r.lotSize?.toLocaleString('en-IN') ?? '—'} · ${expiryLabel(r.nearestExpiry)}`}
-                  price={r.ltp != null ? formatINR(r.ltp) : '—'}
+                  price={ltp != null ? formatINR(ltp) : '—'}
                   change={m.change}
                   changePct={m.changePct}
                   trailing={r.volume != null ? `Vol ${formatCompactNumber(r.volume)}` : null}
@@ -309,6 +315,7 @@ export function FuturesShelf({
   note,
   titleOf = (f) => futureTitle(f.label, f.expiry),
   subOf,
+  live,
 }: {
   title: string;
   section: 'index-futures' | 'stock-futures' | 'commodities' | 'commodity-futures';
@@ -320,6 +327,8 @@ export function FuturesShelf({
   note?: string | null;
   titleOf?: (f: ExploreFuture) => string;
   subOf?: (f: ExploreFuture) => string | null;
+  /** Streamed prices by `EXCHANGE:SYMBOL` (the rows' `streamKey`), folded over the REST price. */
+  live?: ReadonlyMap<string, { ltp: number }>;
 }) {
   const router = useRouter();
   return (
@@ -364,8 +373,11 @@ export function FuturesShelf({
           contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
         >
           {rows.map((f) => {
-            const m = liveMove(f.ltp, f.prevClose);
+            const ltp = streamedLtp(live, f.streamKey, f.ltp);
+            const m = liveMove(ltp, f.prevClose);
             const exchange = f.exchange;
+            // A commodity future opens its commodity's futures with it charted (read-only).
+            const commodityLink = commodity ? exploreCommodityHref(f) : null;
             return (
               <QuoteCard
                 key={`${f.exchange}:${f.tradingSymbol}`}
@@ -374,6 +386,7 @@ export function FuturesShelf({
                     kind={commodity ? 'commodity' : f.logoSymbol ? 'stock' : 'index'}
                     underlying={f.underlying}
                     logoSymbol={f.logoSymbol}
+                    exchange={f.exchange}
                     size={32}
                   />
                 }
@@ -383,13 +396,15 @@ export function FuturesShelf({
                     ? subOf(f)
                     : `${dteLabel(daysUntil(f.expiry))} · lot ${f.lotSize.toLocaleString('en-IN')}`
                 }
-                ltp={f.ltp}
+                ltp={ltp}
                 change={m.change ?? f.change}
                 changePct={m.changePct ?? f.changePct}
                 onPress={
-                  !commodity && isChainExchange(exchange)
-                    ? () => router.push(chainHref(exchange, f.underlying, { tab: 'futures' }))
-                    : null
+                  commodityLink
+                    ? () => router.push(commodityLink)
+                    : !commodity && isEquityFnoExchange(exchange)
+                      ? () => router.push(chainHref(exchange, f.underlying, { tab: 'futures' }))
+                      : null
                 }
               />
             );

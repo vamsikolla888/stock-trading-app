@@ -6,10 +6,11 @@ import { StackScreen } from '@/components/navigation/StackScreen';
 import { AdminOnlyNotice } from '@/features/admin/components/AdminState';
 import { AiUsagePanel } from '@/features/admin/panels/AiUsagePanel';
 import { AnalyticsPanel } from '@/features/admin/panels/AnalyticsPanel';
-import { BrokerUsagePanel } from '@/features/admin/panels/BrokerUsagePanel';
+import { ApiUsagePanel } from '@/features/admin/panels/ApiUsagePanel';
 import { BrowserResearchPanel } from '@/features/admin/panels/BrowserResearchPanel';
 import { DataSourcesPanel } from '@/features/admin/panels/DataSourcesPanel';
 import { FundamentalsPanel } from '@/features/admin/panels/FundamentalsPanel';
+import { GrowwTokenPanel } from '@/features/admin/panels/GrowwTokenPanel';
 import { HealthPanel } from '@/features/admin/panels/HealthPanel';
 import { JobsPanel } from '@/features/admin/panels/JobsPanel';
 import { LogsPanel } from '@/features/admin/panels/LogsPanel';
@@ -20,7 +21,8 @@ import { useAuthStore } from '@/store/authStore';
 
 export { RouteErrorBoundary as ErrorBoundary } from '@/components/common/RouteErrorBoundary';
 
-/** One screen per admin console section; each panel owns its StackScreen. */
+/** One screen per admin console section; each panel owns its StackScreen. An old section id
+ *  (`broker-usage`) resolves to the section it became, so old links still open it. */
 const PANELS: Record<AdminSectionId, React.ComponentType> = {
   health: HealthPanel,
   analytics: AnalyticsPanel,
@@ -28,10 +30,11 @@ const PANELS: Record<AdminSectionId, React.ComponentType> = {
   jobs: JobsPanel,
   'browser-research': BrowserResearchPanel,
   ai: AiUsagePanel,
-  'broker-usage': BrokerUsagePanel,
+  'api-usage': ApiUsagePanel,
   fundamentals: FundamentalsPanel,
   data: DataSourcesPanel,
   users: UsersPanel,
+  'groww-token': GrowwTokenPanel,
   trading: TradingPanel,
 };
 

@@ -16,6 +16,7 @@ import { toast } from '@/lib/utils/toast';
 import { getErrorMessage } from '@/types/api';
 
 import { usePaperMutations, usePaperWallet } from '../hooks';
+import { CASH_WALLET_PRESETS } from '../lib/wallet';
 import type { ProductSummary, SegmentOverview } from '../types';
 
 import { WalletChanges, WalletEditor } from './WalletEditor';
@@ -59,14 +60,14 @@ export function PaperFundsSection({
           className="mb-4"
           tone="error"
           title={`${formatINR(w.marginShortfall)} short`}
-          message="A forced intraday square-off lost more than the margin behind it. That loss is real and isn’t floored at zero — deposit or reset the wallet to trade again."
+          message="A forced intraday square-off lost more than its margin. Deposit or reset to trade again."
         />
       ) : null}
 
       <ListCard className="px-3.5">
         <KeyValueRow
           label="Wallet balance"
-          hint="Free to trade — delivery and intraday"
+          hint="Delivery + intraday"
           value={mask(formatINR(w.availableCash))}
         />
         {w.blockedCash > 0 ? (
@@ -100,7 +101,7 @@ export function PaperFundsSection({
         />
         <KeyValueRow
           label="Intraday buying power"
-          hint="Wallet balance × MIS leverage"
+          hint={`${intraday?.leverage ?? 5}× available cash`}
           value={mask(formatINR(w.intradayBuyingPower, 0))}
           divider
         />
@@ -153,7 +154,7 @@ export function PaperFundsSection({
       </Section>
 
       {delivery || intraday ? (
-        <Section title="By product" note="each its own P&L">
+        <Section title="By product" note="at trade price">
           <View className="gap-3">
             {delivery ? <ProductCard product={delivery} /> : null}
             {intraday ? <ProductCard product={intraday} /> : null}
@@ -163,13 +164,13 @@ export function PaperFundsSection({
 
       {w.mergedAt ? (
         <Text className="mt-4 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-          Your separate delivery and intraday pools were merged into this one wallet on{' '}
+          Delivery and intraday pools merged into this wallet on{' '}
           {new Date(w.mergedAt).toLocaleDateString('en-IN', {
             day: 'numeric',
             month: 'short',
             year: 'numeric',
-          })}{' '}
-          — capital and cash added together, nothing else changed.
+          })}
+          .
         </Text>
       ) : null}
       {overview.caveats.map((caveat) => (
@@ -206,11 +207,7 @@ function ProductCard({ product }: { product: ProductSummary }) {
           {plural(product.positionCount, 'open position')}
         </Text>
       </View>
-      <KeyValueRow
-        label="Invested"
-        hint="At the price paid"
-        value={mask(formatINR(product.investedValue))}
-      />
+      <KeyValueRow label="Invested" hint="At cost" value={mask(formatINR(product.investedValue))} />
       {intraday ? (
         <KeyValueRow
           label="Own money / borrowed"
@@ -264,7 +261,7 @@ function WalletSheet({
     confirmAction({
       title: `Reset ${name}?`,
       message:
-        'Deletes every delivery and intraday position, order and wallet change, so the book starts empty at this wallet. F&O paper trading is untouched. This can’t be undone.',
+        'Deletes every order, position and trade (the wallet amount is kept). F&O paper is untouched. This can’t be undone.',
       confirmLabel: 'Reset',
       cancelLabel: 'Keep my history',
       destructive: true,
@@ -282,7 +279,7 @@ function WalletSheet({
     confirmAction({
       title: `Reset all ${profileCount} profiles?`,
       message:
-        'Every paper profile — default included — goes back to an empty book at its own wallet. The profiles themselves are kept. F&O paper trading is untouched. This can’t be undone.',
+        'Each profile goes back to an empty book at its own wallet. F&O paper is untouched. This can’t be undone.',
       confirmLabel: 'Reset all',
       cancelLabel: 'Cancel',
       destructive: true,
@@ -311,12 +308,36 @@ function WalletSheet({
       ) : (
         <View className="gap-6">
           <View className="flex-row rounded-xl bg-surface-sunk px-3.5 py-3 dark:bg-surface-sunk-dark">
-            <Fact label="Wallet now" value={formatINR(wallet.data.capital, 0)} />
-            <Fact label="Free cash" value={formatINR(wallet.data.availableCash, 0)} />
-            <Fact label="Lowest now" value={formatINR(wallet.data.minCapital, 0)} />
+            <Fact label="Wallet" value={formatINR(wallet.data.capital)} />
+            <Fact label="Cash" value={formatINR(wallet.data.cash)} />
+            <Fact
+              label="Free to withdraw"
+              value={formatINR(Math.max(0, wallet.data.availableCash))}
+            />
           </View>
+          {wallet.data.capitalAdded !== 0 || wallet.data.mergedAt ? (
+            <Text
+              className="-mt-3 text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              {wallet.data.capitalAdded !== 0
+                ? `Started at ${formatINR(wallet.data.openingCapital)}; ${formatSignedINR(wallet.data.capitalAdded)} added since ${wallet.data.resetAt ? 'the last reset' : 'it opened'}. `
+                : ''}
+              {wallet.data.mergedAt
+                ? `The separate delivery and intraday wallets were combined into this one on ${new Date(
+                    wallet.data.mergedAt,
+                  ).toLocaleDateString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    timeZone: 'Asia/Kolkata',
+                  })}.`
+                : ''}
+            </Text>
+          ) : null}
           <WalletEditor
             key={wallet.data.capital}
+            presets={CASH_WALLET_PRESETS}
             wallet={wallet.data}
             saving={setWallet.isPending}
             error={
@@ -330,6 +351,9 @@ function WalletSheet({
             }
           />
           <WalletChanges changes={wallet.data.changes} />
+          <Text className="-mt-2 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
+            Each change is logged in Analytics.
+          </Text>
           <View className="gap-2 border-t border-line pt-4 dark:border-line-dark">
             <Text className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint dark:text-ink-dark-faint">
               Start over

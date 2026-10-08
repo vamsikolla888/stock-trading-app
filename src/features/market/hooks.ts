@@ -10,14 +10,19 @@ import { isApiError } from '@/types/api';
 
 import { marketApi } from './api';
 import { RANGE_REQUEST, type ChartRange } from './lib/chartRanges';
-import type { CapBand, IndexQuote, IndexSnapshot, MoverKind } from './types';
+import type { CapBand, Exchange, IndexQuote, IndexSnapshot, MoverKind } from './types';
 
 export const marketKeys = {
   all: ['market'] as const,
   indices: () => [...marketKeys.all, 'indices'] as const,
   movers: (kind: MoverKind, limit: number, cap?: CapBand) =>
     [...marketKeys.all, 'movers', kind, limit, cap ?? 'all'] as const,
-  search: (query: string) => [...marketKeys.all, 'search', query] as const,
+  search: (query: string, group?: 'company') =>
+    group
+      ? ([...marketKeys.all, 'search', query, group] as const)
+      : ([...marketKeys.all, 'search', query] as const),
+  circuit: (exchange: string, symbol: string) =>
+    [...marketKeys.all, 'circuit', exchange, symbol] as const,
   recentlyViewed: () => [...marketKeys.all, 'recently-viewed'] as const,
   stock: (exchange: string, symbol: string) =>
     [...marketKeys.all, 'stock', exchange, symbol] as const,
@@ -113,14 +118,37 @@ export function useMovers(kind: MoverKind, limit: number, cap?: CapBand) {
   });
 }
 
-export function useStockSearch(query: string) {
+/**
+ * Stock search. `group: 'company'` is the app-wide search (one row per company — it opens the
+ * stock page, which switches NSE/BSE itself); the order, watchlist and paper pickers leave it
+ * off, since there the listing is the choice.
+ */
+export function useStockSearch(query: string, options: { group?: 'company' } = {}) {
   const trimmed = query.trim();
+  const { group } = options;
   return useQuery({
-    queryKey: marketKeys.search(trimmed.toLowerCase()),
-    queryFn: ({ signal }) => marketApi.search(trimmed, 20, signal),
+    queryKey: marketKeys.search(trimmed.toLowerCase(), group),
+    queryFn: ({ signal }) => marketApi.search(trimmed, 20, signal, group),
     enabled: trimmed.length > 0,
     staleTime: 10_000,
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * The session's circuit limits (GET /market/circuit) for an NSE/BSE listing. Never blocks the
+ * page: it loads beside the detail, the exchange sets the band before the session and the server
+ * caches it per day, so a 10-minute refresh in market hours only catches a rare intraday
+ * revision — live ticks, when the feed streams the symbol, are fresher still.
+ */
+export function useCircuitLimits(symbol: string, exchange: string, enabled = true) {
+  const listed = exchange === 'NSE' || exchange === 'BSE';
+  return useQuery({
+    queryKey: marketKeys.circuit(exchange, symbol),
+    queryFn: ({ signal }) => marketApi.circuit(exchange as Exchange, symbol, signal),
+    enabled: enabled && listed && symbol.length > 0,
+    staleTime: 10 * 60_000,
+    refetchInterval: live(10 * 60_000),
   });
 }
 
@@ -151,13 +179,24 @@ export function useClearRecentlyViewed() {
   });
 }
 
-export function useStockDetail(symbol: string, exchange: string) {
+/** The stock page's REST refresh: quick while nothing streams, slow while ticks carry the price. */
+export const STOCK_POLL_MS = { fallback: 5_000, streaming: 30_000 } as const;
+
+/**
+ * One stock's quote and profile. `streaming`: live ticks are already moving the price, so the REST
+ * read only refreshes the rest (day range, volume) — and polls at a fraction of the rate.
+ */
+export function useStockDetail(
+  symbol: string,
+  exchange: string,
+  options: { streaming?: boolean } = {},
+) {
   return useQuery({
     queryKey: marketKeys.stock(exchange, symbol),
     queryFn: ({ signal }) => marketApi.stock(symbol, exchange, signal),
     enabled: symbol.length > 0,
-    staleTime: 5_000,
-    refetchInterval: live(10_000),
+    staleTime: 4_000,
+    refetchInterval: live(options.streaming ? STOCK_POLL_MS.streaming : STOCK_POLL_MS.fallback),
   });
 }
 

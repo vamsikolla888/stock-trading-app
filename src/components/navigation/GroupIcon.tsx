@@ -1,36 +1,53 @@
-import ArrowLeftRight from 'lucide-react-native/icons/arrow-left-right';
-import ChartCandlestick from 'lucide-react-native/icons/chart-candlestick';
-import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
-import Sparkles from 'lucide-react-native/icons/sparkles';
-import TrendingUp from 'lucide-react-native/icons/trending-up';
 import React, { memo } from 'react';
 
-import type { IconComponent } from '@/components/ui/icon';
+import { NavIcon, type NavIconName } from '@/components/navigation/NavIcon';
 
-export type GroupIconName = 'markets' | 'trade' | 'fno' | 'intel' | 'settings';
+export type GroupIconName = 'markets' | 'trade' | 'fno' | 'intel' | 'agents' | 'settings';
 
 interface GroupIconProps {
   name: GroupIconName;
   color: string;
+  /** The filled plane's colour (the theme accent). Defaults to `color`. */
+  duoColor?: string;
   focused: boolean;
   size?: number;
+  /**
+   * `primary`: the raised Trade button. Its glyph sits on the accent, so the filled plane stays
+   * at its resting strength; at full strength it would wash out the white line work.
+   */
+  variant?: 'tab' | 'primary';
 }
 
-const ICONS: Record<GroupIconName, IconComponent> = {
-  markets: TrendingUp,
-  trade: ArrowLeftRight,
-  fno: ChartCandlestick,
-  intel: Sparkles,
-  settings: SlidersHorizontal,
+/**
+ * Each menu group's glyph, from the app's own duotone family (NavIcon), the same drawings the
+ * web menu uses for that group's screens.
+ */
+const GLYPH: Record<GroupIconName, NavIconName> = {
+  markets: 'marketsTab',
+  trade: 'tradeTab',
+  fno: 'candles',
+  intel: 'bulb',
+  agents: 'robot',
+  settings: 'sliders',
 };
 
-/** Semantic Lucide icons for the five primary destinations. */
 export const GroupIcon = memo(function GroupIcon({
   name,
   color,
+  duoColor,
   focused,
   size = 24,
+  variant = 'tab',
 }: GroupIconProps) {
-  const Icon = ICONS[name];
-  return <Icon size={size} color={color} strokeWidth={focused ? 2.35 : 1.8} />;
+  const primary = variant === 'primary';
+  return (
+    <NavIcon
+      name={GLYPH[name]}
+      color={color}
+      duoColor={duoColor}
+      active={focused && !primary}
+      size={size}
+      strokeWidth={focused ? 1.9 : 1.7}
+    />
+  );
 });

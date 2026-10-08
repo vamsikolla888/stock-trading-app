@@ -1,10 +1,29 @@
 import { apiClient } from '@/services/api/client';
+import { SERVER_OUTDATED } from '@/services/api/contract';
+import { ApiError, isApiError } from '@/types/api';
 
+import {
+  normalizeHouseDetail,
+  normalizeHouseList,
+  normalizeJobResult,
+  normalizeScan,
+} from './lib/houseNormalize';
+import { normalizeIntradayDetail, normalizeStockTrades } from './lib/intradayNormalize';
 import type {
   CreateStrategyBody,
   EnqueueBacktestResult,
   GenerationView,
+  HouseJobResult,
+  HouseStrategyDetail,
+  HouseStrategyKey,
+  HouseStrategySummary,
   IndexSummary,
+  IntradayStrategyDetail,
+  IntradayStrategyKey,
+  StockTradesResult,
+  SwingStrategyKey,
+  UniverseKey,
+  VariantKey,
   PairingResult,
   RulesPreview,
   RunStaleResult,
@@ -16,6 +35,7 @@ import type {
   StrategyRules,
   StrategySummary,
   StrategyTemplate,
+  SwingScan,
   UpdateStrategyBody,
 } from './types';
 
@@ -141,5 +161,105 @@ export const strategiesApi = {
   async indices(): Promise<IndexSummary[]> {
     const { data } = await apiClient.get<{ indices: IndexSummary[] }>('/indices');
     return data.indices;
+  },
+};
+
+const housePath = (key: HouseStrategyKey) => `/strategies/house/${encodeURIComponent(key)}`;
+
+/**
+ * An older server has no /strategies/house router, so GET /strategies/house falls through to the
+ * user-strategy route and answers 404 "No strategy with id \"house\"" — never a 404 on a server
+ * that has the router. Read as what it is: the server is older than this screen.
+ */
+function outdatedOn404(error: unknown): never {
+  if (isApiError(error) && error.status === 404) throw outdated();
+  throw error;
+}
+
+function outdated(): ApiError {
+  return new ApiError({
+    status: 426,
+    code: SERVER_OUTDATED,
+    message:
+      'Platform strategies need a newer server version than the one this app is connected to.',
+  });
+}
+
+/**
+ * A server from before the intraday strategy validates `:key` against the swing alone and answers
+ * 422 for `bb-midband-5m` (this app only ever sends valid keys and universes) — older still, 404.
+ */
+function intradayOutdated(error: unknown): never {
+  if (isApiError(error) && (error.status === 404 || error.status === 422)) throw outdated();
+  throw error;
+}
+
+/**
+ * Platform strategies (server/src/modules/house-strategies/house-strategy.routes.ts) — run by the
+ * platform for everyone. Reads are open to every signed-in user; scan and replay are admin-only.
+ */
+export const houseApi = {
+  async list(signal?: AbortSignal): Promise<HouseStrategySummary[]> {
+    const { data } = await apiClient
+      .get<unknown>('/strategies/house', { signal })
+      .catch(outdatedOn404);
+    return normalizeHouseList(data);
+  },
+  /** The daily swing: config, scan days and the replay. */
+  async detail(key: SwingStrategyKey, signal?: AbortSignal): Promise<HouseStrategyDetail> {
+    const { data } = await apiClient.get<unknown>(housePath(key), { signal }).catch(outdatedOn404);
+    const detail = normalizeHouseDetail(data);
+    if (!detail) throw new Error('The server’s answer did not describe this strategy.');
+    return detail;
+  },
+  /** The intraday strategy for one universe: both variants, ablations, the re-test job. */
+  async intraday(
+    key: IntradayStrategyKey,
+    universe: UniverseKey,
+    signal?: AbortSignal,
+  ): Promise<IntradayStrategyDetail> {
+    const { data } = await apiClient
+      .get<unknown>(housePath(key), { params: { u: universe }, signal })
+      .catch(intradayOutdated);
+    const detail = normalizeIntradayDetail(data, universe);
+    if (!detail) throw new Error('The server’s answer did not describe this strategy.');
+    return detail;
+  },
+  /**
+   * Every backtested trade of one stock, newest first. A 404 here is the server's "no backtested
+   * trades for this stock" — the screen says so; it is not an outdated server.
+   */
+  async stockTrades(
+    key: IntradayStrategyKey,
+    symbol: string,
+    variant: VariantKey,
+    universe: UniverseKey,
+    signal?: AbortSignal,
+  ): Promise<StockTradesResult> {
+    const { data } = await apiClient.get<unknown>(
+      `${housePath(key)}/stocks/${encodeURIComponent(symbol)}`,
+      { params: { variant, u: universe }, signal },
+    );
+    return normalizeStockTrades(data, { symbol, variant, universe });
+  },
+  /** One evening scan — the latest completed one, or one session's. Null before any. */
+  async scan(
+    key: HouseStrategyKey,
+    date?: string,
+    signal?: AbortSignal,
+  ): Promise<SwingScan | null> {
+    const { data } = await apiClient.get<unknown>(`${housePath(key)}/scan`, {
+      params: date ? { date } : undefined,
+      signal,
+    });
+    return normalizeScan(data);
+  },
+  async runScan(key: HouseStrategyKey): Promise<HouseJobResult> {
+    const { data } = await apiClient.post<unknown>(`${housePath(key)}/scan`);
+    return normalizeJobResult(data);
+  },
+  async runReplay(key: HouseStrategyKey): Promise<HouseJobResult> {
+    const { data } = await apiClient.post<unknown>(`${housePath(key)}/replay`);
+    return normalizeJobResult(data);
   },
 };

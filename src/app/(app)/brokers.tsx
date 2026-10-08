@@ -75,7 +75,7 @@ function BrokerCard({
   const confirmDisconnect = () =>
     Alert.alert(
       `Disconnect ${broker.label}?`,
-      'Your stored credentials are deleted. You’ll need to connect again from scratch.',
+      'Stored credentials are deleted; history captured here is kept.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -173,8 +173,8 @@ export default function BrokersScreen() {
         </View>
       )}
       <Text className="mt-5 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        Your broker credentials are stored with your account so daily sessions can be renewed.
-        Disconnecting deletes them.
+        Credentials are encrypted, used only to open your broker session, and deleted when you
+        disconnect.
       </Text>
     </StackScreen>
   );

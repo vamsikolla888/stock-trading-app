@@ -27,6 +27,7 @@ export interface Signal {
   invalidation: string;
   /** The screener's own evidence, so a signal can be checked rather than trusted. */
   metrics?: Record<string, number>;
+  /** Clears every alert rule (server-computed; only BUY or SELL can). */
   meetsNotifyBar: boolean;
   notified: boolean;
   notifiedAt: string | null;
@@ -76,7 +77,20 @@ export interface PushGateStatus extends SignalGate {
   verdict: string;
 }
 
-/** GET /signals/status */
+/** One background job's health (signal generation, or the reliability sweep). */
+export interface SignalJobStatus {
+  /** Queued, waiting or running. */
+  running: boolean;
+  waiting: number;
+  active: number;
+  /** The last run's failure, when it failed. */
+  lastError: string | null;
+}
+
+/** GET /signals/status — job health and gate health together. */
 export interface SignalStatusResponse {
-  gate: PushGateStatus;
+  generation: SignalJobStatus;
+  reliability: SignalJobStatus;
+  /** Null from a server that answered without it. */
+  gate: PushGateStatus | null;
 }

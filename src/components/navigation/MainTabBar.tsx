@@ -6,19 +6,20 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GroupIcon, type GroupIconName } from '@/components/navigation/GroupIcon';
-import { NAV_GROUPS } from '@/config/navigation';
+import { TAB_GROUPS } from '@/config/navigation';
 import { useTheme } from '@/theme/ThemeProvider';
 
 const ICON_BY_ROUTE = Object.fromEntries(
-  NAV_GROUPS.map((group) => [group.route, group.icon]),
+  TAB_GROUPS.map((group) => [group.route, group.icon]),
 ) as Record<string, GroupIconName>;
 
+/** Trade sits in the middle slot, raised. */
 const VISUAL_ORDER: Record<string, number> = {
   '(markets)': 0,
   fno: 1,
   trade: 2,
   intel: 3,
-  settings: 4,
+  agents: 4,
 };
 
 const BAR_HORIZONTAL_GUTTER = 18;
@@ -131,7 +132,9 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
                         <GroupIcon
                           name={icon}
                           color={colors.primaryText}
+                          duoColor={colors.primaryText}
                           focused
+                          variant="primary"
                           size={primaryIconSize}
                         />
                       ) : null}
@@ -161,8 +164,9 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
                       <GroupIcon
                         name={icon}
                         color={focused ? colors.link : colors.textMuted}
+                        duoColor={colors.link}
                         focused={focused}
-                        size={21}
+                        size={22}
                       />
                     ) : null
                   }

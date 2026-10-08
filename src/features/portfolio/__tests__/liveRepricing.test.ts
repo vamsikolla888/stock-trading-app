@@ -37,6 +37,21 @@ describe('repriceHolding', () => {
   it('leaves the day move unknown when the row never had one', () => {
     expect(repriceHolding(holding({ dayChange: null }), 4000).dayChange).toBeNull();
   });
+
+  it('measures a row with no reported move against the tick’s previous close', () => {
+    const handAdded = holding({ dayChange: null, dayChangePct: null });
+    const live = repriceHolding(handAdded, 3900, 3800);
+    expect(live).not.toBe(handAdded);
+    expect(live.dayChange).toBeCloseTo(1_000); // (3900 − 3800) × 10
+    expect(live.dayChangePct).toBeCloseTo((100 / 3800) * 100);
+  });
+
+  it('keeps the broker’s own move over the tick’s previous close', () => {
+    const live = repriceHolding(holding(), 4000, 3000);
+    expect(live.dayChange).toBeCloseTo(1_500);
+    const row = holding();
+    expect(repriceHolding(row, 3900, 3000)).toBe(row);
+  });
 });
 
 describe('liveTotals', () => {

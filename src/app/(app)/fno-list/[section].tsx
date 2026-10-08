@@ -14,8 +14,9 @@ import { InstrumentMark } from '@/features/fno/components/Glyphs';
 import { useExploreSection } from '@/features/fno/hooks';
 import {
   chainHref,
+  exploreCommodityHref,
   filterExploreRows,
-  isChainExchange,
+  isEquityFnoExchange,
   isExploreSection,
   liveMove,
   paramString,
@@ -116,6 +117,8 @@ function FnoList({ section, initialFilter }: { section: ExploreSection; initialF
         const commodity = meta.kind === 'commodities';
         const exchange = item.exchange;
         const value = item.ltp != null ? item.ltp * item.lotSize : null;
+        // A commodity future opens its commodity's futures with it charted (read-only).
+        const commodityLink = commodity ? exploreCommodityHref(item) : null;
         return (
           <View className={cn(frame, 'overflow-hidden')}>
             <InstrumentRow
@@ -124,6 +127,7 @@ function FnoList({ section, initialFilter }: { section: ExploreSection; initialF
                   kind={commodity ? 'commodity' : item.logoSymbol ? 'stock' : 'index'}
                   underlying={item.underlying}
                   logoSymbol={item.logoSymbol}
+                  exchange={item.exchange}
                 />
               }
               title={futureTitle(item.label, item.expiry)}
@@ -133,9 +137,11 @@ function FnoList({ section, initialFilter }: { section: ExploreSection; initialF
               changePct={move.changePct ?? item.changePct}
               trailing={value != null ? `Value ${formatINRCompact(value)}` : null}
               onPress={
-                !commodity && isChainExchange(exchange)
-                  ? () => router.push(chainHref(exchange, item.underlying, { tab: 'futures' }))
-                  : null
+                commodityLink
+                  ? () => router.push(commodityLink)
+                  : !commodity && isEquityFnoExchange(exchange)
+                    ? () => router.push(chainHref(exchange, item.underlying, { tab: 'futures' }))
+                    : null
               }
             />
           </View>
@@ -150,6 +156,7 @@ function FnoList({ section, initialFilter }: { section: ExploreSection; initialF
                 kind={item.isIndex ? 'index' : 'stock'}
                 underlying={item.underlying}
                 logoSymbol={item.spotSymbol}
+                exchange={item.exchange}
               />
             }
             title={item.label}

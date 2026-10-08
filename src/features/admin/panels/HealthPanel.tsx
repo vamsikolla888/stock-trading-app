@@ -1,19 +1,19 @@
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
-import { Card } from '@/components/ui/Card';
 import { SegmentedControl } from '@/components/ui/Tabs';
 import { AdminQueryError } from '@/features/admin/components/AdminState';
-import { NoticeCard, UptimeStrip } from '@/features/admin/components/OpsBits';
+import { NoticeCard } from '@/features/admin/components/OpsBits';
+import { ServiceTile } from '@/features/admin/components/ServiceTile';
 import { useServiceHealth } from '@/features/admin/hooks';
-import { formatCount, formatMs, formatUptimePct, uptimeTone } from '@/features/admin/lib/format';
-import type { ObsRange, ServiceHealthRow } from '@/features/admin/types';
-import { monoFont } from '@/features/settings/components/JsonBlock';
-import { StatusPill } from '@/features/settings/components/StatusPill';
-import type { StatusTone } from '@/features/settings/lib/status';
-import { formatClock, formatDateTime } from '@/features/settings/lib/time';
-import { cn } from '@/lib/utils/cn';
+import { formatCount, formatUptimePct, uptimeTone } from '@/features/admin/lib/format';
+import { healthSummary, serviceName } from '@/features/admin/lib/services';
+import type { ObsRange } from '@/features/admin/types';
+import { formatClock } from '@/features/settings/lib/time';
 
 export const OBS_RANGES: readonly { key: ObsRange; label: string }[] = [
   { key: '1h', label: '1h' },
@@ -22,109 +22,47 @@ export const OBS_RANGES: readonly { key: ObsRange; label: string }[] = [
   { key: '30d', label: '30d' },
 ];
 
-/** What each probe is, in a few words — a bare "mstock" doesn't say what a red row means. */
-const DESCRIPTION: Record<string, string> = {
-  mongo: 'Primary datastore · admin ping',
-  redis: 'Cache, queues, pub/sub · PING',
-  mstock: 'Broker REST · from circuit breakers',
-  'quant-service': 'Python backtester · /api/v1/health/live',
-  worker: 'Jobs process · Redis heartbeat',
-  'screener-worker': 'Screener process · Redis heartbeat',
-};
-
-const UPTIME_TEXT: Record<StatusTone, string> = {
-  ok: 'text-brand-text dark:text-brand-text-dark',
-  warn: 'text-warning-600 dark:text-warning-dark',
-  bad: 'text-danger-600 dark:text-danger-dark',
-  info: 'text-info dark:text-info-dark',
-  neutral: 'text-ink-muted dark:text-ink-dark-muted',
-};
-
-function serviceState(row: ServiceHealthRow): { tone: StatusTone; label: string } {
-  // Unknown is grey, never green: an unmeasured dependency must not look healthy.
-  if (row.checks === 0 && (row.detail ?? '').includes('no checks'))
-    return { tone: 'neutral', label: 'Unknown' };
-  return row.ok ? { tone: 'ok', label: 'Up' } : { tone: 'bad', label: 'Down' };
-}
-
-function ServiceCard({ row }: { row: ServiceHealthRow }) {
-  const state = serviceState(row);
-  const tone = uptimeTone(row.uptimePct);
+/** Range switch for an ops panel: full width on a phone, a compact control on a wider window. */
+export function RangeBar<K extends string>({
+  items,
+  value,
+  onChange,
+}: {
+  items: readonly { key: K; label: string }[];
+  value: K;
+  onChange: (key: K) => void;
+}) {
+  const layout = useScreenLayout();
   return (
-    <Card className="gap-3">
-      <View className="flex-row items-start gap-3">
-        <View className="flex-1">
-          <Text
-            className="text-sm font-semibold text-ink dark:text-ink-dark"
-            style={{ fontFamily: monoFont }}
-          >
-            {row.service}
-          </Text>
-          {DESCRIPTION[row.service] ? (
-            <Text className="mt-0.5 text-xs text-ink-muted dark:text-ink-dark-muted">
-              {DESCRIPTION[row.service]}
-            </Text>
-          ) : null}
-        </View>
-        <StatusPill tone={state.tone} label={state.label} />
-      </View>
-      <View className="flex-row gap-4">
-        <View className="flex-1">
-          <Text className="text-[11px] text-ink-muted dark:text-ink-dark-muted">Uptime</Text>
-          <Text className={cn('mt-0.5 text-sm font-bold', UPTIME_TEXT[tone])}>
-            {formatUptimePct(row.uptimePct)}
-          </Text>
-        </View>
-        <View className="flex-1">
-          <Text className="text-[11px] text-ink-muted dark:text-ink-dark-muted">Avg latency</Text>
-          <Text className="mt-0.5 text-sm font-bold text-ink dark:text-ink-dark">
-            {formatMs(row.avgLatencyMs)}
-          </Text>
-        </View>
-        <View className="flex-1">
-          <Text className="text-[11px] text-ink-muted dark:text-ink-dark-muted">Checks</Text>
-          <Text className="mt-0.5 text-sm font-bold text-ink dark:text-ink-dark">
-            {formatCount(row.checks)}
-            {row.failures > 0 ? (
-              <Text className="text-xs font-semibold text-danger-600 dark:text-danger-dark">
-                {` · ${formatCount(row.failures)} failed`}
-              </Text>
-            ) : null}
-          </Text>
-        </View>
-      </View>
-      <UptimeStrip
-        series={row.series}
-        accessibilityLabel={`${row.service} uptime history, ${row.series.length} buckets`}
-      />
-      <Text className="text-xs leading-[17px] text-ink-muted dark:text-ink-dark-muted" selectable>
-        {row.detail ??
-          (row.lastFailureAt
-            ? `Last failure ${formatDateTime(row.lastFailureAt)}`
-            : 'No failures recorded')}
-      </Text>
-    </Card>
+    <View style={layout.compact ? undefined : { maxWidth: 360 }}>
+      <SegmentedControl items={items} value={value} onChange={onChange} />
+    </View>
   );
 }
 
 /** Dependency health with history, from the every-minute checker (web: Service health). */
 export function HealthPanel() {
+  const layout = useScreenLayout();
   const [range, setRange] = useState<ObsRange>('24h');
   const health = useServiceHealth(range);
   const data = health.data;
+  const services = data?.services ?? [];
+  const summary = healthSummary(services);
+  const checks = services.reduce((sum, row) => sum + row.checks, 0);
 
   return (
     <StackScreen
       title="Service health"
       subtitle={
         data
-          ? `Every ${Math.round(data.intervalMs / 1000)}s · ${data.retentionDays}d kept${data.checkedAt ? ` · last ${formatClock(data.checkedAt)}` : ''}`
+          ? `Dependency probes${data.checkedAt ? ` · last check ${formatClock(data.checkedAt)}` : ''}`
           : 'Dependency probes'
       }
       onRefresh={() => health.refetch()}
+      fill
     >
-      <SegmentedControl items={OBS_RANGES} value={range} onChange={setRange} />
-      <View className="mt-4 gap-3">
+      <RangeBar items={OBS_RANGES} value={range} onChange={setRange} />
+      <View className="mt-4 gap-4">
         {health.isPending ? (
           <ListSkeleton rows={4} />
         ) : !data ? (
@@ -136,19 +74,53 @@ export function HealthPanel() {
         ) : (
           <>
             {!data.overall.ok ? (
-              <NoticeCard tone="bad" title={`${data.overall.degraded.length} degraded`}>
-                {data.overall.degraded.join(', ')}
+              <NoticeCard
+                tone="bad"
+                title={`${data.overall.degraded.map(serviceName).join(', ')} ${data.overall.degraded.length === 1 ? 'is' : 'are'} not healthy`}
+              >
+                The history below shows when it started.
               </NoticeCard>
             ) : null}
             {data.checkedAt == null ? (
               <NoticeCard tone="info" title="No live probe yet">
-                No check has run in this API process since it started. The rows below are stored
+                No check has run in this API process since it started. The tiles below are stored
                 history.
               </NoticeCard>
             ) : null}
-            {data.services.map((row) => (
-              <ServiceCard key={row.service} row={row} />
-            ))}
+            <Grid columns={layout.compact ? 2 : 4} gap={12}>
+              <StatTile
+                label="Services up"
+                value={`${summary.up} of ${summary.total}`}
+                status={summary.up === summary.total ? 'ok' : 'bad'}
+                sub={data.overall.ok ? 'Right now' : `${data.overall.degraded.length} degraded`}
+              />
+              <StatTile
+                label="Lowest uptime"
+                value={formatUptimePct(summary.worst?.uptimePct)}
+                status={summary.worst ? uptimeTone(summary.worst.uptimePct) : undefined}
+                sub={summary.worst ? serviceName(summary.worst.service) : 'No samples yet'}
+              />
+              <StatTile
+                label="Failed checks"
+                value={formatCount(summary.failures)}
+                status={summary.failures > 0 ? 'warn' : undefined}
+                sub={
+                  checks > 0
+                    ? `${((summary.failures / checks) * 100).toFixed(2)}% of ${formatCount(checks)} · ${range}`
+                    : `In the last ${range}`
+                }
+              />
+              <StatTile
+                label="Probe interval"
+                value={`${Math.round(data.intervalMs / 1000)}s`}
+                sub={`${data.retentionDays} days kept`}
+              />
+            </Grid>
+            <Grid columns={layout.columns} gap={layout.compact ? 12 : 16}>
+              {services.map((row) => (
+                <ServiceTile key={row.service} row={row} detail />
+              ))}
+            </Grid>
             <Text className="text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
               Each bar is one {data.bucket} — green passed every check, amber some, red most; grey
               wasn’t sampled.

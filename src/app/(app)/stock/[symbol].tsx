@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { InlineError } from '@/components/common/InlineError';
+import { LiveMark } from '@/components/market/LiveMark';
 import { StackScreen } from '@/components/navigation/StackScreen';
 import { Banner } from '@/components/ui/Banner';
 import { Button } from '@/components/ui/Button';
@@ -14,17 +15,20 @@ import { formatIstDateTime, formatIstTime, istDayKey } from '@/features/home/lib
 import { useTodayPicks } from '@/features/insights/api';
 import {
   marketKeys,
+  STOCK_POLL_MS,
   useCandles,
+  useCircuitLimits,
   useRecordStockView,
   useStockDetail,
 } from '@/features/market/hooks';
-import { useLiveQuote } from '@/features/market/live';
+import { useLiveness, useLiveQuote } from '@/features/market/live';
 import { AnalysisTab } from '@/features/stock/components/AnalysisTab';
 import { NewsTab } from '@/features/stock/components/NewsTab';
-import { OverviewTab } from '@/features/stock/components/OverviewTab';
+import { OverviewTab, type CircuitBandState } from '@/features/stock/components/OverviewTab';
 import { PriceChartSection } from '@/features/stock/components/PriceChartSection';
 import { StockHeader } from '@/features/stock/components/StockHeader';
-import { newsSymbolFor, stockPriceView } from '@/features/stock/lib/priceView';
+import { circuitView, sessionLimits } from '@/features/stock/lib/circuit';
+import { stockPriceView } from '@/features/stock/lib/priceView';
 import { parseStockParams } from '@/features/stock/lib/routeParams';
 import { useListsContaining } from '@/features/watchlists/hooks';
 import { useNow } from '@/hooks/useNow';
@@ -32,6 +36,7 @@ import { orderHref } from '@/lib/navigation';
 import { cn } from '@/lib/utils/cn';
 import { formatINR } from '@/lib/utils/formatters';
 import { isMarketOpen } from '@/lib/utils/market';
+import { isServerOutdated } from '@/services/api/contract';
 import { useTheme } from '@/theme/ThemeProvider';
 import { isApiError } from '@/types/api';
 
@@ -47,6 +52,8 @@ const TABS: readonly { key: DetailTab; label: string }[] = [
 ];
 
 const TAB_KEYS = new Set<string>(TABS.map((t) => t.key));
+/** How long the page waits for a first tick before saying nothing streams (and why). */
+const NO_STREAM_HINT_AFTER_MS = 8_000;
 
 /** Today's published levels for this listing, shown under the chart as a reference. */
 function RecommendationLevels({
@@ -97,9 +104,10 @@ function RecommendationLevels({
 }
 
 /**
- * One stock, Groww-style: identity and exchange switch, live price and chart, then
- * Overview (performance, our view, about, alerts), Analysis (technicals, indicators, the
- * full case, news sentiment) and News. Buy / Sell stay pinned to the bottom.
+ * One stock, Groww-style: identity and exchange switch, live price and chart, then Overview
+ * (performance and returns, ratios, financials, our view, shareholding, about, peers, alerts),
+ * Fundamentals (the scored analysis), Technicals (indicators and the full case) and News (the
+ * company's stories with their score and risk). Buy / Sell stay pinned to the bottom.
  */
 export default function StockDetailScreen() {
   const router = useRouter();
@@ -114,7 +122,10 @@ export default function StockDetailScreen() {
   // A link can open a tab directly (the Stock analysis list opens Fundamentals).
   const linkedTab = typeof params.tab === 'string' && TAB_KEYS.has(params.tab) ? params.tab : null;
 
-  const detail = useStockDetail(symbol, exchange);
+  // Streaming from either broker (mStock's ticker or Groww's feed): ticks carry the price, so the
+  // REST read slows down; while nothing streams it refreshes every few seconds instead.
+  const liveness = useLiveness(exchange, symbol);
+  const detail = useStockDetail(symbol, exchange, { streaming: liveness.live });
   // `mutate` is stable across renders, so this records once per stock opened.
   const { mutate: recordView } = useRecordStockView();
   const watch = useListsContaining(exchange, symbol);
@@ -156,6 +167,45 @@ export default function StockDetailScreen() {
     [liveData, lastBar, todayIst],
   );
 
+  // Today's circuit limits: the live tick's when the feed streams them, else the session's from
+  // GET /market/circuit — loaded beside the page, never in front of it.
+  const circuitQuery = useCircuitLimits(symbol, exchange);
+  const liveCircuit = liveQuote?.circuit ?? null;
+  const circuit = useMemo<CircuitBandState>(() => {
+    const quoteLimits = sessionLimits(circuitQuery.data, todayIst);
+    const circuitNow = circuitView({
+      live: liveCircuit,
+      quote: quoteLimits,
+      prevClose: view.prevClose,
+      ltp: view.ltp,
+    });
+    const none = circuitNow.lower == null;
+    return {
+      view: circuitNow,
+      loading: none && circuitQuery.isPending && circuitQuery.fetchStatus !== 'idle',
+      // An index, or a server without the route: the band is left out, not shown empty.
+      hidden:
+        none &&
+        ((exchange !== 'NSE' && exchange !== 'BSE') ||
+          (!circuitQuery.data && isServerOutdated(circuitQuery.error))),
+      reason: !none
+        ? null
+        : (circuitQuery.data?.reason ??
+          (circuitQuery.isError ? 'Circuit limits couldn’t be loaded just now.' : null)),
+    };
+  }, [
+    circuitQuery.data,
+    circuitQuery.error,
+    circuitQuery.fetchStatus,
+    circuitQuery.isError,
+    circuitQuery.isPending,
+    exchange,
+    liveCircuit,
+    todayIst,
+    view.ltp,
+    view.prevClose,
+  ]);
+
   const pick = picks.data?.recommendations.find(
     (rec) => rec.sym === symbol && rec.exch === exchange,
   );
@@ -169,19 +219,33 @@ export default function StockDetailScreen() {
       isApiError(detail.error) &&
       (detail.error.status === 404 || detail.error.status === 422));
 
+  // A first tick usually lands within a second or two; only after a fair wait does the page say
+  // that nothing is streaming, and why. The wait is keyed by listing, so switching stocks starts
+  // it over without resetting state inside the effect.
+  const listingKey = `${exchange}:${symbol}`;
+  const [waitedListing, setWaitedListing] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setWaitedListing(listingKey), NO_STREAM_HINT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [listingKey]);
+  const waitedForTicks = waitedListing === listingKey;
+  const notStreaming = Boolean(data) && marketOpen && !liveness.live && waitedForTicks;
+
   const priceNote = !data
     ? null
-    : liveQuote && marketOpen
-      ? null
-      : view.ltp === null
-        ? 'No price is available for this listing.'
-        : data.priceSource === 'snapshot'
-          ? `The broker didn’t answer — last saved price${
-              data.priceAsOf ? `, from ${formatIstDateTime(data.priceAsOf)} IST` : ''
-            }.`
-          : data.priceSource === 'broker' && data.priceAsOf
-            ? `Broker price as of ${formatIstTime(data.priceAsOf)} IST`
-            : null;
+    : notStreaming && view.ltp !== null
+      ? 'Not streaming — live prices need a connected mStock or Groww session (Settings › Connections).'
+      : liveQuote && marketOpen
+        ? null
+        : view.ltp === null
+          ? 'No price is available for this listing.'
+          : data.priceSource === 'snapshot'
+            ? `The broker didn’t answer — last saved price${
+                data.priceAsOf ? `, from ${formatIstDateTime(data.priceAsOf)} IST` : ''
+              }.`
+            : data.priceSource === 'broker' && data.priceAsOf
+              ? `Broker price as of ${formatIstTime(data.priceAsOf)} IST`
+              : null;
 
   const onRefresh = useCallback(
     () =>
@@ -190,6 +254,7 @@ export default function StockDetailScreen() {
         queryClient.invalidateQueries({
           queryKey: [...marketKeys.all, 'candles', exchange, symbol],
         }),
+        queryClient.invalidateQueries({ queryKey: marketKeys.circuit(exchange, symbol) }),
       ]),
     [detail, queryClient, exchange, symbol],
   );
@@ -266,6 +331,7 @@ export default function StockDetailScreen() {
             detail={data}
             marketOpen={marketOpen}
             streaming={Boolean(liveQuote) && marketOpen}
+            circuit={circuit.view}
           />
           {detail.error && !data ? (
             <InlineError
@@ -283,6 +349,17 @@ export default function StockDetailScreen() {
                 prevClose={view.prevClose}
                 marketOpen={marketOpen}
                 note={priceNote}
+                liveMark={
+                  marketOpen ? (
+                    <LiveMark
+                      live={liveness.live}
+                      via={liveness.via}
+                      fallback={
+                        notStreaming ? `Refreshing every ${STOCK_POLL_MS.fallback / 1000} s` : null
+                      }
+                    />
+                  ) : null
+                }
               />
               {pick ? (
                 <RecommendationLevels
@@ -298,12 +375,14 @@ export default function StockDetailScreen() {
                   <OverviewTab
                     detail={data}
                     view={view}
+                    circuit={circuit}
                     marketOpen={marketOpen}
                     pick={pick}
                     batchDate={picks.data?.date}
                     picksLoading={picks.isPending}
                     onReadCase={() => setTab('analysis')}
                     onOpenFundamentals={() => setTab('fundamentals')}
+                    onOpenNews={() => setTab('news')}
                   />
                 ) : tab === 'fundamentals' ? (
                   <FundamentalsSection symbol={data.symbol} exchange={exchange} />
@@ -315,10 +394,7 @@ export default function StockDetailScreen() {
                     batchDate={picks.data?.date}
                   />
                 ) : (
-                  <NewsTab
-                    newsSymbol={newsSymbolFor(data.symbol, exchange, data.listings)}
-                    displaySymbol={displaySymbol}
-                  />
+                  <NewsTab detail={data} exchange={exchange} displaySymbol={displaySymbol} />
                 )
               ) : (
                 <View className="mt-6 gap-3" accessibilityLabel="Loading stock details">

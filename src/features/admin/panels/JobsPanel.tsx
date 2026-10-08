@@ -1,36 +1,62 @@
-import React, { useState } from 'react';
-import { Text, View } from 'react-native';
+import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import React, { useMemo, useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
 
 import { InlineEmpty } from '@/components/common/InlineError';
+import { StatTile } from '@/components/dashboard/StatTile';
+import { Grid } from '@/components/layout/Grid';
+import { useScreenLayout } from '@/components/layout/responsive';
 import { ListSkeleton, StackScreen } from '@/components/navigation/StackScreen';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { ListCard, RowDivider } from '@/components/ui/Section';
-import { Tabs } from '@/components/ui/Tabs';
+import { Chips, Tabs } from '@/components/ui/Tabs';
 import { AdminQueryError } from '@/features/admin/components/AdminState';
 import {
   useAdminJobLogs,
   useAdminJobs,
+  useAdminNewsRuns,
   useRunAdminJob,
+  useTriggerNewsIngestion,
   useUpdateAdminCron,
 } from '@/features/admin/hooks';
-import { isCronShape, jobActivity, jobStateTone } from '@/features/admin/lib/jobs';
-import type { AdminJob, AdminJobKind } from '@/features/admin/types';
+import { formatCount } from '@/features/admin/lib/format';
+import {
+  cronNextLabel,
+  filterLogs,
+  isCronShape,
+  jobActivity,
+  jobStateTone,
+  jobsSummary,
+  logCounts,
+  RUN_STATE,
+  runDuration,
+  runItems,
+  runStagesLine,
+  STAGE_STATE,
+  type LogFilter,
+} from '@/features/admin/lib/jobs';
+import type { AdminJob, AdminJobKind, AdminJobLog, AdminNewsRun } from '@/features/admin/types';
 import { monoFont } from '@/features/settings/components/JsonBlock';
 import { StatusPill } from '@/features/settings/components/StatusPill';
 import { confirmAction } from '@/features/settings/lib/confirm';
-import { formatDateTime, relativeToNow } from '@/features/settings/lib/time';
+import { formatDateTime, relativeTime, relativeToNow } from '@/features/settings/lib/time';
 import { useNow } from '@/hooks/useNow';
+import { animateNextLayout } from '@/lib/animation';
 import { toast } from '@/lib/utils/toast';
+import { useTheme } from '@/theme/ThemeProvider';
 import { getErrorMessage } from '@/types/api';
 
-type Tab = 'cron' | 'queue' | 'logs';
+type Tab = 'cron' | 'queue' | 'logs' | 'news';
 const TABS: readonly { key: Tab; label: string }[] = [
   { key: 'cron', label: 'Schedules' },
   { key: 'queue', label: 'Queues' },
   { key: 'logs', label: 'History' },
+  { key: 'news', label: 'News' },
 ];
+
+const NUM = { fontVariant: ['tabular-nums' as const] };
 
 function JobCard({ job, kind, now }: { job: AdminJob; kind: AdminJobKind; now: number }) {
   const run = useRunAdminJob();
@@ -132,9 +158,7 @@ function JobCard({ job, kind, now }: { job: AdminJob; kind: AdminJobKind; now: n
               </Text>
             </View>
             <Text className="flex-1 text-xs text-ink-muted dark:text-ink-dark-muted">
-              {job.nextRunAt
-                ? `Next ${formatDateTime(job.nextRunAt)} (${relativeToNow(job.nextRunAt, now)})`
-                : 'Starts when the worker runs'}
+              {cronNextLabel(job, (iso) => `${formatDateTime(iso)} (${relativeToNow(iso, now)})`)}
             </Text>
           </View>
         )
@@ -175,6 +199,7 @@ function JobCard({ job, kind, now }: { job: AdminJob; kind: AdminJobKind; now: n
 }
 
 function JobList({ kind }: { kind: AdminJobKind }) {
+  const layout = useScreenLayout();
   const jobs = useAdminJobs(kind);
   const now = useNow();
   if (jobs.isPending) return <ListSkeleton rows={3} />;
@@ -185,16 +210,18 @@ function JobList({ kind }: { kind: AdminJobKind }) {
       <InlineEmpty title="No jobs configured" message="This worker has no jobs of this kind." />
     );
   return (
-    <View className="gap-3">
+    <Grid columns={layout.columns} gap={layout.compact ? 12 : 16} equalHeight={false}>
       {jobs.data.map((job) => (
         <JobCard key={job.id} job={job} kind={kind} now={now} />
       ))}
-    </View>
+    </Grid>
   );
 }
 
 function JobHistory() {
   const logs = useAdminJobLogs();
+  const [filter, setFilter] = useState<LogFilter>('all');
+  const counts = useMemo(() => logCounts(logs.data ?? []), [logs.data]);
   if (logs.isPending) return <ListSkeleton rows={5} />;
   if (!logs.data)
     return (
@@ -207,9 +234,33 @@ function JobHistory() {
         message="Retained runs from the cron and queue workers show up here."
       />
     );
+  const shown = filterLogs(logs.data, filter);
+  return (
+    <View>
+      <Chips
+        items={[
+          { key: 'all', label: `All · ${counts.all}` },
+          { key: 'failed', label: `Failed · ${counts.failed}` },
+          { key: 'active', label: `Running · ${counts.active}` },
+          { key: 'completed', label: `Done · ${counts.completed}` },
+        ]}
+        value={filter}
+        onChange={setFilter}
+        className="mb-3"
+      />
+      {shown.length === 0 ? (
+        <InlineEmpty title="Nothing matches" message="No retained run is in this state." />
+      ) : (
+        <JobLogList logs={shown} />
+      )}
+    </View>
+  );
+}
+
+function JobLogList({ logs }: { logs: readonly AdminJobLog[] }) {
   return (
     <ListCard>
-      {logs.data.map((log, index) => (
+      {logs.map((log, index) => (
         // The server reads each queue's states one after another, so a job that moves on
         // mid-read can be listed twice — the index keeps the key unique.
         <View key={`${log.queue}-${log.id}-${index}`}>
@@ -249,32 +300,227 @@ function JobHistory() {
   );
 }
 
-/** Worker schedules, on-demand queues and recent runs (web: Jobs & runs → Job control). */
+/** One ingestion batch: when, how it went, and (expanded) every provider's stage. */
+function NewsRunRow({ run, now }: { run: AdminNewsRun; now: number }) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  const state = RUN_STATE[run.status];
+  const items = runItems(run);
+  const trigger = run.trigger === 'MANUAL' ? 'Manual' : 'Scheduled';
+  return (
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${trigger} run, ${formatDateTime(run.startedAt)}, ${state.label}. ${open ? 'Hide' : 'Show'} providers`}
+        onPress={() => {
+          animateNextLayout();
+          setOpen((current) => !current);
+        }}
+        className="gap-1 px-3.5 py-3 active:bg-surface-sunk dark:active:bg-surface-sunk-dark"
+      >
+        <View className="flex-row items-center gap-2">
+          <Text
+            className="flex-1 text-sm font-semibold text-ink dark:text-ink-dark"
+            numberOfLines={1}
+          >
+            {formatDateTime(run.startedAt)}
+          </Text>
+          <StatusPill tone={state.tone} label={state.label} />
+          <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}>
+            <ChevronDown size={16} color={colors.textFaint} />
+          </View>
+        </View>
+        <Text className="text-xs text-ink-muted dark:text-ink-dark-muted" style={NUM}>
+          {[
+            trigger,
+            runDuration(run),
+            `${formatCount(items)} item${items === 1 ? '' : 's'}`,
+            run.inserted != null ? `${formatCount(run.inserted)} new` : null,
+            relativeTime(run.startedAt, now),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+        <Text className="text-[11px] text-ink-faint dark:text-ink-dark-faint">
+          {runStagesLine(run)}
+        </Text>
+        {run.errorMessage ? (
+          <Text
+            className="text-xs leading-[17px] text-danger-600 dark:text-danger-dark"
+            numberOfLines={3}
+            selectable
+          >
+            {run.errorMessage}
+          </Text>
+        ) : null}
+      </Pressable>
+      {open ? (
+        <View className="border-t border-line bg-surface-sunk px-3.5 py-2 dark:border-line-dark dark:bg-surface-sunk-dark">
+          {run.stages.length === 0 ? (
+            <Text className="py-1.5 text-xs text-ink-muted dark:text-ink-dark-muted">
+              No stages recorded for this run.
+            </Text>
+          ) : (
+            run.stages.map((stage) => {
+              const stageState = STAGE_STATE[stage.status];
+              return (
+                <View key={stage.key} className="flex-row items-center gap-3 py-1.5">
+                  <View className="flex-1">
+                    <Text className="text-[13px] text-ink dark:text-ink-dark" numberOfLines={1}>
+                      {stage.label}
+                    </Text>
+                    <Text
+                      className="text-[11px] text-ink-muted dark:text-ink-dark-muted"
+                      numberOfLines={2}
+                    >
+                      {stage.detail ?? '—'}
+                      {stage.itemCount != null ? ` · ${formatCount(stage.itemCount)} items` : ''}
+                    </Text>
+                  </View>
+                  <StatusPill tone={stageState.tone} label={stageState.label} />
+                </View>
+              );
+            })
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** News ingestion runs with their per-provider timeline (web: Jobs › News ingestion). */
+function NewsRuns() {
+  const runs = useAdminNewsRuns(15);
+  const trigger = useTriggerNewsIngestion();
+  const now = useNow(30_000);
+
+  const start = () =>
+    confirmAction({
+      title: 'Start a news ingestion run?',
+      message:
+        'Every provider’s n8n workflow fetches its feed now and reports back here. It returns at once; the timeline fills in over the next minutes.',
+      confirmLabel: 'Start run',
+      onConfirm: () =>
+        trigger.mutate(undefined, {
+          onSuccess: () => toast.success('News ingestion started'),
+          onError: (error) => toast.error('Couldn’t start a run', getErrorMessage(error)),
+        }),
+    });
+
+  return (
+    <View>
+      <View className="mb-3 flex-row items-center gap-3">
+        <Text className="flex-1 text-xs text-ink-muted dark:text-ink-dark-muted" style={NUM}>
+          {runs.data
+            ? `${formatCount(runs.data.total)} runs recorded · each provider reports back from n8n`
+            : 'Each provider reports back from n8n'}
+        </Text>
+        <Button label="Run news ingest" size="sm" loading={trigger.isPending} onPress={start} />
+      </View>
+      {runs.isPending ? (
+        <ListSkeleton rows={4} />
+      ) : !runs.data ? (
+        <AdminQueryError
+          what="ingestion runs"
+          error={runs.error}
+          onRetry={() => void runs.refetch()}
+        />
+      ) : runs.data.runs.length === 0 ? (
+        <InlineEmpty
+          title="No ingestion runs yet"
+          message="Start one and its per-provider timeline appears here."
+        />
+      ) : (
+        <ListCard>
+          {runs.data.runs.map((run, index) => (
+            <View key={run.runId}>
+              {index > 0 ? <RowDivider /> : null}
+              <NewsRunRow run={run} now={now} />
+            </View>
+          ))}
+        </ListCard>
+      )}
+    </View>
+  );
+}
+
+const FOOTNOTE: Record<Tab, string> = {
+  cron: 'Schedules are five-part cron expressions in Asia/Kolkata time.',
+  queue: 'Event-driven queues are fed by the app and can’t be run without a payload.',
+  logs: 'The latest retained runs across cron and queue workers, newest first.',
+  news: 'A provider marked Empty ran and returned nothing — the normal outcome for sites that block automated readers. Only Failed means its workflow errored or never reported back.',
+};
+
+/** Worker schedules, on-demand queues, recent runs and news ingestion (web: Jobs & schedules). */
 export function JobsPanel() {
   const [tab, setTab] = useState<Tab>('cron');
-  const crons = useAdminJobs('cron', tab === 'cron');
-  const queues = useAdminJobs('queue', tab === 'queue');
+  const layout = useScreenLayout();
+  // Both lists feed the headline numbers, so both load whatever tab is open.
+  const crons = useAdminJobs('cron');
+  const queues = useAdminJobs('queue');
   const logs = useAdminJobLogs(tab === 'logs');
+  const news = useAdminNewsRuns(15, tab === 'news');
+  const summary = jobsSummary(crons.data, queues.data);
 
   const onRefresh = () =>
-    tab === 'cron' ? crons.refetch() : tab === 'queue' ? queues.refetch() : logs.refetch();
+    Promise.all([
+      crons.refetch(),
+      queues.refetch(),
+      tab === 'logs' ? logs.refetch() : null,
+      tab === 'news' ? news.refetch() : null,
+    ]);
+
+  const value = (n: number | null) => (n == null ? '—' : formatCount(n));
 
   return (
     <StackScreen
       title="Jobs & schedules"
-      subtitle="Worker jobs · times in IST"
+      subtitle="Live worker queues · times in IST"
       onRefresh={onRefresh}
+      fill
     >
-      <Tabs items={TABS} value={tab} onChange={setTab} />
+      <Grid columns={layout.compact ? 2 : 4} gap={12} className="mb-4">
+        <StatTile
+          label="Scheduled jobs"
+          value={value(summary.scheduled)}
+          sub={
+            summary.registered != null
+              ? `${summary.registered} registered${summary.queues != null ? ` · ${summary.queues} queues` : ''}`
+              : undefined
+          }
+          onPress={() => setTab('cron')}
+        />
+        <StatTile
+          label="Running now"
+          value={value(summary.active)}
+          status={summary.active ? 'info' : undefined}
+          sub="Across every queue"
+          onPress={() => setTab('queue')}
+        />
+        <StatTile label="Waiting" value={value(summary.waiting)} sub="Queued or delayed" />
+        <StatTile
+          label="Failed"
+          value={value(summary.failed)}
+          status={summary.failed == null ? undefined : summary.failed > 0 ? 'warn' : 'ok'}
+          sub="Retained by the queues"
+          onPress={() => setTab('logs')}
+        />
+      </Grid>
+      <View style={layout.compact ? undefined : { maxWidth: 560 }}>
+        <Tabs items={TABS} value={tab} onChange={setTab} />
+      </View>
       <View className="mt-4">
-        {tab === 'logs' ? <JobHistory /> : <JobList key={tab} kind={tab} />}
+        {tab === 'logs' ? (
+          <JobHistory />
+        ) : tab === 'news' ? (
+          <NewsRuns />
+        ) : (
+          <JobList key={tab} kind={tab} />
+        )}
       </View>
       <Text className="mt-4 text-[11px] leading-4 text-ink-faint dark:text-ink-dark-faint">
-        {tab === 'logs'
-          ? 'The latest retained runs across cron and queue workers, newest first.'
-          : tab === 'cron'
-            ? 'Schedules are five-part cron expressions in Asia/Kolkata time.'
-            : 'Event-driven queues are fed by the app and can’t be run without a payload.'}
+        {FOOTNOTE[tab]}
       </Text>
     </StackScreen>
   );
